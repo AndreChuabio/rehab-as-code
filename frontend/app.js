@@ -773,10 +773,9 @@ function finalizePlan() {
   const genBtn = document.getElementById("generatePlanFinalBtn");
   if (genBtn) { genBtn.textContent = "✓ Plan generated"; genBtn.disabled = true; }
 
-  appendChatBubble("coach",
-    `Plan locked: ${approvedPlanExercises.map(e => e.name).join(", ")}. Head to step 3 to start your session.`
-  );
   onPlanApproved();
+  // Auto-advance to step 3 — load guided exercise cards immediately
+  setTimeout(() => triggerExercise(), 600);
 }
 
 // ---------------------------------------------------------------------------
