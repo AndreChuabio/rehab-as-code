@@ -143,6 +143,34 @@ async function loadProtocol() {
   }
 }
 
+async function demoReset() {
+  const btn = document.getElementById("demoResetBtn");
+  if (!confirm("Reset protocol.yaml on main to pending_intake? Wipes whatever the last demo run populated.")) {
+    return;
+  }
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Resetting...";
+  }
+  try {
+    const res = await fetch(`${API_BASE}/demo/reset`, { method: "POST" });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `reset failed: ${res.status}`);
+    }
+    showToast?.("Demo reset — protocol back to pending_intake", "info");
+    loadProtocol();
+  } catch (e) {
+    console.error("demo reset failed", e);
+    showToast?.(`Reset failed: ${e.message}`, "error");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Reset demo";
+    }
+  }
+}
+
 function renderProtocol({ protocol }) {
   const list = document.getElementById("protocolExercises");
   const meta = document.getElementById("protocolMeta");

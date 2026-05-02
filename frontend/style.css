@@ -983,6 +983,24 @@ body {
   color: var(--accent);
   cursor: default;
 }
+.demo-reset-btn {
+  align-self: flex-start;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.12s ease;
+  margin-top: 8px;
+}
+.demo-reset-btn:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent2);
+}
+.demo-reset-btn:disabled { opacity: 0.5; cursor: wait; }
 .protocol-empty {
   background: var(--surface2);
   border: 1px dashed var(--border);

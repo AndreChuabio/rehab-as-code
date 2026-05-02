@@ -623,6 +623,84 @@ def apply_pr(req: ApplyPrRequest):
     return {"applied": True, "pr_number": pr_num}
 
 
+_EMPTY_PROTOCOL_TEMPLATE = """\
+# Awaiting patient intake.
+# Click "1 intake" in the app to begin onboarding. The cursor cloud agent
+# will generate the initial protocol from intake answers by reading the
+# matching protocol-library/ entry, and open a PR for clinician approval.
+
+patient: null
+phase: pending_intake
+week: 0
+generated_by: ""
+last_updated: "2026-05-02"
+
+session_targets:
+  frequency_per_week: 0
+  duration_min: 0
+  max_pain_during_session: 3
+
+exercises: []
+"""
+
+
+@app.post("/demo/reset")
+def demo_reset():
+    """Reset protocols/protocol.yaml on main to the empty pending_intake state.
+    Used between rehearsals so each demo starts from the "patient walks in"
+    blank slate. Atomic update via the GitHub contents API (no git shell).
+    """
+    import base64
+    import subprocess as sp
+    import httpx
+
+    repo = os.getenv("PROTOCOL_REPO", "AndreChuabio/rehab-as-code")
+    branch = os.getenv("PROTOCOL_BRANCH", "main")
+    path = "protocols/protocol.yaml"
+
+    token = os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
+    if not token:
+        try:
+            r = sp.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=5)
+            token = r.stdout.strip() if r.returncode == 0 else None
+        except Exception:
+            token = None
+    if not token:
+        raise HTTPException(status_code=500, detail="no GitHub token; set GITHUB_TOKEN or run 'gh auth login'")
+
+    headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {token}"}
+
+    try:
+        # Fetch current sha (required for atomic update)
+        get_url = f"https://api.github.com/repos/{repo}/contents/{path}?ref={branch}"
+        get_resp = httpx.get(get_url, headers=headers, timeout=10)
+        get_resp.raise_for_status()
+        current_sha = get_resp.json()["sha"]
+
+        put_url = f"https://api.github.com/repos/{repo}/contents/{path}"
+        put_resp = httpx.put(
+            put_url,
+            headers=headers,
+            json={
+                "message": "demo: reset protocol to pending_intake",
+                "content": base64.b64encode(_EMPTY_PROTOCOL_TEMPLATE.encode()).decode(),
+                "sha": current_sha,
+                "branch": branch,
+            },
+            timeout=15,
+        )
+        put_resp.raise_for_status()
+    except httpx.HTTPStatusError as e:
+        logger.warning("demo reset failed: %s", e.response.text[:200])
+        raise HTTPException(status_code=502, detail=f"github api: {e.response.status_code}")
+    except Exception as e:
+        logger.warning("demo reset failed: %s", e)
+        raise HTTPException(status_code=500, detail=str(e))
+
+    logger.info("demo reset: protocol.yaml back to pending_intake")
+    return {"reset": True}
+
+
 def _build_agent_prompt(
     flow: str,
     health: dict,
