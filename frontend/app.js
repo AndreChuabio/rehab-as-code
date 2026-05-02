@@ -22,7 +22,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadProtocol();
   switchStage("chat");
   applyStepLocks();
-  if (!intakeComplete) triggerIntake();
+  triggerIntake();
 });
 
 function applyStepLocks() {
