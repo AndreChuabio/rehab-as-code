@@ -806,79 +806,121 @@ function triggerExercise() {
 
 async function loadExerciseCards() {
   const log = document.getElementById("chatLog");
-  const header = document.createElement("div");
-  header.className = "chat-bubble coach";
-  header.innerHTML = "<strong>Guided Exercise Session</strong><br>Your approved exercises — videos loaded and ready.";
-  log.appendChild(header);
-  scrollChatLog();
 
-  const renderAll = (exercises) => {
-    exercises.forEach((ex) => renderExerciseCardWithVideo(ex));
+  const render = (exercises) => {
+    if (!exercises.length) {
+      appendChatBubble("coach", "No exercises in your plan yet — complete step 2 first.");
+      return;
+    }
+    renderExerciseGallery(exercises);
     scrollChatLog();
   };
 
   if (approvedPlanExercises.length) {
-    renderAll(approvedPlanExercises);
+    render(approvedPlanExercises);
     return;
   }
-
-  // Fallback: fetch all protocol exercises (demo mode / fresh load)
   try {
     const res = await fetch(`${API_BASE}/protocol/exercises`);
     if (!res.ok) throw new Error(`status ${res.status}`);
     const data = await res.json();
-    renderAll(data.exercises || []);
+    render(data.exercises || []);
   } catch (e) {
     appendChatBubble("error", `Could not load exercises: ${e.message}`);
   }
 }
 
-function renderExerciseCardWithVideo(card) {
-  if (!card) return;
+// Single gallery: large main player + thumbnail strip to switch exercises
+function renderExerciseGallery(exercises) {
   const log = document.getElementById("chatLog");
+
   const wrap = document.createElement("div");
-  wrap.className = "exercise-card";
+  wrap.className = "exercise-gallery";
 
-  const cuesHtml = (card.cues || []).map((c) => `<li>${escapeHtml(c)}</li>`).join("");
-  const dose = card.default_dose || card.spec
-    ? `<span class="exercise-dose">${escapeHtml(card.default_dose || card.spec || "")}</span>` : "";
+  // Build per-exercise data (video src + thumb src)
+  const items = exercises.map((ex) => {
+    const genUrl   = ex.generated_video_url || "";
+    const ytId     = ex.youtube_id || "";
+    const watchUrl = ex.youtube_watch_url || "";
+    const thumb    = ex.thumbnail_url || (ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : "");
+    return { ex, genUrl, ytId, watchUrl, thumb };
+  });
 
-  const genUrl   = card.generated_video_url || "";
-  const ytId     = card.youtube_id || "";
-  const watchUrl = card.youtube_watch_url || "";
-  const thumb    = card.thumbnail_url || (ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : "");
-  const name     = card.name || card.id || "";
+  const thumbsHtml = items.map((item, i) => {
+    const thumbContent = item.genUrl
+      ? `<video src="${escapeHtml(item.genUrl)}" muted preload="metadata" class="gallery-thumb-video"></video>`
+      : item.thumb
+        ? `<img src="${escapeHtml(item.thumb)}" alt="${escapeHtml(item.ex.name)}" class="gallery-thumb-img" />`
+        : `<div class="gallery-thumb-blank"></div>`;
+    return `
+      <button class="gallery-thumb-btn${i === 0 ? " active" : ""}" data-idx="${i}" onclick="switchGalleryItem(${i})">
+        ${thumbContent}
+        <span class="gallery-thumb-label">${escapeHtml(item.ex.name || item.ex.id || "")}</span>
+      </button>`;
+  }).join("");
 
-  let videoHtml = "";
+  wrap.innerHTML = `
+    <div class="gallery-thumbs">${thumbsHtml}</div>
+    <div class="gallery-main">
+      <div class="gallery-video-wrap" id="galleryVideoWrap"></div>
+      <div class="gallery-main-info">
+        <span class="gallery-main-title" id="galleryTitle"></span>
+        <span class="gallery-main-dose" id="galleryDose"></span>
+        <span class="gallery-main-badge" id="galleryBadge"></span>
+      </div>
+      <ul class="gallery-cues" id="galleryCues"></ul>
+    </div>
+  `;
+  log.appendChild(wrap);
+
+  // Store items on the element for switchGalleryItem to access
+  wrap._galleryItems = items;
+  window._galleryWrap = wrap;
+
+  switchGalleryItem(0);
+}
+
+function switchGalleryItem(idx) {
+  const wrap = window._galleryWrap;
+  if (!wrap) return;
+  const items = wrap._galleryItems;
+  const item = items[idx];
+  if (!item) return;
+
+  // Update active thumbnail
+  wrap.querySelectorAll(".gallery-thumb-btn").forEach((btn, i) => {
+    btn.classList.toggle("active", i === idx);
+  });
+
+  // Pause any playing video
+  const existing = wrap.querySelector("#galleryVideoWrap video");
+  if (existing) existing.pause();
+
+  // Build main video/media
+  const videoWrap = wrap.querySelector("#galleryVideoWrap");
+  let mediaHtml = "";
   let badge = "";
-  if (genUrl) {
-    videoHtml = `<div class="exercise-video-wrap">
-      <video src="${escapeHtml(genUrl)}" controls muted playsinline preload="metadata"></video>
-    </div>`;
+  if (item.genUrl) {
+    mediaHtml = `<video src="${escapeHtml(item.genUrl)}" controls muted playsinline preload="metadata"></video>`;
     badge = `<span class="video-source sora">sora-2 generated</span>`;
-  } else if (ytId || watchUrl) {
-    const href = escapeHtml(watchUrl || `https://www.youtube.com/watch?v=${ytId}`);
-    videoHtml = `<a class="exercise-video-wrap exercise-video-thumb" href="${href}" target="_blank" rel="noopener">
-      <img src="${escapeHtml(thumb)}" alt="${escapeHtml(name)}" />
+  } else if (item.ytId || item.watchUrl) {
+    const href = escapeHtml(item.watchUrl || `https://www.youtube.com/watch?v=${item.ytId}`);
+    mediaHtml = `<a href="${href}" target="_blank" rel="noopener" class="exercise-video-thumb">
+      <img src="${escapeHtml(item.thumb)}" alt="${escapeHtml(item.ex.name)}" />
       <span class="play-btn">▶</span>
     </a>`;
     badge = `<span class="video-source youtube">curated</span>`;
   } else {
-    videoHtml = `<div class="exercise-video-placeholder"><span class="video-placeholder-text">No video available</span></div>`;
+    mediaHtml = `<div class="exercise-video-placeholder"><span class="video-placeholder-text">No video available</span></div>`;
   }
+  videoWrap.innerHTML = mediaHtml;
 
-  wrap.innerHTML = `
-    ${videoHtml}
-    <div class="exercise-meta">
-      <div class="exercise-title-row">
-        <span class="exercise-title">${escapeHtml(name)}</span>
-        ${dose}${badge}
-      </div>
-      <ul class="exercise-cues">${cuesHtml}</ul>
-    </div>
-  `;
-  log.appendChild(wrap);
-  scrollChatLog();
+  // Update info strip
+  wrap.querySelector("#galleryTitle").textContent = item.ex.name || item.ex.id || "";
+  wrap.querySelector("#galleryDose").textContent  = item.ex.default_dose || item.ex.spec || "";
+  wrap.querySelector("#galleryBadge").innerHTML   = badge;
+  const cuesEl = wrap.querySelector("#galleryCues");
+  cuesEl.innerHTML = (item.ex.cues || []).map(c => `<li>${escapeHtml(c)}</li>`).join("");
 }
 
 // ---------------------------------------------------------------------------
