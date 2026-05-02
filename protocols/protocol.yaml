@@ -5,49 +5,49 @@
 patient: Andre
 phase: post-ACL reconstruction
 week: 4
-generated_by: "care-plan-coordinator; hold (HRV -19ms)"
+generated_by: "care-plan-coordinator; hold (HRV -19ms vs -8ms full-hold threshold); mirror week-3 list (not week-4 progressions); intake pain 8/10; ~20% session intensity reduction (sleep 3-day avg)"
 last_updated: "2026-05-02"
 
 session_targets:
   frequency_per_week: 4
-  duration_min: 35
-  max_pain_during_session: 3   # 0-10 scale, hard ceiling
+  duration_min: 28
+  max_pain_during_session: 3
 
 exercises:
   - name: quad_sets
     sets: 3
-    reps: 15
+    reps: 12
     load: bodyweight
     ROM_target_deg: 90
-    progression_criteria: "pain-free, no swelling next morning"
-    regression_criteria: "any swelling within 24h"
+    progression_criteria: "pain-free, no swelling next morning; defer load increase until HRV stable or improving"
+    regression_criteria: "any swelling within 24h; HRV further decline or session pain >3"
     references:
       - protocol-library/post-acl-week-3.yaml
 
   - name: heel_slides
     sets: 3
-    reps: 10
+    reps: 8
     load: bodyweight
     ROM_target_deg: 100
-    progression_criteria: "ROM > 100 deg, painless"
-    regression_criteria: "ROM regression > 5 deg week-over-week"
+    progression_criteria: "ROM > 100 deg, painless; no progression until HRV stabilizes"
+    regression_criteria: "ROM regression > 5 deg week-over-week; effusion after session"
     references:
       - protocol-library/post-acl-week-3.yaml
 
   - name: terminal_knee_extension
     sets: 3
-    reps: 12
+    reps: 10
     load: yellow_band
-    ROM_target_deg: 0   # full extension target
-    progression_criteria: "matches contralateral extension"
-    regression_criteria: "extension lag > 5 deg"
+    ROM_target_deg: 0
+    progression_criteria: "matches contralateral extension; conservative band tension only"
+    regression_criteria: "extension lag > 5 deg; anterior knee pain >3/10"
     references:
       - protocol-library/post-acl-week-3.yaml
 
   - name: stationary_bike
-    duration_min: 10
-    intensity: "RPE 4 of 10"
-    progression_criteria: "tolerates 12 min"
-    regression_criteria: "patellofemoral pain mid-session"
+    duration_min: 8
+    intensity: "RPE 3 of 10"
+    progression_criteria: "tolerates 10 min at same RPE without pain increase"
+    regression_criteria: "patellofemoral pain mid-session; pain >3/10 or next-day effusion"
     references:
       - protocol-library/post-acl-week-3.yaml

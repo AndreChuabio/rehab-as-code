@@ -1,9 +1,9 @@
-# Week outline — same exercise order each session; loads match protocol.yaml (week-3 hold).
+# Week outline — same exercise order each session; loads match protocol.yaml (week-3 hold + sleep-driven ~20% intensity trim).
 
 week: 4
 patient: Andre
 last_updated: "2026-05-02"
-hold_note: "HRV hold — week counter advanced; prescription unchanged from week 3."
+hold_note: "HRV hold (-19ms); mirror week-3 exercise list until HRV stabilizes; session duration/reps/bike scaled ~20% for 3-day sleep avg <70."
 
 session_order:
   - quad_sets
