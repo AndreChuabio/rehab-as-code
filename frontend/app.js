@@ -272,8 +272,11 @@ async function startSession() {
     }
 
     if (data.recommendations?.length) {
-      renderFocus(data.recommendations);
-      document.getElementById("recommendations").style.display = "block";
+      const recPanel = document.getElementById("recommendations");
+      if (recPanel) {
+        renderFocus(data.recommendations);
+        recPanel.style.display = "block";
+      }
     }
   } catch (e) {
     loading.style.display = "none";
@@ -286,6 +289,7 @@ async function startSession() {
 
 function renderFocus(items) {
   const container = document.getElementById("recCards");
+  if (!container) return;
   container.innerHTML = items
     .map(
       (r) => `

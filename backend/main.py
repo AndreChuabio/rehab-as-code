@@ -430,6 +430,8 @@ def protocol_exercises():
             "generated_video_url": card.get("generated_video_url") or None,
             "cues": card.get("cues", []),
             "default_dose": card.get("default_dose", spec),
+            "generated_video_url": card.get("generated_video_url"),
+            "video_source": card.get("video_source"),
         })
     return {
         "patient": p.get("patient") or "Andre",
