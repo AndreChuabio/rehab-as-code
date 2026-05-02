@@ -382,8 +382,10 @@ async function invokeAgent(flow, body = {}) {
       setAgentButtonsDisabled(false);
       setAgentStatus("done", "ready");
       refreshProtocol();
-      if (flow === "intake" || flow === "weekly_plan") {
-        await showPlanWithApprove();
+      if (flow === "intake") {
+        // After intake, drop straight into the plan builder (days + exercises)
+        appendChatBubble("coach", "Intake complete! Now set your training days and add exercises below.");
+        await renderPlanBuilder();
       }
     });
   } catch (e) {
