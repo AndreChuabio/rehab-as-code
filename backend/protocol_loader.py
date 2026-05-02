@@ -40,16 +40,26 @@ def _in_subdir(path: str) -> str:
 
 
 def fetch_protocol(branch: str = DEFAULT_BRANCH) -> dict:
-    """Fetch the current protocol.yaml from GitHub raw, return parsed dict.
+    """Fetch the current protocol.yaml from GitHub, return parsed dict.
 
-    Falls back to a local stub if the repo isn't reachable yet (e.g., before
-    seeding). Keeps the rest of the app working in offline dev.
+    Uses the GitHub contents API instead of raw.githubusercontent.com because
+    the latter has a CDN cache (~5min TTL) — fatal for the demo workflow chain
+    where each approve flips main and the next /protocol call must see fresh
+    state. The API returns the latest commit's content immediately.
+
+    Falls back to a local stub if the repo isn't reachable yet.
     """
-    url = _raw_url(PROTOCOL_REPO, branch, _in_subdir("protocol.yaml"))
+    api_url = (
+        f"https://api.github.com/repos/{PROTOCOL_REPO}/contents/"
+        f"{_in_subdir('protocol.yaml')}?ref={branch}"
+    )
+    headers = {"Accept": "application/vnd.github.v3.raw"}
+    token = os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     try:
-        r = httpx.get(url, timeout=10.0)
+        r = httpx.get(api_url, headers=headers, timeout=10.0)
         r.raise_for_status()
-        # PyYAML import deferred so missing dep doesn't crash app startup
         import yaml
         return yaml.safe_load(r.text)
     except Exception as exc:
