@@ -484,7 +484,7 @@ function reportSymptom() {
     "Let's log your symptom. Press Enter to use each default.\n\n" +
     SYMPTOM_QUESTIONS[0].q
   );
-  prefillFlowInput();
+  setTimeout(prefillFlowInput, 50);
 }
 
 // ---------------------------------------------------------------------------
@@ -532,7 +532,8 @@ function triggerIntake() {
     "I'll walk you through a quick intake. Press Enter to use each default — it's fast for demo.\n\n" +
     INTAKE_QUESTIONS[0].q
   );
-  prefillFlowInput();
+  // Defer so the input is pre-filled after any pending DOM flushes
+  setTimeout(prefillFlowInput, 50);
 }
 
 function prefillFlowInput() {
@@ -649,7 +650,7 @@ function triggerCheckin() {
     "Quick session check-in! Press Enter to accept each default.\n\n" +
     CHECKIN_QUESTIONS[0].q
   );
-  prefillFlowInput();
+  setTimeout(prefillFlowInput, 50);
 }
 
 function setAgentButtonsDisabled(disabled) {
