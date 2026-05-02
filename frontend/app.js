@@ -42,6 +42,7 @@ function onIntakeComplete() {
   document.getElementById("triggerIntakeBtn")?.classList.remove("primary");
   document.getElementById("generatePlanBtn")?.classList.add("primary");
   showToast("Intake complete — now generate your weekly plan!", "info");
+  loadProtocol(); // now that intake is done, show whatever's on main
 }
 
 function onPlanApproved() {
@@ -159,6 +160,10 @@ function renderCalendar(events) {
 // ---------------------------------------------------------------------------
 
 async function loadProtocol() {
+  if (!intakeComplete) {
+    renderProtocol({ protocol: { phase: "pending_intake", exercises: [] } });
+    return;
+  }
   try {
     const res = await fetch(`${API_BASE}/protocol`);
     const data = await res.json();
