@@ -119,9 +119,20 @@ def _output_path(exercise_id: str) -> Path:
 
 
 def static_url(exercise_id: str) -> str | None:
-    """Return the /static URL if the MP4 is already on disk, else None."""
+    """Return the /static URL for the generated MP4, or None if not available.
+
+    Local dev: checks file existence so partially-generated libraries don't
+    advertise broken URLs. Production (Vercel): the frontend/ tree isn't
+    bundled into the Python function, so we fall back to the EXERCISE_PROMPTS
+    registry — every exercise with a prompt was generated offline and shipped
+    as a static asset.
+    """
     path = _output_path(exercise_id)
-    return f"/static/videos/{exercise_id}.mp4" if path.exists() else None
+    if path.exists():
+        return f"/static/videos/{exercise_id}.mp4"
+    if exercise_id in EXERCISE_PROMPTS:
+        return f"/static/videos/{exercise_id}.mp4"
+    return None
 
 
 def generate_one(
