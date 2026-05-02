@@ -4,7 +4,7 @@
 patient: Andre
 phase: post-ACL reconstruction
 week: 3
-generated_by: "care-plan-coordinator; researcher (post-acl-week-3); evaluator (HRV hold)"
+generated_by: "care-plan-coordinator (intake summary); researcher (PRIMARY post-acl-week-3.yaml, no week-4 substitution until clearance+HRV stable); evaluator (HOLD: >8 ms HRV decline vs prior window/low-HRV streak, hold entire protocol; no advancement, no arbitrary broad regression)"
 last_updated: "2026-05-02"
 
 session_targets:
@@ -45,7 +45,7 @@ exercises:
     sets: 3
     reps: 10
     ROM_target_deg: 100
-    progression_criteria: "ROM > 100 deg, painless"
+    progression_criteria: "pain-free sustained 100° active flexion (library milestone); defer higher ROM until hold clears/clinician ok"
     regression_criteria: "ROM regression > 5 deg week-over-week"
     references:
       - protocol-library/post-acl-week-3.yaml
