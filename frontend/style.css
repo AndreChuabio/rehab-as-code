@@ -536,6 +536,20 @@ body {
   object-fit: cover;
   background: #000;
 }
+.exercise-video-thumb { display: block; text-decoration: none; }
+.exercise-video-thumb:hover img { opacity: 0.8; }
+.exercise-video-thumb img { transition: opacity 0.15s; }
+.play-btn {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 3rem;
+  color: #fff;
+  text-shadow: 0 2px 12px rgba(0,0,0,0.7);
+  pointer-events: none;
+}
 .exercise-meta { padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
 .exercise-title-row {
   display: flex;

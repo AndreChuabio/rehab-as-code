@@ -968,24 +968,16 @@ function renderExerciseCard(card) {
   let sourceBadge = "";
   if (card.generated_video_url) {
     embed = `<div class="exercise-video-wrap">
-      <video
-        src="${escapeHtml(card.generated_video_url)}"
-        controls
-        autoplay
-        muted
-        playsinline
-        loop
-        preload="metadata"></video>
+      <video src="${escapeHtml(card.generated_video_url)}" controls autoplay muted playsinline loop preload="metadata"></video>
     </div>`;
     sourceBadge = `<span class="video-source sora">sora-2 generated</span>`;
-  } else if (card.youtube_embed_url) {
-    embed = `<div class="exercise-video-wrap">
-      <iframe
-        src="${escapeHtml(card.youtube_embed_url)}"
-        title="${escapeHtml(card.name || "exercise video")}"
-        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-        allowfullscreen></iframe>
-    </div>`;
+  } else if (card.youtube_id || card.youtube_watch_url) {
+    const watchUrl = escapeHtml(card.youtube_watch_url || `https://www.youtube.com/watch?v=${card.youtube_id}`);
+    const thumb = escapeHtml(card.thumbnail_url || `https://img.youtube.com/vi/${card.youtube_id}/hqdefault.jpg`);
+    embed = `<a class="exercise-video-wrap exercise-video-thumb" href="${watchUrl}" target="_blank" rel="noopener" title="Watch on YouTube">
+      <img src="${thumb}" alt="${escapeHtml(card.name || "exercise")}" />
+      <span class="play-btn">▶</span>
+    </a>`;
     sourceBadge = `<span class="video-source youtube">curated</span>`;
   } else {
     embed = `<div class="exercise-video-wrap">
