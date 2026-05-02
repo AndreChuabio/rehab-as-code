@@ -87,7 +87,8 @@ backend talks only to the abstract `CodingAgent` interface in `agents/base.py`.
 cd backend
 pip install -r ../requirements.txt
 cp ../.env.example .env  # fill in TAVUS / ANTHROPIC keys
-AGENT_PROVIDER=cached_replay python3 -m uvicorn main:app --reload
+# Backend targets Python 3.11+ (install e.g. Python 3.11 and use `python3.11` if `python3` is older).
+AGENT_PROVIDER=cached_replay python3.11 -m uvicorn main:app --reload
 ```
 
 Open `frontend/index.html` (or `cd frontend && python3 -m http.server 3000`).
@@ -97,6 +98,35 @@ Smoke test the modular agent layer:
 ```bash
 cd backend && python3 -m scripts.smoke_test_agents
 ```
+
+## Open Wearables data source (optional)
+
+`backend/health_mock.py` supports [Open Wearables](https://github.com/the-momentum/open-wearables) as a **read-only** source for normalized wearable data (cloud OAuth providers plus Apple Health-style sync via their stack), while preserving the Apple Shortcut cache and mock fallbacks.
+
+### What you need
+
+1. **Python 3.11+** for this backend (type hints and tooling expect 3.11+).
+2. **A running Open Wearables instance** (self-hosted per [their quickstart](https://openwearables.io/docs/quickstart)). Connect your devices there so summaries exist for your user.
+3. **An Open Wearables user UUID** — create a user in their developer portal or API; this integration does not create users.
+4. **API key** — from the Open Wearables developer portal; server calls use header `X-Open-Wearables-API-Key` (see their [backend integration guide](https://openwearables.io/docs/dev-guides/integration-guide)).
+5. **Correct base URL** — `OPEN_WEARABLES_API_URL` must point at **Open Wearables’** API, not RehabAsCode. Both default to port `8000`; run one stack on another port (e.g. `uvicorn main:app --port 8001` for this app) or host OW on a different URL.
+
+### Env vars (in `.env`)
+
+```bash
+OPEN_WEARABLES_API_URL=http://localhost:8000
+OPEN_WEARABLES_API_KEY=sk-your-open-wearables-key
+OPEN_WEARABLES_USER_ID=your-open-wearables-user-uuid
+HEALTH_DATA_SOURCE=auto
+```
+
+### Source modes
+
+- `auto` (default): try Open Wearables when all three `OPEN_WEARABLES_*` vars are set; else Apple cache/mock
+- `open_wearables`: always try Open Wearables first; fallback to cache/mock if the request fails
+- `apple_cache`: never call Open Wearables; cache/mock only
+
+Check `GET /health-data`: on success, `source` is `open_wearables`.
 
 ## Publish the protocol target repo
 

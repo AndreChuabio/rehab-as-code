@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 calendar_fetch.py - Fetch today's calendar events via Google Calendar API
 

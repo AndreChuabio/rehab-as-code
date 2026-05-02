@@ -1,5 +1,3 @@
-// Backend serves this HTML at the same origin, so relative URLs always work:
-// localhost, 127.0.0.1, phone hotspot IP, Railway prod - same code path.
 const API_BASE = "";
 
 const TRACE_GLYPH = {
