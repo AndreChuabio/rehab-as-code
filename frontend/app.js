@@ -62,6 +62,18 @@ function applyStepLocks() {
   });
 }
 
+function setActiveStepBtn(step) {
+  const map = {
+    intake:   "triggerIntakeBtn",
+    plan:     "generatePlanBtn",
+    exercise: "exerciseBtn",
+    checkin:  "triggerCheckinBtn",
+  };
+  Object.entries(map).forEach(([s, id]) => {
+    document.getElementById(id)?.classList.toggle("primary", s === step);
+  });
+}
+
 function onIntakeComplete() {
   intakeComplete = true;
   localStorage.setItem("rehab_intake_complete", "1");
@@ -563,6 +575,7 @@ let activeFlow = null; // { type, step, answers }
 
 function triggerIntake() {
   if (window.location.hash !== "#intake") history.pushState(null, "", "#intake");
+  setActiveStepBtn("intake");
   // Always reset state so sidebar starts empty for a fresh run
   intakeComplete = false;
   localStorage.removeItem("rehab_intake_complete");
@@ -693,6 +706,7 @@ function handleFlowAnswer(text) {
 
 function triggerCheckin() {
   if (window.location.hash !== "#checkin") history.pushState(null, "", "#checkin");
+  setActiveStepBtn("checkin");
   switchStage("chat");
   clearChatLog();
   activeFlow = { type: "checkin", step: 0, answers: {} };
@@ -721,6 +735,7 @@ let selectedDays = new Set(DAYS); // default: every day
 
 function triggerGeneratePlan() {
   if (window.location.hash !== "#plan") history.pushState(null, "", "#plan");
+  setActiveStepBtn("plan");
   switchStage("chat");
   clearChatLog();
   selectedDays = new Set(DAYS); // reset to all days on each entry
@@ -796,7 +811,7 @@ function confirmFrequencyAndGenerate() {
   const ordered = DAYS.filter(d => selectedDays.has(d));
   const freqNote = `Training days: ${ordered.join(", ")} (${ordered.length}/week).`;
 
-  appendChatBubble("coach", `Got it — ${freqNote.toLowerCase()} Generating your weekly protocol...`);
+  appendChatBubble("coach", `Scheduled reminder set for ${ordered.join(", ")}. Generating your weekly protocol...`);
   invokeAgent("weekly_plan", { intake_text: freqNote });
 }
 
@@ -907,6 +922,7 @@ function finalizePlan() {
 
 function triggerExercise() {
   if (window.location.hash !== "#exercise") history.pushState(null, "", "#exercise");
+  setActiveStepBtn("exercise");
   switchStage("chat");
   clearChatLog();
   loadExerciseCards();
