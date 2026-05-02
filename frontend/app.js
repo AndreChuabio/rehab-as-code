@@ -12,7 +12,7 @@ const TRACE_GLYPH = {
   agent_failed:    "[fail]",
 };
 
-const intakeDone = localStorage.getItem("rehab_intake_complete") === "1";
+let intakeComplete = localStorage.getItem("rehab_intake_complete") === "1";
 
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("dateDisplay").textContent = new Date().toLocaleDateString(
@@ -22,11 +22,11 @@ document.addEventListener("DOMContentLoaded", () => {
   loadProtocol();
   switchStage("chat");
   applyStepLocks();
-  if (!intakeDone) triggerIntake();
+  if (!intakeComplete) triggerIntake();
 });
 
 function applyStepLocks() {
-  const locked = !intakeDone;
+  const locked = !intakeComplete;
   ["generatePlanBtn", "reportSymptomBtn", "triggerCheckinBtn"].forEach((id) => {
     const btn = document.getElementById(id);
     if (!btn) return;
@@ -34,6 +34,13 @@ function applyStepLocks() {
     btn.title = locked ? "Complete intake first" : btn.getAttribute("data-orig-title") || btn.title;
     if (!btn.getAttribute("data-orig-title")) btn.setAttribute("data-orig-title", btn.title);
   });
+}
+
+function onIntakeComplete() {
+  intakeComplete = true;
+  localStorage.setItem("rehab_intake_complete", "1");
+  applyStepLocks();
+  showToast("Intake complete — now generate your weekly plan!", "info");
 }
 
 // ---------------------------------------------------------------------------
@@ -471,10 +478,10 @@ function reportSymptom() {
   activeFlow = { type: "symptom", step: 0, answers: {} };
   updateFlowUI(true);
   appendChatBubble("coach",
-    "Let's log your symptom. Type **cancel** at any time to stop.\n\n" +
+    "Let's log your symptom. Press Enter to use each default.\n\n" +
     SYMPTOM_QUESTIONS[0].q
   );
-  document.getElementById("chatInput")?.focus();
+  prefillFlowInput();
 }
 
 // ---------------------------------------------------------------------------
@@ -482,27 +489,27 @@ function reportSymptom() {
 // ---------------------------------------------------------------------------
 
 const INTAKE_QUESTIONS = [
-  { key: "name",     q: "What's your name?",                                                          hint: "e.g. Andre" },
-  { key: "age",      q: "How old are you?",                                                            hint: "e.g. 26" },
-  { key: "injury",   q: "What was your injury or surgery?",                                            hint: "e.g. ACL reconstruction" },
-  { key: "timing",   q: "When was your surgery or injury?",                                            hint: "e.g. 3 weeks ago" },
-  { key: "pain",     q: "On a scale of 1–10, what's your current pain level?",                        hint: "e.g. 3" },
-  { key: "symptoms", q: "Any specific symptoms or limitations? (or type \"none\")",                    hint: "e.g. mild pain at 110° flexion" },
+  { key: "name",     q: "What's your name?",                                         default: "Andre",                     hint: "e.g. Andre" },
+  { key: "age",      q: "How old are you?",                                           default: "26",                        hint: "e.g. 26" },
+  { key: "injury",   q: "What was your injury or surgery?",                           default: "ACL reconstruction",        hint: "e.g. ACL reconstruction" },
+  { key: "timing",   q: "When was your surgery or injury?",                           default: "3 weeks ago",               hint: "e.g. 3 weeks ago" },
+  { key: "pain",     q: "On a scale of 1–10, what's your current pain level?",       default: "3",                         hint: "e.g. 3" },
+  { key: "symptoms", q: "Any specific symptoms? (press Enter to use the default)",   default: "mild pain at 110° flexion", hint: "e.g. mild pain at 110° flexion" },
 ];
 
 const SYMPTOM_QUESTIONS = [
-  { key: "location",  q: "Where is the pain or discomfort?",                                          hint: "e.g. inner knee" },
-  { key: "type",      q: "How would you describe it?",                                                 hint: "e.g. sharp, dull, ache, tightness" },
-  { key: "level",     q: "Pain level 1–10?",                                                          hint: "e.g. 4" },
-  { key: "trigger",   q: "When does it happen?",                                                      hint: "e.g. during single-leg squats" },
-  { key: "duration",  q: "How long has this been going on?",                                          hint: "e.g. started today" },
+  { key: "location",  q: "Where is the pain or discomfort?",          default: "inner knee",               hint: "e.g. inner knee" },
+  { key: "type",      q: "How would you describe it?",                 default: "dull ache",                hint: "e.g. sharp, dull, ache, tightness" },
+  { key: "level",     q: "Pain level 1–10?",                           default: "4",                        hint: "e.g. 4" },
+  { key: "trigger",   q: "When does it happen?",                       default: "during single-leg squats", hint: "e.g. during single-leg squats" },
+  { key: "duration",  q: "How long has this been going on?",           default: "started today",            hint: "e.g. started today" },
 ];
 
 const CHECKIN_QUESTIONS = [
-  { key: "rating",     q: "How did today's session go overall? (1–10)",                               hint: "e.g. 8" },
-  { key: "completed",  q: "Which exercises did you complete?",                                        hint: "e.g. heel slides, quad sets, straight leg raises" },
-  { key: "strong",     q: "What felt strong or improved today?",                                      hint: "e.g. quad set felt stronger than yesterday" },
-  { key: "difficult",  q: "Anything that felt difficult or caused discomfort? (or type \"none\")",    hint: "e.g. single-leg balance was shaky" },
+  { key: "rating",     q: "How did today's session go overall? (1–10)",                             default: "8",                                        hint: "e.g. 8" },
+  { key: "completed",  q: "Which exercises did you complete?",                                      default: "heel slides, quad sets, stationary bike",   hint: "e.g. heel slides, quad sets" },
+  { key: "strong",     q: "What felt strong or improved today?",                                    default: "quad set felt stronger",                   hint: "e.g. quad set felt stronger than yesterday" },
+  { key: "difficult",  q: "Anything that felt difficult or caused discomfort? (or type \"none\")", default: "none",                                      hint: "e.g. single-leg balance was shaky" },
 ];
 
 const FLOW_META = {
@@ -519,10 +526,23 @@ function triggerIntake() {
   activeFlow = { type: "intake", step: 0, answers: {} };
   updateFlowUI(true);
   appendChatBubble("coach",
-    "I'll walk you through a quick intake. Type **cancel** at any time to stop.\n\n" +
+    "I'll walk you through a quick intake. Press Enter to use each default — it's fast for demo.\n\n" +
     INTAKE_QUESTIONS[0].q
   );
-  document.getElementById("chatInput")?.focus();
+  prefillFlowInput();
+}
+
+function prefillFlowInput() {
+  if (!activeFlow) return;
+  const meta = FLOW_META[activeFlow.type];
+  const q = meta.questions[activeFlow.step];
+  const input = document.getElementById("chatInput");
+  if (input && q) {
+    input.value = q.default || "";
+    input.placeholder = q.hint || "Type your answer...";
+    input.select();
+    input.focus();
+  }
 }
 
 function cancelFlow() {
@@ -553,8 +573,7 @@ function updateFlowProgress() {
   if (label) label.textContent = `${meta.label} — question ${activeFlow.step + 1} of ${total}`;
   const fill = document.getElementById("intakeProgressFill");
   if (fill) fill.style.width = `${(activeFlow.step / total) * 100}%`;
-  const input = document.getElementById("chatInput");
-  if (input) input.placeholder = meta.questions[activeFlow.step]?.hint || "Type your answer...";
+  prefillFlowInput();
 }
 
 function resetInputPlaceholder() {
@@ -574,7 +593,7 @@ function handleFlowAnswer(text) {
 
   const meta = FLOW_META[activeFlow.type];
   const q = meta.questions[activeFlow.step];
-  activeFlow.answers[q.key] = text;
+  activeFlow.answers[q.key] = text || q.default || "";
   activeFlow.step++;
 
   if (activeFlow.step < meta.questions.length) {
@@ -593,9 +612,10 @@ function handleFlowAnswer(text) {
   if (type === "intake") {
     const intake_text =
       `${a.name}, ${a.age} years old. Injury: ${a.injury}, ${a.timing}. ` +
-      `Pain level ${a.level || a.pain}/10. Symptoms: ${a.symptoms}`;
+      `Pain level ${a.pain}/10. Symptoms: ${a.symptoms}`;
     appendChatBubble("coach", "Got it! Generating your personalized protocol...");
     invokeAgent("intake", { intake_text });
+    onIntakeComplete();
 
   } else if (type === "symptom") {
     const symptom_text =
@@ -621,10 +641,10 @@ function triggerCheckin() {
   activeFlow = { type: "checkin", step: 0, answers: {} };
   updateFlowUI(true);
   appendChatBubble("coach",
-    "Quick session check-in! Type **cancel** at any time to stop.\n\n" +
+    "Quick session check-in! Press Enter to accept each default.\n\n" +
     CHECKIN_QUESTIONS[0].q
   );
-  document.getElementById("chatInput")?.focus();
+  prefillFlowInput();
 }
 
 function setAgentButtonsDisabled(disabled) {
