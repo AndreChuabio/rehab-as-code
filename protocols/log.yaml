@@ -1,0 +1,17 @@
+checkins:
+  - date: "2026-05-02"
+    recorded_at: "2026-05-02T18:57:33.480898+00:00"
+    note: "post-merge sanity test"
+    wearable:
+      sleep_score: 71
+      hrv_ms: 42
+      recovery_score: 65
+    evaluator:
+      classification: hold
+      reason: HRV dropped 19ms over 7d (61→42), exceeds -8ms hold threshold per .cursorrules
+      symptom_interpretation: non-clinical test note; no pain
+      recovery_risk: elevated vs recent baseline (65 vs 7d avg 72); recovery still ≥60
+      flags_for_followup:
+        - declining HRV
+        - 3 consecutive low-HRV days
+        - week-4 clearance blocked until HRV stable/improving per post-acl-week-4.yaml clearance_criteria
