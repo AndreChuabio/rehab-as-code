@@ -20,7 +20,50 @@ document.addEventListener("DOMContentLoaded", () => {
   );
   loadSidebar();
   loadProtocol();
+  switchStage("chat");  // default hero
 });
+
+// ---------------------------------------------------------------------------
+// Stage tab toggle (chat | video)
+// ---------------------------------------------------------------------------
+
+function switchStage(mode) {
+  const chatPane  = document.getElementById("stageChat");
+  const videoPane = document.getElementById("stageVideo");
+  const chatTab   = document.getElementById("tabChat");
+  const videoTab  = document.getElementById("tabVideo");
+  const isChat = mode === "chat";
+
+  chatPane.hidden  = !isChat;
+  videoPane.hidden =  isChat;
+  chatTab.classList.toggle("active", isChat);
+  videoTab.classList.toggle("active", !isChat);
+  chatTab.setAttribute("aria-selected", isChat);
+  videoTab.setAttribute("aria-selected", !isChat);
+
+  if (isChat) {
+    // Stop Tavus iframe when leaving video to free camera/mic
+    const frame = document.getElementById("tavusFrame");
+    if (frame && frame.style.display !== "none" && frame.src) {
+      // Just hide; reload iframe only if user clicks Start Session again
+    }
+    document.getElementById("chatInput")?.focus();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Agent status chip (left rail)
+// ---------------------------------------------------------------------------
+
+function setAgentStatus(state, label) {
+  const chip = document.querySelector(".agent-status");
+  const dot  = document.getElementById("agentStatusDot");
+  const txt  = document.getElementById("agentStatusLabel");
+  if (!chip || !txt) return;
+  chip.classList.remove("working", "done", "error");
+  if (state) chip.classList.add(state);
+  txt.textContent = label || state || "idle";
+}
 
 // ---------------------------------------------------------------------------
 // Sidebar: wearable signals + calendar
@@ -92,8 +135,11 @@ async function loadProtocol() {
     const res = await fetch(`${API_BASE}/protocol`);
     const data = await res.json();
     renderProtocol(data);
-    document.getElementById("repoLink").href = `https://github.com/${data.repo}`;
-    document.getElementById("repoLink").textContent = data.repo;
+    const link = document.getElementById("repoLink");
+    if (link) {
+      link.href = `https://github.com/${data.repo}/tree/main/protocols`;
+      link.textContent = data.repo;
+    }
   } catch (e) {
     console.error("Failed to load protocol:", e);
   }
@@ -192,15 +238,11 @@ function renderFocus(items) {
 // ---------------------------------------------------------------------------
 
 async function invokeAgent(flow, body = {}) {
-  const traceCard = document.getElementById("agentTraceCard");
-  const traceList = document.getElementById("traceList");
-  const prCard = document.getElementById("prDiffCard");
-  traceCard.style.display = "block";
-  traceList.innerHTML = "";
-  prCard.style.display = "none";
-
+  // Make sure the trace shows up where the user is looking.
+  switchStage("chat");
   resetAgentTeam();
   activateTeamNode("parent");
+  setAgentStatus("working", `coordinator (${flow})`);
   setAgentButtonsDisabled(true);
 
   try {
@@ -212,23 +254,41 @@ async function invokeAgent(flow, body = {}) {
     });
     if (!res.ok) throw new Error(`invoke failed: ${res.status}`);
     const { invocation_id, pr_url, branch, provider } = await res.json();
-    document.getElementById("providerName").textContent = provider;
+    const providerEl = document.getElementById("providerName");
+    if (providerEl) providerEl.textContent = provider;
 
     streamTrace(invocation_id, () => {
       if (pr_url) {
         renderPullRequest(pr_url, branch);
       }
       setAgentButtonsDisabled(false);
+      setAgentStatus("done", "ready");
     });
   } catch (e) {
     console.error(e);
     showToast(`Agent invoke failed: ${e.message}`, "error");
     setAgentButtonsDisabled(false);
+    setAgentStatus("error", "failed");
   }
 }
 
+// streamTrace renders trace events as a single inline chat bubble. Each
+// invocation gets its own bubble; events stream into its <ol>. This
+// preserves the chat-as-single-surface UX — no peer panels.
 function streamTrace(invocationId, onDone) {
-  const traceList = document.getElementById("traceList");
+  const log = document.getElementById("chatLog");
+  if (!log) return;
+
+  const bubble = document.createElement("div");
+  bubble.className = "chat-bubble agent-trace";
+  bubble.innerHTML = `
+    <div class="trace-header">cloud agent / ${escapeHtml(invocationId.slice(0, 8))}</div>
+    <ol class="trace-list"></ol>
+  `;
+  log.appendChild(bubble);
+  scrollChatLog?.();
+  const traceList = bubble.querySelector(".trace-list");
+
   const url = `${API_BASE}/agent/stream/${encodeURIComponent(invocationId)}`;
   const source = new EventSource(url);
   let activeSubagent = null;
@@ -237,11 +297,11 @@ function streamTrace(invocationId, onDone) {
     try {
       const event = JSON.parse(e.data);
 
-      // Light up the team-node strip when a sub-agent is spawned.
       const subagent = event?.payload?.subagent;
       if (subagent) {
         activateTeamNode(subagent);
         activeSubagent = subagent;
+        setAgentStatus("working", `${subagent} working`);
       } else if (event.type === "pr_opened" || event.type === "agent_completed") {
         activeSubagent = null;
       }
@@ -263,7 +323,7 @@ function streamTrace(invocationId, onDone) {
         <span class="trace-label">${escapeHtml(event.label)}</span>
       `;
       traceList.appendChild(li);
-      traceList.parentElement.scrollTop = traceList.parentElement.scrollHeight;
+      scrollChatLog?.();
     } catch (err) {
       console.error("trace parse error", err);
     }
@@ -282,24 +342,29 @@ function streamTrace(invocationId, onDone) {
 }
 
 function resetAgentTeam() {
-  document.querySelectorAll(".team-node").forEach((n) => {
+  document.querySelectorAll(".team-mini-node").forEach((n) => {
     n.classList.remove("active");
   });
 }
 
 function activateTeamNode(role) {
-  const node = document.querySelector(`.team-node[data-role="${role}"]`);
+  const node = document.querySelector(`.team-mini-node[data-role="${role}"]`);
   if (node) node.classList.add("active");
 }
 
+// PR result also lives inline in chat. Click-through to GitHub for the diff.
 function renderPullRequest(prUrl, branch) {
-  const card = document.getElementById("prDiffCard");
-  document.getElementById("prLink").href = prUrl;
-  document.getElementById("prLink").textContent = prUrl;
-  document.getElementById("prBranch").textContent = branch
-    ? `branch: ${branch}`
-    : "";
-  card.style.display = "block";
+  const log = document.getElementById("chatLog");
+  if (!log) return;
+  const bubble = document.createElement("div");
+  bubble.className = "chat-bubble pr-result";
+  bubble.innerHTML = `
+    <div class="pr-result-header">pull request opened</div>
+    <a class="pr-result-link" href="${escapeHtml(prUrl)}" target="_blank">${escapeHtml(prUrl)}</a>
+    ${branch ? `<div class="pr-result-branch">branch: ${escapeHtml(branch)}</div>` : ""}
+  `;
+  log.appendChild(bubble);
+  scrollChatLog?.();
 }
 
 function reportSymptom() {
@@ -462,31 +527,31 @@ function handleChatEvent(event, coachBubble, appendDelta) {
 
     case "tool_call":
       renderToolLine(event);
-      // Light up the right-panel team strip so the audience sees the link
-      // between chat and orchestrator immediately.
+      // Light up the team-mini strip the moment chat fires an agent so the
+      // audience sees the chat-to-orchestrator link without a panel switch.
       if (String(event.name || "").startsWith("fire_")) {
         resetAgentTeam();
         activateTeamNode("parent");
-        document.getElementById("agentTraceCard").style.display = "block";
-        document.getElementById("traceList").innerHTML = "";
-        document.getElementById("prDiffCard").style.display = "none";
+        setAgentStatus("working", "coordinator (chat)");
       }
       break;
 
     case "tool_result":
-      // For fire_*_trigger results we have a real invocation - hand it off
-      // to the existing streamTrace() so the right-panel UI mirrors a button
-      // press exactly. recommend_exercise / list_phase_exercises results
-      // do not include invocation_id; they're frontend-only.
+      // Real fire_*_trigger results carry an invocation_id; stream the trace
+      // inline as a chat bubble. Library lookup tools have no invocation_id;
+      // they render as the existing tool-result line only.
       if (event.result?.invocation_id) {
         renderToolResultLine(event);
         streamTrace(event.result.invocation_id, () => {
           if (event.result.pr_url) {
             renderPullRequest(event.result.pr_url, event.result.branch);
           }
+          setAgentStatus("done", "ready");
         });
-        document.getElementById("providerName").textContent =
-          event.result.provider || "cached_replay";
+        const providerEl = document.getElementById("providerName");
+        if (providerEl) {
+          providerEl.textContent = event.result.provider || "cached_replay";
+        }
       }
       break;
 
