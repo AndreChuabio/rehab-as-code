@@ -34,7 +34,7 @@ Two orchestrators sharing the same repo should declare disjoint
 {
   "config": "care-plan",
   "flow": "weekly_plan",
-  "repoUrl": "https://github.com/AndreChuabio/rehab-protocols-andre",
+  "repoUrl": "https://github.com/AndreChuabio/rehab-as-code",
   "extraPrompt": "optional task addendum",
   "contextFiles": { "data/wearables.json": "..." }
 }
@@ -61,7 +61,7 @@ Two orchestrators sharing the same repo should declare disjoint
 cd orchestrator
 npm install
 export CURSOR_API_KEY=cursor_...
-echo '{"config":"care-plan","flow":"weekly_plan","repoUrl":"https://github.com/AndreChuabio/rehab-protocols-andre"}' \
+echo '{"config":"care-plan","flow":"weekly_plan","repoUrl":"https://github.com/AndreChuabio/rehab-as-code"}' \
   | npx tsx src/orchestrator.ts
 ```
 

@@ -1,194 +1,165 @@
-# AGENTS.md — Wellness Coach AI
+# AGENTS.md — RehabAsCode
 
-> Instructions for any AI coding agent (Copilot, Cursor, Claude, Codex) pair programming on this project.
+Instructions for AI coding agents (Cursor, Copilot, Claude, Codex) pair
+programming on this repo. The cloud agent's clinical guardrails live in
+`protocols/.cursorrules`; this file is for harness-level concerns.
 
----
+## What this project is
 
-## What This Project Is
+A FastAPI app where a Cursor cloud agent updates `protocols/protocol.yaml`
+each time the patient hits a trigger (intake / weekly plan / check-in /
+symptom). The agent reads wearables + library + the current protocol, opens
+a draft PR with reasoning + cited library entries, and a clinician approves
+it from the UI.
 
-A conversational AI wellness coach that:
-- Reads your wearable health data (sleep, HRV, recovery)
-- Reads your Google Calendar for the day
-- Builds a personalized Claude system prompt (Healthmaxx persona)
-- Starts a **live, interactive Tavus CVI video session** — the user speaks back and forth with the AI character
-- Proactively suggests wellness practices (breathing, meditation, movement)
+The repo IS the message bus. Don't add side channels.
 
-**Stack:** FastAPI (Python) · Tavus CVI · Claude (Anthropic) · Vanilla JS frontend · gog CLI (Google Cal)
+**Stack**: FastAPI · `@cursor/sdk` (TypeScript, wrapped by a Node helper) ·
+OpenAI gpt-4o-mini (chat) · Anthropic (context) · Tavus CVI (optional
+video) · vanilla JS frontend.
 
----
+## Repo layout
 
-## Repo Structure
+See the root `README.md` for the full tree. Quick orientation:
 
 ```
-wellness-coach/
-├── backend/
-│   ├── main.py              ← FastAPI app (start here)
-│   ├── context_builder.py   ← Health + calendar → Claude system prompt
-│   ├── health_mock.py       ← Mock wearable data + real API stubs
-│   ├── calendar_fetch.py    ← gog CLI integration + mock fallback
-│   ├── tavus_client.py      ← Tavus CVI session creation
-│   └── requirements.txt
-├── frontend/
-│   ├── index.html           ← Main UI
-│   ├── app.js               ← API calls + Tavus iframe logic
-│   └── style.css            ← Dark wellness theme
-├── cron/
-│   └── morning_context.py   ← Standalone 6:30AM pre-build script
-├── .env.example             ← Copy to .env, fill in keys
-└── README.md
+backend/
+  main.py                   FastAPI app + 4 trigger endpoints + /pr/apply
+  agents/                   provider abstraction (cursor_sdk live primary)
+  cached_runs/              JSON traces for cached_replay fallback
+  coach_chat.py             OpenAI chat with fire_*_trigger tools
+  protocol_loader.py        fetches protocol.yaml via GitHub API (no CDN cache)
+orchestrator/
+  src/orchestrator.ts       @cursor/sdk wrapper (subprocess from Python)
+  configs/care-plan.yaml    parent prompt + sub-agent roster
+protocols/
+  protocol.yaml             the patient's current program
+  protocol-library/         evidence base (read-only for the agent)
+  .cursorrules              clinical guardrails
+frontend/
+  app.js                    SSE consumer + Approve / Reset / chat
 ```
 
----
-
-## Current Status (as of scaffold)
-
-### ✅ Done
-- Full project scaffold pushed to GitHub
-- FastAPI backend with 4 working endpoints
-- Health mock data + real API stubs (Oura, Fitbit, Apple Health)
-- Calendar fetch via `gog` CLI with mock fallback
-- Context builder: Claude generates Healthmaxx system prompt + greeting + wellness recs
-- Tavus CVI session creation (graceful mock if no keys)
-- Frontend: dark UI, Tavus iframe, recommendations cards, health stats sidebar
-- Cron script for morning pre-build
-
-### 🔧 TODO / Open Work
-- [ ] Wire real wearable API (see `health_mock.py` stubs)
-- [ ] Set up Tavus Persona + Replica → add to `.env`
-- [ ] Test full end-to-end with real Tavus keys
-- [ ] Add ElevenLabs voice layer (optional — Tavus has native voice)
-- [ ] Polish frontend (animations, better mobile layout)
-- [ ] Add a "wellness history" endpoint to track recs over time
-- [ ] OpenClaw cron job for morning context pre-build
-
----
-
-## Key Design Decisions
-
-### Why Tavus CVI (not just audio)?
-Real-time video avatar = way more engaging demo. The character lip-syncs live to Claude's responses. Users feel like they're talking to someone, not a chatbot.
-
-### Why pre-build context at 6:30 AM?
-So the session starts *instantly* when the user opens the app — no 3-second wait for Claude to generate the system prompt. The `cron/morning_context.py` saves to `context.json` which the backend serves from `/context`.
-
-### Why Healthmaxx?
-Warm, caring, non-judgmental, health-obsessed. Perfect wellness coach energy. The Claude prompt instructs the AI to stay in character.
-
-### Why mock data first?
-Wearable APIs vary wildly (Oura vs Fitbit vs Apple Health). Mock lets us build + demo the full pipeline without being blocked on OAuth flows. Easy to swap in real data later.
-
----
-
-## Environment Variables
-
-```bash
-cp .env.example .env
-```
-
-| Variable | Required | Description |
-|---|---|---|
-| `ANTHROPIC_API_KEY` | Yes | Claude context generation |
-| `TAVUS_API_KEY` | For live video | Tavus CVI sessions |
-| `TAVUS_REPLICA_ID` | For live video | Your avatar (create at platform.tavus.io) |
-| `TAVUS_PERSONA_ID` | For live video | Your character persona |
-| `ELEVENLABS_API_KEY` | Optional | Custom voice (Tavus has native voice) |
-
-> **Without Tavus keys:** the app still runs — it uses mock mode and shows the greeting as text.
-> **Without Anthropic key:** context builder falls back to a hardcoded Healthmaxx prompt.
-
----
-
-## Running Locally
-
-```bash
-# Backend
-cd backend
-pip install -r requirements.txt
-cp ../.env.example ../.env   # fill in keys
-uvicorn main:app --reload
-# → http://localhost:8000
-# → http://localhost:8000/docs  (Swagger UI)
-
-# Frontend (no build needed)
-open frontend/index.html
-# or: cd frontend && python3 -m http.server 3000
-```
-
----
-
-## API Endpoints
-
-| Method | Path | Description |
-|---|---|---|
-| `GET` | `/health-data` | Today's wearable metrics |
-| `GET` | `/calendar` | Today's calendar events |
-| `POST` | `/start-session` | Full pipeline → Tavus CVI URL + recs |
-| `GET` | `/context` | Pre-built context (from cron) |
-
-Test with Swagger: `http://localhost:8000/docs`
-
----
-
-## Coding Guidelines
-
-- **Python 3.11+**, type hints preferred
-- **No secrets in code** — all keys via `.env` / `os.getenv()`
-- **Graceful degradation** — every external API call falls back to mock if keys are missing
-- **Keep it hackathon-clean** — readable > clever. Comment the non-obvious stuff.
-- **Don't break the mock fallbacks** — demo must work without any API keys
-
----
-
-## Pair Programming Tips for the Agent
-
-- If you're adding a new endpoint, add it to `main.py` and match the pattern already there
-- If you're adding a new wellness recommendation rule, add it to `analyze_health()` in `context_builder.py`
-- If you're wiring a real wearable, implement the stub in `health_mock.py` and update `get_health_data()` to call it
-- If you're touching the frontend, keep it vanilla JS — no framework, no build step
-- The `context.json` file is gitignored (runtime artifact) — don't hardcode paths, use `Path(__file__)` relative resolution
-- Run `uvicorn main:app --reload` from the `backend/` directory, not the root
-
----
-
-## Hackathon Context
-
-- Built at a hackathon, April 2026
-- Two-person team (Andre + teammate)
-- Time constraint: ship a working demo
-- Priority order: **working demo > clean code > full features**
-- The Tavus CVI integration is the money shot — prioritize getting that live
-
----
-
-## Cursor Cloud specific instructions
-
-### Running the backend
+## Running the backend
 
 ```bash
 cd backend && uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-The FastAPI server serves both the API and the frontend (mounted at `/static`, root `/` returns `frontend/index.html`). No separate frontend build or dev server is needed.
+Backend serves both API and frontend (mounted at `/static`, `/` returns
+`frontend/index.html`). No separate frontend build or dev server needed.
 
-### .env setup gotcha
+## Provider configuration
 
-The `.env.example` ships with placeholder values like `your_anthropic_key_here`. These are **truthy** — the code checks `if os.getenv("ANTHROPIC_API_KEY")` and will attempt a real API call that fails with 401. When running without real API keys, clear the placeholder values (set them to empty strings) so the mock fallbacks activate correctly.
+`AGENT_PROVIDER` selects the live path; `DEMO_LIVE_AGENT=1` arms it. When
+the live path raises, `_invoke_with_fallback()` (`backend/main.py:220-267`)
+swaps in `cached_replay` silently — the response's `provider` field
+reflects which one actually ran.
 
-### Agent smoke tests
+| Provider | Notes |
+|---|---|
+| `cursor_sdk` | Live primary. Spawns `tsx orchestrator/src/orchestrator.ts` via subprocess. Requires `CURSOR_API_KEY` and `cd orchestrator && npm install`. |
+| `cached_replay` | Replays JSON from `backend/cached_runs/{flow}.json`. Default fallback. |
+| `cursor_github` | `@cursor` GitHub mention via gh CLI. Backup path. |
+| `mock` | Scripted fake, no network. Dev / unit tests. |
 
-`python3 -m scripts.smoke_test_agents` (from `backend/`) exercises mock, cached_replay, and cursor_sdk providers. The cached_replay provider paces trace events in real-time by default (~30s+); the cursor_sdk provider hangs without `CURSOR_API_KEY` and the orchestrator installed. For quick validation, test mock and cached_replay individually or use a high speed multiplier with `CachedReplayAgent(speed=100.0)`.
+## Workflow chain (intake → weekly_plan → check-in → symptom)
 
-### PyJWT conflict
+Each flow opens a PR. State only advances on `main` after the clinician
+clicks "Approve and apply" in the UI (which calls `POST /pr/apply` →
+`gh pr ready` then `gh pr merge --squash`). The next flow's agent reads
+the freshly-merged `main` via `protocol_loader.fetch_protocol()` (which
+uses the GitHub contents API — never `raw.githubusercontent.com`, that
+has a CDN cache).
 
-The base VM image ships with a system-managed `PyJWT 2.7.0` that pip cannot uninstall. Run `pip install --ignore-installed pyjwt` before `pip install -r requirements.txt` to work around this.
+Do not bypass this. Direct commits to `protocols/protocol.yaml` will
+break the audit story. Only the Reset demo button is allowed to write
+`protocol.yaml` directly (it nukes back to `pending_intake`).
 
-### Key endpoints for testing
+## .env setup gotcha
+
+`.env.example` ships with placeholder values like `your_anthropic_key_here`.
+These are truthy — code paths that check `if os.getenv("X")` will attempt
+real API calls and fail with 401. When running without real keys, clear the
+placeholder values to empty strings so mock fallbacks activate.
+
+For the live `cursor_sdk` path you need at minimum:
+```
+CURSOR_API_KEY=crsr_...
+AGENT_PROVIDER=cursor_sdk
+DEMO_LIVE_AGENT=1
+OPENAI_API_KEY=sk-...        # for chat
+ANTHROPIC_API_KEY=sk-ant-... # for Tavus context generation
+```
+
+## Agent smoke tests
+
+```bash
+cd backend && python3 -m scripts.smoke_test_agents
+```
+
+Exercises mock, cached_replay, and cursor_sdk providers. The cached_replay
+provider paces trace events in real-time by default (~30s+); the
+cursor_sdk provider hangs without `CURSOR_API_KEY` and the orchestrator
+installed. For quick validation, test mock and cached_replay individually
+or pass a high speed multiplier (`CachedReplayAgent(speed=100.0)`).
+
+## PyJWT conflict
+
+The base VM image ships with a system-managed `PyJWT 2.7.0` that pip
+cannot uninstall. Run `pip install --ignore-installed pyjwt` before
+`pip install -r requirements.txt` to work around this.
+
+## Key endpoints for testing
 
 | Method | Path | Notes |
 |---|---|---|
-| `GET` | `/health-data` | Always works (mock data) |
-| `GET` | `/calendar` | Always works (mock data) |
-| `POST` | `/start-session` | Needs cleared API keys for mock fallback |
-| `GET` | `/protocol` | Returns current rehab protocol from local YAML |
-| `POST` | `/agent/invoke` | Uses `cached_replay` by default (deterministic) |
-| `GET` | `/docs` | Swagger UI |
+| GET | `/protocol` | Always works (falls back to local stub if API unreachable) |
+| GET | `/health-data` | Always works (mock data if no Apple Watch sync) |
+| GET | `/calendar` | Mock fallback if Google creds missing |
+| POST | `/agent/invoke` | Live or cached based on env flags above |
+| GET | `/agent/stream/{id}` | SSE; pair with the `invocation_id` from invoke |
+| POST | `/pr/apply` | Body: `{"pr_url": "..."}` or `{"pr_number": N}` |
+| POST | `/demo/reset` | Wipes protocol.yaml back to `pending_intake` on main |
+| POST | `/start-session` | Needs cleared API keys for mock fallback |
+| GET | `/docs` | Swagger UI |
+| GET | `/debug-env` | All env vars surfaced (values masked) |
+
+## Coding guidelines
+
+- Python 3.11+, type hints preferred
+- No secrets in code — all keys via `.env` / `os.getenv()`
+- Graceful degradation — every external API call falls back to mock when
+  keys are missing
+- Don't break the mock fallbacks — demo must work without any API keys
+- Don't write to `protocols/protocol.yaml` directly except via the
+  agent's PR flow or the demo reset
+- Don't add emojis to docs / commits / code
+- Frontend is vanilla JS — no framework, no build step
+- Run `uvicorn` from the repo root with `--app-dir backend`, not from
+  inside `backend/`
+
+## Pair programming tips
+
+- New endpoint: add to `backend/main.py`, match existing pattern
+- New trigger flow: add config in `orchestrator/configs/care-plan.yaml`,
+  new `_build_agent_prompt` branch in `main.py`, new `/triggers/X`
+  endpoint that funnels through `_invoke_with_fallback`
+- New provider: add a class implementing `CodingAgent` (see `agents/base.py`)
+  and register in `agents/__init__.py:get_agent`
+- New chat tool: add in `coach_chat.py` tool registry; if it fires an
+  agent, follow the `fire_*_trigger` naming so the frontend lights up
+  the team-mini strip in the Cloud Agent card
+- Touching the trace UI: `streamTrace` in `frontend/app.js`, consumes the
+  SSE stream and renders inline as a chat bubble
+
+## Hackathon context
+
+- Built at Slop Con NYC 2026-05-02 (single day)
+- Two-person team (Andre + Nikki Hu)
+- Priority order: working demo > clean code > full features
+- `cursor_sdk` is the live primary path; `cached_replay` is the silent
+  safety net that catches anything that breaks live
+- The Approve and apply button is the visible clinician-gate gesture
+  for the pitch story; Cursor cloud agents auto-merge their own PRs
+  in seconds, so the Approve handler treats "already merged" as success

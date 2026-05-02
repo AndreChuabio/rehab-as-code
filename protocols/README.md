@@ -1,17 +1,21 @@
-# rehab-protocols-andre
+# protocols/
 
-Andre's personal rehab protocol, version-controlled and updated by Cursor cloud agents.
+The patient's rehab program, lived in version control and updated by Cursor
+cloud agents. Lives under `protocols/` of `AndreChuabio/rehab-as-code` so
+the agent's PRs and the app code share one repo and one audit trail.
 
-## What this repo is
+## What this directory is
 
-The current week's protocol lives in `protocol.yaml`. Cursor cloud agents read
-the patient's wearable data (under `data/`) and reported symptoms, consult
-`protocol-library/` for evidence-based progressions, and open PRs that update
-`protocol.yaml`. A human (Andre or his physical therapist) reviews and merges.
+The current week's protocol lives in `protocol.yaml`. Cursor cloud agents
+read the patient's wearable data (under `data/`) and reported symptoms,
+consult `protocol-library/` for evidence-based progressions, and open
+draft PRs that update `protocol.yaml`. The clinician approves each PR
+from the RehabAsCode UI (which calls `POST /pr/apply` to squash-merge it
+onto main); the next flow's agent then reads the updated state.
 
 This is **rehab as code**: every change to the program is a commit, every
 weekly progression is a reviewable diff, every adjustment cites the
-evidence-based reference it's based on.
+evidence-based reference it is based on.
 
 ## Layout
 
@@ -31,14 +35,21 @@ schema.json                       - schema for protocol.yaml
 
 ## How to invoke an update
 
-Either:
+Three ways, in order of how the demo uses them:
 
-1. Open an issue using the `Rehab protocol update` template and mention
-   `@cursor` in the body, or
-2. POST to the RehabAsCode backend's `/agent/invoke` endpoint, which writes
-   wearable + symptom data into `data/` on a fresh branch and opens the
-   issue for you.
+1. **From the UI**: click `1 intake`, `2 weekly plan`, `3 check-in`, or
+   `4 symptom` in the dashboard. The backend funnels through
+   `_invoke_with_fallback()` and fires the cursor cloud agent with the
+   right per-flow prompt.
+2. **From chat**: type natural language to Coach Maya
+   ("I am ready to progress - plan next week"); GPT-4o-mini routes to
+   the matching `fire_*_trigger` tool, same backend path as the buttons.
+3. **From curl**: `POST /triggers/{intake,weekly-cron,checkin,symptom}`
+   with the relevant body fields. See root `README.md` endpoints table.
 
-The agent will clone the repo, read the context, draft a PR, and post it
-back. The PR body includes Reasoning, Cited library entries, and a Wearable
-data summary.
+The agent reads `protocol.yaml`, `.cursorrules`, the `data/wearables-{date}.json`
+the backend just wrote, and the relevant `protocol-library/` entries.
+It opens a draft PR; the clinician approves from the UI.
+
+PR body always includes: Reasoning, Cited library entries, Wearable data
+summary (the `.cursorrules` requires this).

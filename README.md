@@ -1,143 +1,223 @@
 # RehabAsCode
 
-Rehab protocols as code, updated weekly by Cursor cloud agents, delivered by a
-live video coach you can talk to.
+Rehab protocols as code. A Cursor cloud agent reads the patient's wearables
+and current protocol, opens a PR with reasoning and library citations, and a
+clinician approves it from the chat. Coach Maya (a GPT-4o chat persona, with
+Tavus video as an optional surface) walks the patient through the result.
 
-Built at Slop Con NYC 2026-05-02. Forked from
-[wellness-coach](https://github.com/AndreChuabio/wellness-coach).
+Built at Slop Con NYC 2026-05-02.
 
-## What it does
+## How it works
 
-Andre is week 3 post-ACL reconstruction. His rehab protocol lives in
-`AndreChuabio/rehab-protocols-andre/protocol.yaml`. Each week (or whenever a
-symptom report comes in mid-session), a Cursor cloud agent:
+Five surfaces, one repo:
 
-1. reads the patient's wearable data (HRV, sleep, recovery from Apple Watch)
-2. reads the patient's symptom log
-3. consults `protocol-library/` for evidence-based progressions
-4. opens a PR updating `protocol.yaml` with reasoning + citations
-5. a Tavus video avatar (Coach Maya) walks the patient through the new plan
+```
+  patient / clinician
+        │
+        ▼
+  Coach Maya (chat or Tavus video)
+        │  fires
+        ▼
+  POST /agent/invoke  ──►  Cursor cloud agent (live)
+        │                     │
+        │                     ├─ reads protocols/protocol.yaml + .cursorrules
+        │                     ├─ reads protocols/protocol-library/**
+        │                     ├─ reads protocols/data/wearables-{date}.json
+        │                     └─ writes new protocols/protocol.yaml on a branch
+        ▼                              │
+  SSE trace stream                     ▼
+  inline in chat              opens draft PR on rehab-as-code
+        │
+        │
+        ▼
+  Clinician clicks "Approve and apply" ──► POST /pr/apply
+                                                │
+                                                ├─ gh pr ready
+                                                └─ gh pr merge --squash
+                                                        │
+                                                        ▼
+                                          Current Protocol card refreshes
+                                          (next agent reads the new state)
+```
 
-The repo is the message bus. The agent has no other channel back.
+The repo IS the message bus. Every protocol update is a reviewable diff with
+cited evidence in the PR body.
 
-## Demo moments
+## The four-flow workflow chain
 
-1. **Personalized greeting.** Coach Maya appears, knows you are week 3
-   post-ACL, mentions HRV + ROM specifically.
-2. **Live agent generates next week's plan.** Click "Generate this week's
-   plan." Cursor agent panel streams tool calls, opens a PR, the diff slides
-   in.
-3. **Live re-plan from voice.** Patient says "knee felt tweaky on single-leg
-   squats." Avatar relays it. New Cursor agent task fires. Revised PR opens
-   with the regression. Avatar walks the swap.
+| Trigger button | Endpoint | What the agent does | UI artifact |
+|---|---|---|---|
+| `1 intake` | `POST /triggers/intake` | Initialize `protocol.yaml` from intake answers + matching `protocol-library/` entry | Current Protocol card populates |
+| `2 weekly plan` | `POST /triggers/weekly-cron` | Read current protocol, evaluate progression criteria against wearable trends, advance/hold per `.cursorrules` | Current Protocol card updates to next week |
+| `3 check-in` | `POST /triggers/checkin` | Append today's check-in to `log.yaml`, flag any trend that should trigger a follow-up | log entry visible in PR diff |
+| `4 symptom` | `POST /triggers/symptom` | Patch one exercise in `protocol.yaml` based on the symptom report, cite a regression entry | Current Protocol card shows the patched exercise |
+
+Demo starts empty (`patient: null, phase: pending_intake, exercises: []`).
+Each flow's PR must be approved before the next flow runs, so the chain
+state propagates through `protocol.yaml` on `main`.
+
+The four flows can also be fired through chat (Coach Maya parses natural
+language and routes via `fire_*_trigger` tools).
+
+## Stack
+
+- **Backend**: FastAPI (Python 3.11+), serves both API and frontend
+- **Cloud agent**: Node helper wrapping `@cursor/sdk` (TypeScript-only SDK)
+  spawned as a subprocess from Python
+- **Chat coach**: OpenAI `gpt-4o-mini` via the `coach_chat` module
+- **Video coach (optional)**: Tavus CVI iframe
+- **Wearables**: Apple Health via iOS Shortcut → `/health-sync`, with Open
+  Wearables as an optional read-only source
+- **Frontend**: Vanilla JS, no build step
+
+## Provider abstraction
+
+`AGENT_PROVIDER` env var selects the live path; `DEMO_LIVE_AGENT=1` arms
+it. When live fails for any reason, `_invoke_with_fallback()` swaps in
+`cached_replay` silently so the demo never dies.
+
+| Provider | What it does | When to use |
+|---|---|---|
+| `cursor_sdk` | Spawns `tsx orchestrator/src/orchestrator.ts`, calls `@cursor/sdk`, opens real PR | Demo + production path |
+| `cached_replay` | Replays a JSON trace from `backend/cached_runs/` with paced timing | Auto-fallback, deterministic stage demo |
+| `cursor_github` | Posts an `@cursor` GitHub mention via gh CLI | Backup, no SDK access required |
+| `mock` | Scripted fake, no network | Dev / unit tests |
+
+Verify which path actually ran by inspecting the response's `provider`
+field, the PR branch name, or the Cloud Agent card badge in the UI:
+
+| Signal | Live (cursor_sdk) | Fallback (cached_replay) |
+|---|---|---|
+| `provider` | `cursor_sdk` | `cached_replay` |
+| Branch | `cursor/<flow>-<random4>` | pinned (e.g. `cursor/week-4-progression-ad45`) |
+| PR | new (#N+1) | pinned (e.g. `pull/1`) |
+
+## Demo controls
+
+- **"Approve and apply"** button on each PR result bubble — runs `gh pr
+  ready` then `gh pr merge --squash --delete-branch` so the next flow's
+  agent reads the updated state
+- **"Reset demo"** button at the bottom of the left sidebar — calls
+  `POST /demo/reset` which atomically rewrites `protocols/protocol.yaml`
+  back to the `pending_intake` empty state via the GitHub contents API
+- **Provider badge** on the Cloud Agent card — `cursor_sdk` (live) or
+  `cached_replay` (fallback)
 
 ## Layout
 
 ```
 rehab-as-code/
-  backend/                     FastAPI server
-    agents/                    modular CodingAgent abstraction
-      base.py                  ABC + dataclasses
-      cursor_github.py         primary: @cursor mention via gh CLI
-      cursor_api.py            fallback: direct Cursor API (stub)
-      cached_replay.py         demo: replay captured trace JSON
-      mock.py                  dev: scripted fake
-      __init__.py              factory keyed on AGENT_PROVIDER env var
-    cached_runs/               pre-captured demo traces
+  backend/
+    main.py                        FastAPI app
+    agents/
+      __init__.py                  factory keyed on AGENT_PROVIDER
+      base.py                      ABC + dataclasses (CodingAgent, TraceEvent)
+      cursor_sdk.py                spawns orchestrator/ subprocess
+      cursor_github.py             @cursor mention via gh CLI
+      cached_replay.py             replays JSON traces
+      mock.py                      scripted fake
+    cached_runs/
+      intake.json                  pinned fallback trace per flow
       weekly_plan.json
+      checkin.json
       symptom_adjustment.json
-    main.py                    /protocol /agent/invoke /agent/stream/{id}
-    context_builder.py         Tavus persona context (Coach Maya)
-    protocol_loader.py         fetch + write to rehab-protocols-andre
-    health_mock.py             Apple Watch ingest (reused from wellness-coach)
-    calendar_fetch.py          Google Calendar (reused)
-    tavus_client.py            Tavus CVI client (reused)
-    scripts/
-      smoke_test_agents.py     exercise the modular agent layer
-  frontend/                    vanilla JS + HTML + CSS
-    index.html                 dashboard
-    app.js                     SSE consumer for /agent/stream
-    style.css                  dark theme
-  protocol-repo/               TARGET REPO content (push to GitHub separately)
-    protocol.yaml
-    protocol-library/
-    .cursorrules
-    schema.json
-    .github/ISSUE_TEMPLATE/rehab-update.md
-    README.md
+    protocol_loader.py             fetches protocol.yaml via GitHub API
+    coach_chat.py                  OpenAI chat with fire_*_trigger tools
+    health_mock.py                 wearable data + Apple Health ingest
+    open_wearables_client.py       optional read-only Open Wearables source
+    user_store.py                  per-user token + health storage
+    shortcut_template.py           iOS Shortcut binary plist generator
+    calendar_fetch.py              Google Calendar
+    context_builder.py             Tavus persona context
+    tavus_client.py                Tavus CVI session client
+  orchestrator/
+    src/
+      orchestrator.ts              Node entry point (@cursor/sdk wrapper)
+      config.ts                    YAML config loader
+    configs/
+      care-plan.yaml               parent prompt + sub-agent roster
+    package.json                   @cursor/sdk + tsx
+  protocols/
+    protocol.yaml                  patient's current program (starts empty)
+    protocol-library/              evidence-based progressions (read-only)
+    .cursorrules                   clinical guardrails for the agent
+    schema.json                    protocol.yaml schema
+    .demo-snapshots/               snapshots for demo reset
+    log.yaml                       check-in log (agent appends)
+  frontend/
+    index.html                     dashboard
+    app.js                         SSE consumer + tool calls + Approve/Reset
+    style.css                      dark theme
+  Procfile                         Railway deploy
+  requirements.txt
+  .env.example                     all required env vars
 ```
-
-## Modular agent layer
-
-`AGENT_PROVIDER` env var selects the implementation:
-
-| Provider         | What it does                                              |
-|------------------|-----------------------------------------------------------|
-| `cursor_github`  | primary: `@cursor` GitHub mention via gh CLI              |
-| `cursor_api`     | fallback: direct Cursor API (stub until access confirmed) |
-| `cached_replay`  | demo: replay pre-captured trace from `cached_runs/`       |
-| `mock`           | dev: scripted fake (no external calls)                    |
-
-Swapping providers is a config change, not a code change. The rest of the
-backend talks only to the abstract `CodingAgent` interface in `agents/base.py`.
 
 ## Run locally
 
 ```bash
-cd backend
-pip install -r ../requirements.txt
-cp ../.env.example .env  # fill in TAVUS / ANTHROPIC keys
-# Backend targets Python 3.11+ (install e.g. Python 3.11 and use `python3.11` if `python3` is older).
-AGENT_PROVIDER=cached_replay python3.11 -m uvicorn main:app --reload
+# 1. Install deps
+pip install -r requirements.txt
+cd orchestrator && npm install && cd ..
+
+# 2. Configure env
+cp .env.example .env
+# Required for live cursor_sdk path:
+#   CURSOR_API_KEY=crsr_...
+#   AGENT_PROVIDER=cursor_sdk
+#   DEMO_LIVE_AGENT=1
+# Required for chat:
+#   OPENAI_API_KEY=sk-...
+# Required for context:
+#   ANTHROPIC_API_KEY=sk-ant-...
+
+# 3. Boot
+python -m uvicorn main:app --reload --app-dir backend --port 8000
+# UI: http://127.0.0.1:8000
+# Swagger: http://127.0.0.1:8000/docs
 ```
 
-Open `frontend/index.html` (or `cd frontend && python3 -m http.server 3000`).
+## Endpoints
 
-Smoke test the modular agent layer:
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/protocol` | Current `protocols/protocol.yaml` from main, fetched via GitHub API (no CDN cache) |
+| GET | `/health-data` | Today's wearable metrics |
+| GET | `/calendar` | Today's calendar events |
+| POST | `/agent/invoke` | Fire an agent run; returns `invocation_id`, `pr_url`, `branch`, `provider` |
+| GET | `/agent/stream/{id}` | SSE stream of TraceEvents |
+| POST | `/triggers/{intake,weekly-cron,checkin,symptom}` | Funnel into `_invoke_with_fallback` |
+| POST | `/pr/apply` | Mark draft ready then `gh pr merge --squash` (the Approve gesture) |
+| POST | `/demo/reset` | Rewrite `protocol.yaml` to `pending_intake` via GitHub contents API |
+| POST | `/chat` | OpenAI chat; tools include `fire_intake_trigger` etc. |
+| POST | `/start-session` | Create Tavus CVI session with Coach Maya persona |
+| POST | `/health-sync` | Ingest Apple Watch metrics from iOS Shortcut |
+| POST | `/connect/apple-health` | Generate per-user token + onboard URL (QR flow) |
+| GET | `/onboard/{token}` | Mobile HTML onboarding page |
+| GET | `/shortcut/{token}` | Serve `.shortcut` file for iOS import |
 
+## Open Wearables (optional read-only source)
+
+`backend/open_wearables_client.py` integrates [Open
+Wearables](https://github.com/the-momentum/open-wearables) as a normalized
+source for cloud-OAuth wearable providers, alongside the Apple Shortcut
+cache and mock fallbacks.
+
+Set in `.env`:
 ```bash
-cd backend && python3 -m scripts.smoke_test_agents
-```
-
-## Open Wearables data source (optional)
-
-`backend/health_mock.py` supports [Open Wearables](https://github.com/the-momentum/open-wearables) as a **read-only** source for normalized wearable data (cloud OAuth providers plus Apple Health-style sync via their stack), while preserving the Apple Shortcut cache and mock fallbacks.
-
-### What you need
-
-1. **Python 3.11+** for this backend (type hints and tooling expect 3.11+).
-2. **A running Open Wearables instance** (self-hosted per [their quickstart](https://openwearables.io/docs/quickstart)). Connect your devices there so summaries exist for your user.
-3. **An Open Wearables user UUID** — create a user in their developer portal or API; this integration does not create users.
-4. **API key** — from the Open Wearables developer portal; server calls use header `X-Open-Wearables-API-Key` (see their [backend integration guide](https://openwearables.io/docs/dev-guides/integration-guide)).
-5. **Correct base URL** — `OPEN_WEARABLES_API_URL` must point at **Open Wearables’** API, not RehabAsCode. Both default to port `8000`; run one stack on another port (e.g. `uvicorn main:app --port 8001` for this app) or host OW on a different URL.
-
-### Env vars (in `.env`)
-
-```bash
-OPEN_WEARABLES_API_URL=http://localhost:8000
+OPEN_WEARABLES_API_URL=http://localhost:8000   # OW server, not this app
 OPEN_WEARABLES_API_KEY=sk-your-open-wearables-key
 OPEN_WEARABLES_USER_ID=your-open-wearables-user-uuid
-HEALTH_DATA_SOURCE=auto
+HEALTH_DATA_SOURCE=auto    # auto | open_wearables | apple_cache
 ```
 
-### Source modes
+Both stacks default to port 8000; run RehabAsCode on a different port if
+both are local. Verify via `GET /health-data`: `source` will be
+`open_wearables` on success.
 
-- `auto` (default): try Open Wearables when all three `OPEN_WEARABLES_*` vars are set; else Apple cache/mock
-- `open_wearables`: always try Open Wearables first; fallback to cache/mock if the request fails
-- `apple_cache`: never call Open Wearables; cache/mock only
+## Sub-docs
 
-Check `GET /health-data`: on success, `source` is `open_wearables`.
-
-## Publish the protocol target repo
-
-The `protocol-repo/` directory is the seed for `AndreChuabio/rehab-protocols-andre`.
-Push it once Cursor's GitHub app has the right permissions:
-
-```bash
-cd protocol-repo
-git init && git add . && git commit -m "seed rehab-protocols-andre"
-gh repo create AndreChuabio/rehab-protocols-andre --public --push --source=.
-```
-
-Then install the Cursor GitHub App on the new repo so `@cursor` mentions
-trigger cloud agent runs.
+- `protocols/README.md` — what the agent reads and writes, how `.cursorrules` constrains it
+- `orchestrator/README.md` — `@cursor/sdk` wrapper contract (stdin / stdout / exit codes)
+- `AGENTS.md` — instructions for AI coding agents pair-programming on the repo
+- `PLAN.md` — historical planning doc (cursor cloud agent path C, sub-agent roster, scope guardrails)
