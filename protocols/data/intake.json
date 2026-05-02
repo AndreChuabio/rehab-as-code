@@ -1,0 +1,9 @@
+{
+  "patient": "Andre",
+  "age_years": 26,
+  "injury": "ACL reconstruction",
+  "weeks_since_surgery": 3,
+  "pain_level_0_to_10": 3,
+  "symptoms": "mild pain at 110° flexion",
+  "recorded_at": "2026-05-02T20:21:06.711489+00:00"
+}
