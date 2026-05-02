@@ -597,7 +597,7 @@ def apply_pr(req: ApplyPrRequest):
 
     try:
         result = subprocess.run(
-            ["gh", "pr", "merge", str(pr_num), "--squash", "--delete-branch",
+            ["gh", "pr", "merge", str(pr_num), "--merge", "--delete-branch",
              "--repo", repo],
             capture_output=True, text=True, timeout=30,
         )
@@ -615,9 +615,12 @@ def apply_pr(req: ApplyPrRequest):
             phrase in stderr_lower
             for phrase in ("already been merged", "pull request is closed", "not open", "no commits between")
         )
-        if already_done:
-            logger.info("PR #%s already merged/closed — treating as applied", pr_num)
-            return {"applied": True, "pr_number": pr_num, "note": "already merged"}
+        # GitHub Projects (classic) deprecation is a non-fatal GraphQL warning
+        # that gh surfaces as a non-zero exit even when the merge succeeded.
+        projects_noise = "projects (classic) is being deprecated" in stderr_lower
+        if already_done or projects_noise:
+            logger.info("PR #%s treated as applied (already_done=%s projects_noise=%s)", pr_num, already_done, projects_noise)
+            return {"applied": True, "pr_number": pr_num, "note": "applied"}
         # Don't surface raw stderr — could leak token/auth info
         logger.warning("gh pr merge %s failed: %s", pr_num, result.stderr[:200])
         raise HTTPException(
