@@ -144,15 +144,26 @@ async function loadProtocol() {
 }
 
 function renderProtocol({ protocol }) {
-  const meta = `${protocol.patient || "patient"} - ${protocol.phase || "rehab"} - week ${protocol.week ?? "?"}`;
-  document.getElementById("protocolMeta").textContent = meta;
-
   const list = document.getElementById("protocolExercises");
+  const meta = document.getElementById("protocolMeta");
   const exercises = protocol.exercises || [];
-  if (!exercises.length) {
-    list.innerHTML = "<li class='loading-text'>(empty protocol)</li>";
+  const isPendingIntake =
+    !exercises.length ||
+    protocol.phase === "pending_intake" ||
+    !protocol.patient;
+
+  if (isPendingIntake) {
+    meta.textContent = "no patient yet";
+    list.innerHTML = `
+      <li class="protocol-empty">
+        <div class="empty-headline">Awaiting intake</div>
+        <div class="empty-sub">Click <strong>1 intake</strong> below to onboard the patient. The cloud agent will generate the initial protocol.</div>
+      </li>
+    `;
     return;
   }
+
+  meta.textContent = `${protocol.patient} - ${protocol.phase || "rehab"} - week ${protocol.week ?? "?"}`;
   list.innerHTML = exercises
     .map((ex) => {
       const parts = [];
@@ -360,20 +371,55 @@ function activateTeamNode(role) {
   if (node) node.classList.add("active");
 }
 
-// PR result also lives inline in chat. Click-through to GitHub for the diff.
+// PR result also lives inline in chat. The clinician approves each PR
+// explicitly via the Approve button — that's the audit story for judges:
+// agent suggests, human applies. Click-through to GitHub for the diff.
 function renderPullRequest(prUrl, branch) {
   const log = document.getElementById("chatLog");
   if (!log) return;
   const bubble = document.createElement("div");
   bubble.className = "chat-bubble pr-result";
+  const safeUrl = escapeHtml(prUrl);
   bubble.innerHTML = `
-    <div class="pr-result-header">pull request opened</div>
+    <div class="pr-result-header">pull request opened — awaiting approval</div>
     ${branch ? `<div class="pr-result-branch">branch: ${escapeHtml(branch)}</div>` : ""}
-    <a class="pr-result-cta" href="${escapeHtml(prUrl)}" target="_blank" rel="noopener">View pull request on GitHub</a>
-    <a class="pr-result-link" href="${escapeHtml(prUrl)}" target="_blank" rel="noopener">${escapeHtml(prUrl)}</a>
+    <div class="pr-result-actions">
+      <button class="pr-approve-btn" data-pr-url="${safeUrl}">Approve and apply</button>
+      <a class="pr-result-cta" href="${safeUrl}" target="_blank" rel="noopener">View on GitHub</a>
+    </div>
+    <a class="pr-result-link" href="${safeUrl}" target="_blank" rel="noopener">${safeUrl}</a>
   `;
+  bubble.querySelector(".pr-approve-btn").addEventListener("click", (e) => {
+    applyPullRequest(prUrl, e.currentTarget);
+  });
   log.appendChild(bubble);
   scrollChatLog?.();
+}
+
+async function applyPullRequest(prUrl, btn) {
+  btn.disabled = true;
+  btn.textContent = "Applying...";
+  try {
+    const res = await fetch(`${API_BASE}/pr/apply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pr_url: prUrl }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `apply failed: ${res.status}`);
+    }
+    const { pr_number } = await res.json();
+    btn.textContent = `Applied to main (PR #${pr_number})`;
+    btn.classList.add("applied");
+    // Refresh Current Protocol card so the new state appears in the sidebar
+    loadProtocol();
+  } catch (e) {
+    console.error("apply failed", e);
+    btn.disabled = false;
+    btn.textContent = "Approve and apply";
+    showToast?.(`Apply failed: ${e.message}`, "error");
+  }
 }
 
 function reportSymptom() {

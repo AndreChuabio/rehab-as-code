@@ -1,41 +1,17 @@
-# Current rehab protocol for Andre.
-# This file IS the patient's program. Cursor cloud agents update it weekly
-# by opening a PR per the conventions in .cursorrules.
+# Awaiting patient intake.
+# Click "1 intake" in the app to begin onboarding. The cursor cloud agent
+# will generate the initial protocol from intake answers by reading the
+# matching protocol-library/ entry, and open a PR for clinician approval.
 
-patient: Andre
-phase: acute/subacute lateral ankle sprain (~1 wk); lower-limb library exercises adapted (no ankle-specific library entry)
-week: 1
-generated_by: "care-plan-coordinator; researcher; evaluator; planner"
+patient: null
+phase: pending_intake
+week: 0
+generated_by: ""
 last_updated: "2026-05-02"
 
 session_targets:
-  frequency_per_week: 3
-  duration_min: 15
-  max_pain_during_session: 3   # 0-10 ceiling; high rest pain + hold + swelling — conservative cap
+  frequency_per_week: 0
+  duration_min: 0
+  max_pain_during_session: 3
 
-exercises:
-  - name: stationary_bike
-    duration_min: 6
-    intensity: "RPE 2–3 of 10 (zero resistance if needed)"
-    progression_criteria: "pain and toe/foot swelling stable or improved next day; may add 2 min or RPE 1 step when HRV improves and pain ≤4/10"
-    regression_criteria: "pain >3/10 during session, lateral ankle/throbbing worse during or within 24h, or increased toe/foot swelling"
-    references:
-      - protocol-library/post-acl-week-3.yaml
-
-  - name: heel_raises
-    sets: 2
-    reps: 10
-    load: bodyweight
-    progression_criteria: "smooth, mild calf work without limping off; no flare of swelling; advance reps or sets only after HRV stabilizes/improving and session pain stays ≤3/10"
-    regression_criteria: "weight-bearing pain spike, instability, or swelling increase within 24h"
-    references:
-      - protocol-library/post-acl-week-4.yaml
-
-  - name: single_leg_balance
-    sets: 2
-    reps: 15   # seconds per rep; unsteady leg only if cleared for partial WB — else use bilateral stance / hand support per tolerance
-    load: bodyweight
-    progression_criteria: "30s total per set with fingertip support acceptable; stop progression until HRV trend improves off hold rule"
-    regression_criteria: "giving-way, sharp lateral ankle pain, or swelling worse same day or next morning"
-    references:
-      - protocol-library/post-acl-week-4.yaml
+exercises: []

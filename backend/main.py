@@ -556,6 +556,52 @@ async def agent_stream(invocation_id: str):
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
+class ApplyPrRequest(BaseModel):
+    pr_url: str | None = None
+    pr_number: int | None = None
+
+
+@app.post("/pr/apply")
+def apply_pr(req: ApplyPrRequest):
+    """Squash-merge a cursor agent PR onto main so the next flow's agent reads
+    the updated protocol. Surfaced in UI as the "Approve and apply" button on
+    the PR result bubble — the clinician explicitly approves each PR.
+    """
+    import re
+    import subprocess
+
+    pr_num = req.pr_number
+    if pr_num is None and req.pr_url:
+        m = re.search(r"/pull/(\d+)", req.pr_url)
+        if m:
+            pr_num = int(m.group(1))
+    if pr_num is None:
+        raise HTTPException(status_code=400, detail="pr_number or pr_url required")
+
+    repo = os.getenv("PROTOCOL_REPO", "AndreChuabio/rehab-as-code")
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "merge", str(pr_num), "--squash", "--delete-branch",
+             "--repo", repo],
+            capture_output=True, text=True, timeout=30,
+        )
+    except FileNotFoundError:
+        raise HTTPException(status_code=500, detail="gh CLI not installed")
+    except subprocess.TimeoutExpired:
+        raise HTTPException(status_code=504, detail="merge timed out")
+
+    if result.returncode != 0:
+        # Don't surface raw stderr — could leak token/auth info
+        logger.warning("gh pr merge %s failed: %s", pr_num, result.stderr[:200])
+        raise HTTPException(
+            status_code=502,
+            detail=f"merge failed: {result.stderr.splitlines()[-1] if result.stderr else 'unknown'}",
+        )
+
+    logger.info("auto-applied PR #%s to main", pr_num)
+    return {"applied": True, "pr_number": pr_num}
+
+
 def _build_agent_prompt(
     flow: str,
     health: dict,
