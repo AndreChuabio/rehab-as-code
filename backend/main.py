@@ -385,6 +385,35 @@ def protocol():
     return {"repo": PROTOCOL_REPO, "protocol": fetch_protocol()}
 
 
+@app.get("/protocol/exercises")
+def protocol_exercises():
+    """Return protocol exercises enriched with KB video data for the Guided Exercise view."""
+    import exercise_kb
+    p = fetch_protocol()
+    enriched = []
+    for ex in p.get("exercises", []):
+        ex_id = ex.get("id") or ex.get("name", "")
+        kb = exercise_kb.find_by_id(ex_id) or exercise_kb.find_by_id(ex_id.replace(" ", "_").lower())
+        card = exercise_kb.to_card(kb) if kb else {}
+        enriched.append({
+            "id": ex_id,
+            "name": ex.get("name") or ex_id,
+            "spec": ex.get("sets_reps") or ex.get("spec") or "",
+            "youtube_id": card.get("youtube_id", ""),
+            "youtube_embed_url": card.get("youtube_embed_url", ""),
+            "youtube_watch_url": card.get("youtube_watch_url", ""),
+            "thumbnail_url": card.get("thumbnail_url", ""),
+            "cues": card.get("cues", []),
+            "default_dose": card.get("default_dose", ex.get("sets_reps", "")),
+        })
+    return {
+        "patient": p.get("patient"),
+        "phase": p.get("phase"),
+        "week": p.get("week"),
+        "exercises": enriched,
+    }
+
+
 class AgentInvokeRequest(BaseModel):
     flow: str = "weekly_plan"               # weekly_plan | symptom_adjustment | intake | checkin
     symptom_text: str = ""                  # used for symptom_adjustment

@@ -27,7 +27,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
 function applyStepLocks() {
   const locked = !intakeComplete;
-  ["generatePlanBtn", "reportSymptomBtn", "triggerCheckinBtn"].forEach((id) => {
+  ["generatePlanBtn", "triggerCheckinBtn", "guidedExerciseBtn"].forEach((id) => {
     const btn = document.getElementById(id);
     if (!btn) return;
     btn.disabled = locked;
@@ -631,8 +631,10 @@ function handleFlowAnswer(text) {
     const checkin_text =
       `Session rating ${a.rating}/10. Completed: ${a.completed}. ` +
       `Strong: ${a.strong}. Difficult: ${a.difficult}`;
-    appendChatBubble("coach", "Check-in logged. Updating your record...");
+    appendChatBubble("coach", "Check-in logged! Starting your video session with Coach Maya...");
     invokeAgent("checkin", { checkin_text });
+    // Auto-switch to video call after check-in
+    setTimeout(() => switchStage("video"), 1800);
   }
 
   return true;
@@ -651,12 +653,56 @@ function triggerCheckin() {
 }
 
 function setAgentButtonsDisabled(disabled) {
-  ["generatePlanBtn", "reportSymptomBtn", "triggerIntakeBtn", "triggerCheckinBtn"].forEach(
-    (id) => {
-      const btn = document.getElementById(id);
-      if (btn) btn.disabled = disabled;
-    },
-  );
+  ["generatePlanBtn", "triggerIntakeBtn", "triggerCheckinBtn", "guidedExerciseBtn"].forEach((id) => {
+    const btn = document.getElementById(id);
+    if (btn) btn.disabled = disabled;
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Step 4: Guided Exercise — load all protocol exercises as video cards
+// ---------------------------------------------------------------------------
+
+async function loadGuidedExercises() {
+  switchStage("chat");
+  clearChatLog();
+  const log = document.getElementById("chatLog");
+
+  const header = document.createElement("div");
+  header.className = "chat-bubble coach";
+  header.innerHTML = "<strong>Your Guided Exercise Session</strong><br>Here's your full plan for this week. Watch each video, then chat with me below.";
+  log.appendChild(header);
+  scrollChatLog();
+
+  try {
+    const res = await fetch(`${API_BASE}/protocol/exercises`);
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const data = await res.json();
+    const exercises = data.exercises || [];
+
+    if (!exercises.length) {
+      const empty = document.createElement("div");
+      empty.className = "chat-bubble coach";
+      empty.textContent = "No exercises found — generate your weekly plan first (step 2).";
+      log.appendChild(empty);
+      scrollChatLog();
+      return;
+    }
+
+    exercises.forEach((ex) => renderExerciseCard(ex));
+
+    const footer = document.createElement("div");
+    footer.className = "chat-bubble coach";
+    footer.textContent = `${exercises.length} exercises loaded. Ask me about any of them or tell me how the session went.`;
+    log.appendChild(footer);
+    scrollChatLog();
+  } catch (e) {
+    const err = document.createElement("div");
+    err.className = "chat-bubble error";
+    err.textContent = `Could not load exercises: ${e.message}`;
+    log.appendChild(err);
+    scrollChatLog();
+  }
 }
 
 // ---------------------------------------------------------------------------
