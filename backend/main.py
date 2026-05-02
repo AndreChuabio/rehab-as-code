@@ -49,6 +49,7 @@ from protocol_loader import fetch_protocol, write_context_files, PROTOCOL_REPO
 from user_store import create_token, token_exists, load_user, save_health
 from shortcut_template import generate_shortcut
 import coach_chat
+import exercise_kb
 import qrcode
 import qrcode.image.svg
 
@@ -378,6 +379,41 @@ def protocol():
     return {"repo": PROTOCOL_REPO, "protocol": fetch_protocol()}
 
 
+@app.get("/protocol/exercises")
+def protocol_exercises():
+    """Protocol exercises enriched with KB video data for the session view."""
+    p = fetch_protocol()
+    enriched = []
+    for ex in p.get("exercises", []):
+        eid = ex.get("name", "")
+        kb = exercise_kb.find_by_id(eid)
+        card = exercise_kb.to_card(kb) if kb else {}
+        spec_parts = []
+        if ex.get("sets") and ex.get("reps"):
+            spec_parts.append(f"{ex['sets']}×{ex['reps']}")
+        if ex.get("duration_min"):
+            spec_parts.append(f"{ex['duration_min']} min")
+        if ex.get("ROM_target_deg") is not None:
+            spec_parts.append(f"ROM {ex['ROM_target_deg']}°")
+        if ex.get("intensity"):
+            spec_parts.append(ex["intensity"])
+        enriched.append({
+            "id": eid,
+            "name": card.get("name") or eid.replace("_", " ").title(),
+            "spec": " · ".join(spec_parts) or "see protocol",
+            "youtube_id": card.get("youtube_id"),
+            "thumbnail_url": card.get("thumbnail_url"),
+            "youtube_watch_url": card.get("youtube_watch_url"),
+            "cues": card.get("cues", [])[:3],
+        })
+    return {
+        "patient": p.get("patient", "Patient"),
+        "phase": p.get("phase", "rehab"),
+        "week": p.get("week"),
+        "exercises": enriched,
+    }
+
+
 class AgentInvokeRequest(BaseModel):
     flow: str = "weekly_plan"               # weekly_plan | symptom_adjustment | intake | checkin
     symptom_text: str = ""                  # used for symptom_adjustment
@@ -641,6 +677,32 @@ async def _chat_trigger_executor(flow: str, payload: dict) -> dict:
         "provider": agent.name,
         "flow": flow,
     }
+
+
+class MergePRRequest(BaseModel):
+    pr_url: str
+
+
+@app.post("/pr/merge")
+async def merge_pr(body: MergePRRequest):
+    """Merge an open PR via GitHub CLI. Used by the approve button in the weekly plan UI."""
+    import subprocess, re
+    pr_url = body.pr_url.strip()
+    # Validate it's a GitHub PR URL before shelling out
+    if not re.match(r"https://github\.com/[^/]+/[^/]+/pull/\d+$", pr_url):
+        raise HTTPException(status_code=400, detail="Invalid GitHub PR URL")
+    try:
+        result = subprocess.run(
+            ["gh", "pr", "merge", pr_url, "--merge", "--auto", "--delete-branch"],
+            capture_output=True, text=True, timeout=30
+        )
+        if result.returncode != 0:
+            return {"ok": False, "error": result.stderr.strip() or "gh CLI error"}
+        return {"ok": True, "message": "PR merged successfully"}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "error": "Merge timed out"}
+    except FileNotFoundError:
+        return {"ok": False, "error": "gh CLI not found — merge manually on GitHub"}
 
 
 @app.post("/chat")
