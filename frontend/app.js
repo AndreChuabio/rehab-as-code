@@ -797,13 +797,17 @@ async function loadExerciseCards() {
   const log = document.getElementById("chatLog");
   const header = document.createElement("div");
   header.className = "chat-bubble coach";
-  header.innerHTML = "<strong>Guided Exercise Session</strong><br>Your approved exercises are below — click Add to today to load the video.";
+  header.innerHTML = "<strong>Guided Exercise Session</strong><br>Your approved exercises — videos loaded and ready.";
   log.appendChild(header);
   scrollChatLog();
 
-  if (approvedPlanExercises.length) {
-    approvedPlanExercises.forEach((ex) => renderExerciseCard(ex));
+  const renderAll = (exercises) => {
+    exercises.forEach((ex) => renderExerciseCardWithVideo(ex));
     scrollChatLog();
+  };
+
+  if (approvedPlanExercises.length) {
+    renderAll(approvedPlanExercises);
     return;
   }
 
@@ -812,11 +816,58 @@ async function loadExerciseCards() {
     const res = await fetch(`${API_BASE}/protocol/exercises`);
     if (!res.ok) throw new Error(`status ${res.status}`);
     const data = await res.json();
-    (data.exercises || []).forEach((ex) => renderExerciseCard(ex));
-    scrollChatLog();
+    renderAll(data.exercises || []);
   } catch (e) {
     appendChatBubble("error", `Could not load exercises: ${e.message}`);
   }
+}
+
+function renderExerciseCardWithVideo(card) {
+  if (!card) return;
+  const log = document.getElementById("chatLog");
+  const wrap = document.createElement("div");
+  wrap.className = "exercise-card";
+
+  const cuesHtml = (card.cues || []).map((c) => `<li>${escapeHtml(c)}</li>`).join("");
+  const dose = card.default_dose || card.spec
+    ? `<span class="exercise-dose">${escapeHtml(card.default_dose || card.spec || "")}</span>` : "";
+
+  const genUrl   = card.generated_video_url || "";
+  const ytId     = card.youtube_id || "";
+  const watchUrl = card.youtube_watch_url || "";
+  const thumb    = card.thumbnail_url || (ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : "");
+  const name     = card.name || card.id || "";
+
+  let videoHtml = "";
+  let badge = "";
+  if (genUrl) {
+    videoHtml = `<div class="exercise-video-wrap">
+      <video src="${escapeHtml(genUrl)}" controls autoplay muted playsinline loop preload="auto"></video>
+    </div>`;
+    badge = `<span class="video-source sora">sora-2 generated</span>`;
+  } else if (ytId || watchUrl) {
+    const href = escapeHtml(watchUrl || `https://www.youtube.com/watch?v=${ytId}`);
+    videoHtml = `<a class="exercise-video-wrap exercise-video-thumb" href="${href}" target="_blank" rel="noopener">
+      <img src="${escapeHtml(thumb)}" alt="${escapeHtml(name)}" />
+      <span class="play-btn">▶</span>
+    </a>`;
+    badge = `<span class="video-source youtube">curated</span>`;
+  } else {
+    videoHtml = `<div class="exercise-video-placeholder"><span class="video-placeholder-text">No video available</span></div>`;
+  }
+
+  wrap.innerHTML = `
+    ${videoHtml}
+    <div class="exercise-meta">
+      <div class="exercise-title-row">
+        <span class="exercise-title">${escapeHtml(name)}</span>
+        ${dose}${badge}
+      </div>
+      <ul class="exercise-cues">${cuesHtml}</ul>
+    </div>
+  `;
+  log.appendChild(wrap);
+  scrollChatLog();
 }
 
 // ---------------------------------------------------------------------------
