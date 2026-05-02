@@ -15,3 +15,22 @@ checkins:
         - declining HRV
         - 3 consecutive low-HRV days
         - week-4 clearance blocked until HRV stable/improving per post-acl-week-4.yaml clearance_criteria
+
+  - date: "2026-05-02"
+    recorded_at: "2026-05-02T19:24:57.843351+00:00"
+    note: "Session rating 4/10. Completed: the hip thrust thing. Strong: quads felt improved but still shaky. Difficult: putting full load on it"
+    wearable:
+      sleep_score: 71
+      hrv_ms: 42
+      recovery_score: 65
+    evaluator:
+      classification: hold
+      reason: HRV down ~19ms (61→42) meets ≥8ms decline hold per .cursorrules; recovery 65 ≥60
+      symptom_interpretation: Session 4/10; hip thrust completed; quads improved but shaky; full load difficult; no explicit pain score
+      recovery_risk: moderate — autonomic stress (declining HRV, 3 low-HRV days) plus low session rating/load intolerance
+      flags_for_followup:
+        - declining HRV (-8ms+ rule)
+        - 3 consecutive low-HRV days / accumulated stress
+        - low session rating (4/10) and full-load intolerance on hip thrust
+        - borderline recovery_score (65); <60 would reinforce hold
+        - confirm knee symptoms and ROM/load at next check-in
