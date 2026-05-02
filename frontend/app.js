@@ -738,16 +738,17 @@ function triggerGeneratePlan() {
   setActiveStepBtn("plan");
   switchStage("chat");
   clearChatLog();
-  selectedDays = new Set(DAYS); // reset to all days on each entry
-  renderFrequencyPicker();
+  selectedDays = new Set(DAYS);
+  _pendingPlan.length = 0;
+  renderPlanBuilder();
 }
 
-function renderFrequencyPicker() {
+async function renderPlanBuilder() {
   const log = document.getElementById("chatLog");
 
   const wrap = document.createElement("div");
   wrap.className = "chat-bubble freq-picker-wrap";
-  wrap.id = "freqPickerWrap";
+  wrap.id = "planBuilderWrap";
 
   const dayBtns = DAYS.map((d, i) => `
     <button class="day-btn active"
@@ -758,16 +759,51 @@ function renderFrequencyPicker() {
     </button>`).join("");
 
   wrap.innerHTML = `
-    <div class="freq-picker-label">How many days per week?</div>
+    <div class="freq-picker-label">Training days</div>
     <div class="day-btn-row">${dayBtns}</div>
     <div class="freq-summary" id="freqSummary">Every day (7 days/week)</div>
+    <div class="freq-picker-label" style="margin-top:14px">Add exercises to your plan</div>
+    <div class="plan-rows" id="planRowsInner"><div class="plan-loading">Loading exercises…</div></div>
     <div class="pr-result-actions" style="margin-top:12px">
-      <button class="pr-approve-btn" id="confirmFreqBtn" onclick="confirmFrequencyAndGenerate()">
-        Generate Plan
+      <button class="pr-approve-btn" id="confirmFreqBtn" disabled onclick="confirmFrequencyAndGenerate()">
+        Generate Plan (add exercises first)
       </button>
     </div>`;
   log.appendChild(wrap);
   scrollChatLog();
+
+  // Fetch exercises and inject rows
+  try {
+    const res = await fetch(`${API_BASE}/protocol/exercises`);
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const data = await res.json();
+    const exercises = data.exercises || [];
+    const rowsEl = document.getElementById("planRowsInner");
+    if (!rowsEl) return;
+    rowsEl.innerHTML = exercises.map(ex => `
+      <div class="plan-row">
+        <div class="plan-row-info">
+          <span class="plan-row-name">${escapeHtml(ex.name)}</span>
+          <span class="plan-row-spec">${escapeHtml(ex.spec || ex.default_dose || "")}</span>
+        </div>
+        <button class="plan-add-btn"
+                data-ex-id="${escapeHtml(ex.id || ex.name)}"
+                data-ex-name="${escapeHtml(ex.name)}"
+                data-ex-spec="${escapeHtml(ex.spec || ex.default_dose || "")}"
+                data-ex-gen-url="${escapeHtml(ex.generated_video_url || "")}"
+                data-ex-yt-id="${escapeHtml(ex.youtube_id || "")}"
+                data-ex-watch-url="${escapeHtml(ex.youtube_watch_url || "")}"
+                data-ex-thumb-url="${escapeHtml(ex.thumbnail_url || "")}"
+                data-ex-cues="${escapeHtml(JSON.stringify(ex.cues || []))}"
+                onclick="addToPlan(this)">
+          + Add
+        </button>
+      </div>`).join("");
+    scrollChatLog();
+  } catch (e) {
+    const rowsEl = document.getElementById("planRowsInner");
+    if (rowsEl) rowsEl.innerHTML = `<div style="color:var(--danger);font-size:12px">Could not load exercises: ${escapeHtml(e.message)}</div>`;
+  }
 }
 
 function toggleDay(btn, day) {
@@ -808,11 +844,17 @@ function confirmFrequencyAndGenerate() {
   const btn = document.getElementById("confirmFreqBtn");
   if (btn) { btn.disabled = true; btn.textContent = "Generating..."; }
 
-  const ordered = DAYS.filter(d => selectedDays.has(d));
-  const freqNote = `Training days: ${ordered.join(", ")} (${ordered.length}/week).`;
+  // Commit the pending exercise selections
+  approvedPlanExercises = [..._pendingPlan];
+  _pendingPlan.length = 0;
 
-  appendChatBubble("coach", `Scheduled reminder set for ${ordered.join(", ")}. Generating your weekly protocol...`);
+  const ordered = DAYS.filter(d => selectedDays.has(d));
+  const freqNote = `Training days: ${ordered.join(", ")} (${ordered.length}/week). Exercises: ${approvedPlanExercises.map(e => e.name).join(", ")}.`;
+
+  appendChatBubble("coach", `Scheduled reminder set for ${ordered.join(", ")}. Generating your protocol...`);
+  onPlanApproved();
   invokeAgent("weekly_plan", { intake_text: freqNote });
+  setTimeout(() => triggerExercise(), 2400);
 }
 
 // Exercises the user staged in step 2 (by clicking "+ Add to plan")
@@ -896,10 +938,10 @@ function addToPlan(btn) {
   btn.disabled = true;
   btn.classList.add("added");
 
-  const genBtn = document.getElementById("generatePlanFinalBtn");
+  const genBtn = document.getElementById("confirmFreqBtn");
   if (genBtn) {
     genBtn.disabled = false;
-    genBtn.textContent = `Generate Plan (${_pendingPlan.length} selected)`;
+    genBtn.textContent = `Generate Plan (${_pendingPlan.length} exercise${_pendingPlan.length > 1 ? "s" : ""} selected)`;
   }
 }
 
