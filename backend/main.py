@@ -3,7 +3,7 @@ from __future__ import annotations
 main.py - FastAPI backend for RehabAsCode
 
 Endpoints (existing):
-  GET  /health-data         today's wearable metrics
+  GET  /health-data         today's wearable metrics (optional ?token= for per-user)
   GET  /calendar            today's calendar events
   POST /start-session       build context + create Tavus CVI session
   GET  /context             pre-built context (cron use case)
@@ -13,21 +13,28 @@ Endpoints (new for RehabAsCode):
   POST /agent/invoke        kick off a Cursor cloud agent run, return invocation_id
   GET  /agent/stream/{id}   SSE: stream TraceEvents for an invocation
 
+Apple Health onboarding:
+  POST /connect/apple-health          generate user token + return onboard URL
+  GET  /connect/status/{token}        connection status for a user token
+  GET  /onboard/{token}               mobile HTML onboarding page (QR + install button)
+  GET  /shortcut/{token}              serve .shortcut file for iOS Shortcuts import
+
 Agent provider is selected via AGENT_PROVIDER env var (cursor_github,
 cursor_api, cached_replay, mock). All endpoints below talk to the abstract
 CodingAgent interface only — swapping providers is a config change.
 """
 
 import asyncio
+import io
 import json
 import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
@@ -39,7 +46,11 @@ from context_builder import build_system_prompt
 from tavus_client import create_conversation
 from agents import AgentInvocation, InvocationRequest, get_agent
 from protocol_loader import fetch_protocol, write_context_files, PROTOCOL_REPO
+from user_store import create_token, token_exists, load_user, save_health
+from shortcut_template import generate_shortcut
 import coach_chat
+import qrcode
+import qrcode.image.svg
 
 logger = logging.getLogger(__name__)
 
@@ -105,16 +116,23 @@ def debug_env():
 
 
 @app.post("/health-sync")
-def health_sync(payload: HealthSyncPayload):
+def health_sync(payload: HealthSyncPayload, token: str | None = Query(None)):
     """
     Ingest Apple Watch metrics posted by the iOS Shortcut.
-    Derives sleep_score and recovery_score, appends to rolling 7-day cache.
+    If ?token= is provided, saves to per-user store (users/{token}.json).
+    Otherwise appends to the shared rolling 7-day Apple cache.
     """
     try:
         record = ingest_shortcut_payload(payload.model_dump())
-        logger.info("Health sync received: hrv=%s resting_hr=%s sleep=%sh",
-                    record.get("hrv_ms"), record.get("resting_hr"), record.get("sleep_hours"))
+        logger.info("Health sync received: hrv=%s resting_hr=%s sleep=%sh token=%s",
+                    record.get("hrv_ms"), record.get("resting_hr"), record.get("sleep_hours"), token)
+        if token:
+            if not token_exists(token):
+                raise HTTPException(status_code=404, detail="unknown token")
+            save_health(token, record)
         return {"status": "ok", "synced_at": datetime.now(timezone.utc).isoformat(), "record": record}
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Health sync failed: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
@@ -137,9 +155,10 @@ def health_sync_status():
 
 
 @app.get("/health-data")
-def health_data():
-    """Return today's wearable health metrics."""
-    return get_health_data()
+def health_data(token: str | None = Query(None)):
+    """Return today's wearable health metrics.
+    If ?token= is provided, returns that user's Apple Watch data (if synced)."""
+    return get_health_data(user_token=token)
 
 
 @app.get("/calendar")
@@ -195,6 +214,157 @@ def get_context():
     health = get_health_data()
     events = get_calendar_events()
     return build_system_prompt(health, events)
+
+
+# -------------------------------------------------------------------------
+# Apple Health onboarding — token-based Shortcut magic link
+# -------------------------------------------------------------------------
+
+def _base_url() -> str:
+    return (os.getenv("PUBLIC_BASE_URL") or "http://localhost:8000").rstrip("/")
+
+
+def _qr_svg(url: str) -> str:
+    factory = qrcode.image.svg.SvgImage
+    img = qrcode.make(url, image_factory=factory, box_size=6, border=2)
+    buf = io.BytesIO()
+    img.save(buf)
+    return buf.getvalue().decode()
+
+
+@app.post("/connect/apple-health")
+def connect_apple_health():
+    """
+    Generate a new user token and return the onboarding URL.
+    Share the returned onboard_url with the patient via Slack, SMS, or QR code.
+    """
+    token = create_token()
+    base = _base_url()
+    onboard_url = f"{base}/onboard/{token}"
+    magic_link = f"shortcuts://import-shortcut?url={base}/shortcut/{token}&name=RehabCoach%20Sync"
+    return {
+        "token": token,
+        "onboard_url": onboard_url,
+        "magic_link": magic_link,
+        "instructions": "Share onboard_url with the patient. They open it on iPhone and tap 'Install Shortcut'.",
+    }
+
+
+@app.get("/connect/status/{token}")
+def connect_status(token: str):
+    """Check connection status for a user token."""
+    if not token_exists(token):
+        raise HTTPException(status_code=404, detail="unknown token")
+    user = load_user(token) or {}
+    health = user.get("health")
+    return {
+        "token": token,
+        "connected": health is not None,
+        "last_sync": user.get("last_sync"),
+        "source": health.get("source") if health else None,
+        "created_at": user.get("created_at"),
+    }
+
+
+@app.get("/onboard/{token}", response_class=HTMLResponse)
+def onboard_page(token: str):
+    """Mobile-friendly onboarding page. Patient opens this on iPhone and taps Install."""
+    if not token_exists(token):
+        raise HTTPException(status_code=404, detail="unknown token")
+
+    base = _base_url()
+    magic_link = f"shortcuts://import-shortcut?url={base}/shortcut/{token}&name=RehabCoach%20Sync"
+    qr_svg = _qr_svg(magic_link)
+
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connect RehabCoach</title>
+  <style>
+    * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #f2f2f7; color: #1c1c1e; min-height: 100vh;
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; padding: 24px; }}
+    .card {{ background: #fff; border-radius: 20px; padding: 32px 24px;
+             max-width: 380px; width: 100%; text-align: center;
+             box-shadow: 0 4px 24px rgba(0,0,0,.08); }}
+    h1 {{ font-size: 22px; font-weight: 700; margin-bottom: 8px; }}
+    .subtitle {{ color: #6e6e73; font-size: 14px; margin-bottom: 28px; line-height: 1.5; }}
+    .install-btn {{ display: block; background: #000; color: #fff;
+                    text-decoration: none; border-radius: 14px; padding: 16px 24px;
+                    font-size: 17px; font-weight: 600; margin-bottom: 24px;
+                    letter-spacing: -0.3px; }}
+    .install-btn:hover {{ background: #333; }}
+    .qr-wrap {{ margin: 0 auto 20px; display: inline-block; }}
+    .qr-wrap svg {{ width: 180px; height: 180px; }}
+    .token-label {{ font-size: 11px; color: #8e8e93; margin-bottom: 4px; }}
+    .token {{ font-family: 'SF Mono', Menlo, monospace; font-size: 13px;
+              background: #f2f2f7; border-radius: 8px; padding: 8px 12px;
+              word-break: break-all; }}
+    .step {{ text-align: left; background: #f2f2f7; border-radius: 12px;
+             padding: 14px 16px; margin-bottom: 8px; font-size: 14px; }}
+    .step strong {{ display: block; margin-bottom: 2px; }}
+    .step span {{ color: #6e6e73; line-height: 1.5; }}
+    h2 {{ font-size: 14px; font-weight: 600; color: #6e6e73;
+          text-transform: uppercase; letter-spacing: .5px;
+          margin: 24px 0 12px; }}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Connect Apple Watch</h1>
+    <p class="subtitle">Sync your health data to RehabCoach in one tap.</p>
+
+    <a class="install-btn" href="{magic_link}">
+      Install Shortcut
+    </a>
+
+    <p style="font-size:12px;color:#8e8e93;margin-bottom:20px;">
+      Tap the button above on your iPhone. It opens the Shortcuts app and installs the sync automation.
+    </p>
+
+    <div class="qr-wrap">{qr_svg}</div>
+    <p style="font-size:12px;color:#8e8e93;margin-bottom:24px;">
+      Scan this QR code with your iPhone camera if the link doesn't open automatically.
+    </p>
+
+    <h2>How it works</h2>
+    <div class="step">
+      <strong>1. Install</strong>
+      <span>Tap "Install Shortcut" → Shortcuts app opens → tap Add Shortcut.</span>
+    </div>
+    <div class="step">
+      <strong>2. Run once</strong>
+      <span>Open the Shortcuts app, find "RehabCoach Sync", and run it manually to verify it works.</span>
+    </div>
+    <div class="step">
+      <strong>3. Automate (optional)</strong>
+      <span>In Shortcuts → Automation → create a personal automation to run this Shortcut daily (e.g. every morning).</span>
+    </div>
+
+    <h2>Your token</h2>
+    <p class="token-label">Keep this private</p>
+    <div class="token">{token}</div>
+  </div>
+</body>
+</html>"""
+
+
+@app.get("/shortcut/{token}")
+def serve_shortcut(token: str):
+    """Serve the .shortcut file for iOS Shortcuts import."""
+    if not token_exists(token):
+        raise HTTPException(status_code=404, detail="unknown token")
+    base = _base_url()
+    plist_bytes = generate_shortcut(backend_url=base, token=token)
+    return Response(
+        content=plist_bytes,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="RehabCoach-{token[:8]}.shortcut"'},
+    )
 
 
 # -------------------------------------------------------------------------

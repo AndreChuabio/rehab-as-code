@@ -12,3 +12,4 @@ google-auth-httplib2
 mcp
 pyyaml
 openai>=1.50.0
+qrcode

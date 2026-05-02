@@ -30,14 +30,25 @@ MAX_HISTORY_DAYS = 7
 # Public API
 # ---------------------------------------------------------------------------
 
-def get_health_data() -> dict:
+def get_health_data(user_token: str | None = None) -> dict:
     """
     Returns today's health metrics + 7-day history.
-    Source is controlled by HEALTH_DATA_SOURCE:
+
+    If user_token is provided, reads that user's per-token store first
+    (data posted by their iOS Shortcut). Falls through to Open Wearables /
+    Apple cache / mock if no per-user data exists yet.
+
+    Source priority without a token is controlled by HEALTH_DATA_SOURCE:
       - open_wearables: force Open Wearables read path
       - apple_cache: only use Apple cache + mock fallback
       - auto (default): try Open Wearables when configured, then cache, then mock
     """
+    if user_token:
+        from user_store import load_user
+        user = load_user(user_token)
+        if user and user.get("health"):
+            return user["health"]
+
     source_mode = (os.getenv("HEALTH_DATA_SOURCE") or "auto").strip().lower()
 
     if source_mode == "open_wearables":

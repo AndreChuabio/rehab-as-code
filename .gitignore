@@ -60,3 +60,5 @@ Thumbs.db
 *.swp
 *.swo
 *~
+# Per-user token data (generated at runtime, never commit)
+users/
