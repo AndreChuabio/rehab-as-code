@@ -157,3 +157,38 @@ Test with Swagger: `http://localhost:8000/docs`
 - Time constraint: ship a working demo
 - Priority order: **working demo > clean code > full features**
 - The Tavus CVI integration is the money shot — prioritize getting that live
+
+---
+
+## Cursor Cloud specific instructions
+
+### Running the backend
+
+```bash
+cd backend && uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+The FastAPI server serves both the API and the frontend (mounted at `/static`, root `/` returns `frontend/index.html`). No separate frontend build or dev server is needed.
+
+### .env setup gotcha
+
+The `.env.example` ships with placeholder values like `your_anthropic_key_here`. These are **truthy** — the code checks `if os.getenv("ANTHROPIC_API_KEY")` and will attempt a real API call that fails with 401. When running without real API keys, clear the placeholder values (set them to empty strings) so the mock fallbacks activate correctly.
+
+### Agent smoke tests
+
+`python3 -m scripts.smoke_test_agents` (from `backend/`) exercises mock, cached_replay, and cursor_sdk providers. The cached_replay provider paces trace events in real-time by default (~30s+); the cursor_sdk provider hangs without `CURSOR_API_KEY` and the orchestrator installed. For quick validation, test mock and cached_replay individually or use a high speed multiplier with `CachedReplayAgent(speed=100.0)`.
+
+### PyJWT conflict
+
+The base VM image ships with a system-managed `PyJWT 2.7.0` that pip cannot uninstall. Run `pip install --ignore-installed pyjwt` before `pip install -r requirements.txt` to work around this.
+
+### Key endpoints for testing
+
+| Method | Path | Notes |
+|---|---|---|
+| `GET` | `/health-data` | Always works (mock data) |
+| `GET` | `/calendar` | Always works (mock data) |
+| `POST` | `/start-session` | Needs cleared API keys for mock fallback |
+| `GET` | `/protocol` | Returns current rehab protocol from local YAML |
+| `POST` | `/agent/invoke` | Uses `cached_replay` by default (deterministic) |
+| `GET` | `/docs` | Swagger UI |
