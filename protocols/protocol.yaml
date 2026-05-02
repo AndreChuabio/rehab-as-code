@@ -1,17 +1,72 @@
-# Awaiting patient intake.
-# Click "1 intake" in the app to begin onboarding. The cursor cloud agent
-# will generate the initial protocol from intake answers by reading the
-# matching protocol-library/ entry, and open a PR for clinician approval.
-
-patient: null
-phase: pending_intake
-week: 0
-generated_by: ""
+patient: Andre
+phase: post-ACL reconstruction
+week: 3
+generated_by: care-plan-coordinator + planner/researcher/evaluator — HOLD (HRV −19 ms vs −8 ms)
 last_updated: "2026-05-02"
 
 session_targets:
-  frequency_per_week: 0
-  duration_min: 0
+  frequency_per_week: 3
+  duration_min: 28
   max_pain_during_session: 3
 
-exercises: []
+exercises:
+  - name: quad_sets
+    sets: 3
+    reps: 15
+    load: bodyweight
+    ROM_target_deg: 90
+    progression_criteria: >-
+      Can advance toward terminal knee extension work (with band/progression named in protocol library)
+      when each rep stays a controlled ~10-second isometric hold without sharp pain flare, swelling
+      the next morning, limp worsening, or clear quad shutdown; hold at week-3 parameters while HRV
+      stay is active.
+    regression_criteria: >-
+      Bump up pain during or after reps, reactive swelling/effusion, knee feels hot/throbbing overnight,
+      or you cannot maintain the hold or heel-pressure cue comfortably — lighten volume first (fewer reps
+      or shorter hold), pause 24–48h, and revisit step count only when symptoms settle below session pain cap.
+    references:
+      - protocol-library/post-acl-week-3.yaml
+
+  - name: heel_slides
+    sets: 3
+    reps: 10
+    ROM_target_deg: 100
+    progression_criteria: >-
+      May progress toward prone hangs (per library succession) once active flexion is smooth toward ~100°
+      without forcing, session pain stays ≤3/10 during/after, and no effusion spikes; during HRV hold keep
+      week-3 amplitude and repetitions unless clinician clears advancing.
+    regression_criteria: >-
+      Stop or reduce reps/range at first noticeable effusion increase, guarding, pinching deep in bend,
+      or pain that ramps after the set — prioritize quiet knee and ice/elevate schedule; revert to shorter
+      arc ROM until settled.
+    references:
+      - protocol-library/post-acl-week-3.yaml
+
+  - name: terminal_knee_extension
+    sets: 3
+    reps: 12
+    load: yellow_band
+    ROM_target_deg: 0
+    progression_criteria: >-
+      Maintain week-3 band dose while hold is on; criteria to consider later taper/add load only when full
+      extension lock is repeatable without observable quad lag in the last ~30°, next-day stiffness does not climb,
+      and pain stays under the session cap — no jump to heavier band or extras until evaluator/clinician clears
+      physiological concerns.
+    regression_criteria: >-
+      Visible lag into extension during the press, anterior knee ache that lingers hours later, gait worsening,
+      or inability to straighten afterward — loosen band tension, shorten sets, swap to unloaded extension sets,
+      and rest enough for symptoms to normalize.
+    references:
+      - protocol-library/post-acl-week-3.yaml
+
+  - name: stationary_bike
+    duration_min: 10
+    intensity: "RPE 4 of 10"
+    progression_criteria: >-
+      Library allows adding resistance only with no bike-related knee pain — during HRV hold keep easy spin/RPE ~4,
+      prioritize smooth circles and ROM tolerance; revisit resistance only once hold lifts and symptom rules pass.
+    regression_criteria: >-
+      Pain or fullness that builds through the pedal stroke, reactive swelling afterward, or patellar/front-of-knee
+      irritation — shorten time, zero added resistance, lower cadence, or split into two short bouts; stop if sharp pain.
+    references:
+      - protocol-library/post-acl-week-3.yaml

@@ -1,42 +1,39 @@
-# Three sessions/week; order bike first (warmup). Whole-protocol hold: HRV −19ms /7d;
-# week-4 ACL baseline from library — no fabricated progression.
+# Three sessions/week (Mon/Wed/Fri): bike warmup → extension bias → quad sets → flexion/heel slides.
+# HOLD: whole plan stays week-3 library baseline (no advancement to week-4 content).
 
-week: 4
+week: 3
 patient: Andre
-generated_by: care-plan-coordinator + sub-agents
+generated_by: care-plan-coordinator + sub-agents (HRV hold; synced with patient protocol artifact)
 last_updated: "2026-05-02"
 
 hold_note: >-
-  HRV delta −19ms over 7d (≥8ms decline) → hold entire protocol per wearable rules — baseline week-4
-  template only. Intake: ACL recon ~4 weeks ago; mild pain near ~110° flexion; recovery 65; cleared
-  for structured rehab without advancing beyond library.
+  Evaluator HOLD: HRV Δ −19 ms over 7d (threshold −8 ms) — keep conservative week-3 template only until
+  autonomic/readiness improves and clinician resets rules. Recovery score 65 (≥60 cleared for structured rehab
+  volume but without progression). Intake: Andre (26), right ACL reconstruction ~1 month, pain reported 7/10,
+  ambulation with crutches; week-3 post-acl library exercises only, identical ordering each session below.
 
 session_order:
   - stationary_bike
   - terminal_knee_extension
-  - mini_squats
-  - heel_raises
-  - single_leg_balance
+  - quad_sets
+  - heel_slides
 
 sessions:
   - day: Monday
     exercises:
       - stationary_bike
       - terminal_knee_extension
-      - mini_squats
-      - heel_raises
-      - single_leg_balance
+      - quad_sets
+      - heel_slides
   - day: Wednesday
     exercises:
       - stationary_bike
       - terminal_knee_extension
-      - mini_squats
-      - heel_raises
-      - single_leg_balance
+      - quad_sets
+      - heel_slides
   - day: Friday
     exercises:
       - stationary_bike
       - terminal_knee_extension
-      - mini_squats
-      - heel_raises
-      - single_leg_balance
+      - quad_sets
+      - heel_slides
