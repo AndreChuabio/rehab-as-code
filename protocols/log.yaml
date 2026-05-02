@@ -1,0 +1,11 @@
+# Protocol check-ins (audit trail). Not validated by schema.json.
+checkins:
+  - date: "2026-05-02"
+    wearables: data/wearables-2026-05-02.json
+    symptoms: heel slides all 3 sets, no pain
+    classification: HOLD
+    evaluator: HRV -19ms vs 7d; hold entire protocol per .cursorrules
+    trend_audit: >-
+      Symptoms good; progression candidate prone_hangs (week-3 lib) withheld.
+      HRV not stable/improving for week-4 clearance — elevated recovery risk;
+      verify 3-day sleep average before −20% intensity.
