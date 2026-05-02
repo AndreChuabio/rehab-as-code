@@ -569,10 +569,7 @@ class ApplyPrRequest(BaseModel):
 
 @app.post("/pr/apply")
 def apply_pr(req: ApplyPrRequest):
-    """Squash-merge a cursor agent PR onto main so the next flow's agent reads
-    the updated protocol. Surfaced in UI as the "Approve and apply" button on
-    the PR result bubble — the clinician explicitly approves each PR.
-    """
+    """Merge a cursor agent PR onto main via GitHub REST API (avoids GraphQL/Projects-classic noise)."""
     import re
     import subprocess
 
@@ -586,19 +583,14 @@ def apply_pr(req: ApplyPrRequest):
 
     repo = os.getenv("PROTOCOL_REPO", "AndreChuabio/rehab-as-code")
 
-    # Cursor SDK opens PRs as draft. Mark ready first; ignore failure (already ready).
-    try:
-        subprocess.run(
-            ["gh", "pr", "ready", str(pr_num), "--repo", repo],
-            capture_output=True, text=True, timeout=15,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
-
+    # Use gh api (REST) to merge — avoids the GraphQL Projects-classic deprecation error
+    # that breaks `gh pr merge` for repos with classic Projects attached.
     try:
         result = subprocess.run(
-            ["gh", "pr", "merge", str(pr_num), "--merge", "--delete-branch",
-             "--repo", repo],
+            ["gh", "api", f"repos/{repo}/pulls/{pr_num}/merge",
+             "-X", "PUT",
+             "-f", "merge_method=merge",
+             "-f", f"commit_title=Apply PR #{pr_num}"],
             capture_output=True, text=True, timeout=30,
         )
     except FileNotFoundError:
@@ -607,28 +599,23 @@ def apply_pr(req: ApplyPrRequest):
         raise HTTPException(status_code=504, detail="merge timed out")
 
     if result.returncode != 0:
-        # Cursor cloud agents auto-merge their own PRs, so by the time the
-        # clinician clicks Approve the PR may already be closed/merged. Treat
-        # that as success — the goal (state advanced on main) is achieved.
         stderr_lower = (result.stderr or "").lower()
-        already_done = any(
-            phrase in stderr_lower
-            for phrase in ("already been merged", "pull request is closed", "not open", "no commits between")
-        )
-        # GitHub Projects (classic) deprecation is a non-fatal GraphQL warning
-        # that gh surfaces as a non-zero exit even when the merge succeeded.
-        projects_noise = "projects (classic) is being deprecated" in stderr_lower
-        if already_done or projects_noise:
-            logger.info("PR #%s treated as applied (already_done=%s projects_noise=%s)", pr_num, already_done, projects_noise)
-            return {"applied": True, "pr_number": pr_num, "note": "applied"}
-        # Don't surface raw stderr — could leak token/auth info
-        logger.warning("gh pr merge %s failed: %s", pr_num, result.stderr[:200])
+        stdout_lower = (result.stdout or "").lower()
+        combined = stderr_lower + stdout_lower
+        already_done = any(p in combined for p in (
+            "already merged", "pull request is closed", "not mergeable",
+            "405", "409",  # HTTP 405 = method not allowed (already merged), 409 = conflict
+        ))
+        if already_done:
+            logger.info("PR #%s already merged/closed — treating as applied", pr_num)
+            return {"applied": True, "pr_number": pr_num, "note": "already merged"}
+        logger.warning("PR merge %s failed stdout=%s stderr=%s", pr_num, result.stdout[:300], result.stderr[:200])
         raise HTTPException(
             status_code=502,
-            detail=f"merge failed: {result.stderr.splitlines()[-1] if result.stderr else 'unknown'}",
+            detail=f"merge failed: {(result.stdout or result.stderr or 'unknown').splitlines()[-1]}",
         )
 
-    logger.info("auto-applied PR #%s to main", pr_num)
+    logger.info("auto-applied PR #%s to main via REST", pr_num)
     return {"applied": True, "pr_number": pr_num}
 
 

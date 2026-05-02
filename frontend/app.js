@@ -22,12 +22,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadProtocol();
   switchStage("chat");
   applyStepLocks();
-  if (intakeComplete) {
-    document.getElementById("triggerIntakeBtn")?.classList.remove("primary");
-    document.getElementById("generatePlanBtn")?.classList.add("primary");
-  } else {
-    triggerIntake();
-  }
+  if (!intakeComplete) triggerIntake();
 });
 
 function applyStepLocks() {
