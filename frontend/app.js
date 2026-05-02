@@ -851,9 +851,27 @@ function confirmFrequencyAndGenerate() {
   _pendingPlan.length = 0;
 
   const ordered = DAYS.filter(d => selectedDays.has(d));
-  const freqNote = `Training days: ${ordered.join(", ")} (${ordered.length}/week). Exercises: ${approvedPlanExercises.map(e => e.name).join(", ")}.`;
+  const exerciseNames = approvedPlanExercises.map(e => e.name);
+  const freqNote = `Training days: ${ordered.join(", ")} (${ordered.length}/week). Exercises: ${exerciseNames.join(", ")}.`;
 
-  appendChatBubble("coach", `Scheduled reminder set for ${ordered.join(", ")}. Generating your protocol...`);
+  // Register schedule + trigger Slack reminder
+  fetch(`${API_BASE}/triggers/schedule`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ patient: "Andre", days: ordered, exercises: exerciseNames, hour: 9 }),
+  })
+    .then(r => r.json())
+    .then(data => {
+      appendChatBubble("coach",
+        data.slack_sent
+          ? `Scheduled reminder set for ${ordered.join(", ")} at 9 AM — Slack notification sent! 🔔`
+          : `Schedule saved for ${ordered.join(", ")} at 9 AM. Add SLACK_WEBHOOK_URL to .env for Slack reminders.`
+      );
+    })
+    .catch(() => {
+      appendChatBubble("coach", `Schedule saved for ${ordered.join(", ")}. Generating your protocol...`);
+    });
+
   onPlanApproved();
   invokeAgent("weekly_plan", { intake_text: freqNote });
   setTimeout(() => triggerExercise(), 2400);

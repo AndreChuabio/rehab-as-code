@@ -52,6 +52,8 @@ from shortcut_template import generate_shortcut
 import coach_chat
 import qrcode
 import qrcode.image.svg
+from slack_notifier import send_reminder
+from schedule_store import save_schedule, load_schedule
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +73,42 @@ app.add_middleware(
 
 CONTEXT_FILE = Path(__file__).parent.parent / "context.json"
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
+
+# -------------------------------------------------------------------------
+# Daily schedule runner — fires Slack reminders on the patient's chosen days
+# -------------------------------------------------------------------------
+
+def _run_scheduled_reminder():
+    """Called once per day by APScheduler. Sends Slack if today matches schedule."""
+    sched = load_schedule()
+    if not sched:
+        return
+    today_abbr = datetime.now().strftime("%a")[:2]  # "Mo", "Tu", "We" …
+    # Map Python weekday abbrevs to the UI labels (M T W Th F S Su)
+    _ABBREV_MAP = {"Mo": "M", "Tu": "T", "We": "W", "Th": "Th", "Fr": "F", "Sa": "S", "Su": "Su"}
+    today_label = _ABBREV_MAP.get(today_abbr, "")
+    if today_label not in sched.get("days", []):
+        logger.info("Schedule: no session today (%s)", today_label)
+        return
+    send_reminder(
+        patient=sched.get("patient", "Patient"),
+        exercises=sched.get("exercises", []),
+        days=sched.get("days", []),
+    )
+
+
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+
+    _scheduler = BackgroundScheduler()
+    sched_config = load_schedule()
+    _fire_hour = sched_config.get("hour", 9) if sched_config else 9
+    _scheduler.add_job(_run_scheduled_reminder, "cron", hour=_fire_hour, minute=0, id="daily_reminder")
+    _scheduler.start()
+    logger.info("APScheduler started — daily reminder at %02d:00", _fire_hour)
+except ImportError:
+    _scheduler = None
+    logger.info("APScheduler not installed — install with: pip install apscheduler")
 
 if FRONTEND_DIR.exists():
     app.mount("/static", StaticFiles(directory=str(FRONTEND_DIR)), name="static")
@@ -589,6 +627,60 @@ async def trigger_symptom(body: SymptomRequest):
         "branch": invocation.branch,
         "provider": agent.name,
     }
+
+
+class ScheduleRequest(BaseModel):
+    patient: str = "Andre"
+    days: list[str]         # ["M","T","W","Th","F","S","Su"] subset
+    exercises: list[str] = []
+    hour: int = 9           # 24h hour to fire (server local time)
+
+
+@app.post("/triggers/schedule")
+def trigger_schedule(body: ScheduleRequest):
+    """Save the patient's training-day schedule and register the daily Slack reminder.
+
+    Called from the frontend when the user confirms their frequency in step 2.
+    Immediately fires a test notification so the patient can verify their Slack works.
+    """
+    save_schedule(
+        patient=body.patient,
+        days=body.days,
+        exercises=body.exercises,
+        hour=body.hour,
+    )
+
+    # Reschedule APScheduler job to the new hour
+    if _scheduler:
+        try:
+            _scheduler.reschedule_job("daily_reminder", trigger="cron", hour=body.hour, minute=0)
+        except Exception:
+            pass  # job may not exist yet on first call
+
+    # Fire an immediate confirmation Slack message
+    ok = send_reminder(patient=body.patient, exercises=body.exercises, days=body.days)
+
+    return {
+        "scheduled": True,
+        "days": body.days,
+        "hour": body.hour,
+        "slack_sent": ok,
+        "message": f"Reminders set for {', '.join(body.days)} at {body.hour:02d}:00. {'Slack confirmation sent!' if ok else 'Add SLACK_WEBHOOK_URL to .env to enable Slack.'}",
+    }
+
+
+@app.post("/triggers/schedule/fire")
+def trigger_schedule_fire():
+    """Manually fire today's scheduled reminder — useful for demo / testing."""
+    sched = load_schedule()
+    if not sched:
+        raise HTTPException(status_code=404, detail="no schedule saved yet")
+    ok = send_reminder(
+        patient=sched.get("patient", "Patient"),
+        exercises=sched.get("exercises", []),
+        days=sched.get("days", []),
+    )
+    return {"fired": True, "slack_sent": ok}
 
 
 @app.get("/agent/stream/{invocation_id}")

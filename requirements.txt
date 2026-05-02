@@ -13,3 +13,4 @@ mcp
 pyyaml
 openai>=1.50.0
 qrcode
+apscheduler
