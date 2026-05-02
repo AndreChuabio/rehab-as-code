@@ -157,3 +157,50 @@ Test with Swagger: `http://localhost:8000/docs`
 - Time constraint: ship a working demo
 - Priority order: **working demo > clean code > full features**
 - The Tavus CVI integration is the money shot — prioritize getting that live
+
+---
+
+## Cursor Cloud specific instructions
+
+### Running the backend
+
+The only required service is the FastAPI backend. From `backend/`:
+
+```bash
+AGENT_PROVIDER=mock uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
+
+The frontend is served by FastAPI at `/` (no separate build step needed).
+
+### Key gotchas
+
+- **PyJWT conflict**: The base VM has a system-managed PyJWT 2.7.0 without a RECORD file. Run `pip install --ignore-installed pyjwt` before `pip install -r requirements.txt` or it will fail.
+- **AGENT_PROVIDER**: Set to `mock` for local dev without any API keys. The default in `.env.example` is the replay provider which reads cached traces from `backend/cached_runs/`.
+- **Smoke test hangs on `cursor_sdk`**: The full `python3 -m scripts.smoke_test_agents` tries the `cursor_sdk` provider which blocks waiting for a Node.js subprocess. For quick validation, use only `mock` provider.
+- **SSE streams**: The `/agent/stream/{id}` endpoint uses SSE (Server-Sent Events). The replay provider has deliberate `asyncio.sleep()` delays to simulate real agent timing. Set HTTP read timeouts > 30s when consuming these streams.
+- **No database, no Docker**: The app is stateless. All data is mock or fetched from external APIs at request time.
+
+### Lint
+
+```bash
+ruff check backend/ --select E,F,I --ignore E501
+```
+
+Pre-existing lint issues exist in the codebase (unused imports, etc). These are not regressions.
+
+### Testing
+
+Quick validation of the agent layer:
+
+```bash
+cd backend && python3 -c "
+import asyncio; from agents import InvocationRequest, get_agent
+async def t():
+    a = get_agent('mock')
+    i = await a.invoke(InvocationRequest(repo='x', prompt='x', context_files={}, flow='weekly_plan'))
+    print(f'OK: {i.pr_url}')
+asyncio.run(t())
+"
+```
+
+All API endpoints can be exercised via Swagger at `http://localhost:8000/docs`.
