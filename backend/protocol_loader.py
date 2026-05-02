@@ -96,23 +96,8 @@ def _format_symptom_log(text: str) -> str:
 def _stub_protocol() -> dict:
     """Local fallback when the GitHub repo isn't reachable."""
     return {
-        "patient": "Andre",
-        "phase": "post-ACL reconstruction",
-        "week": 3,
-        "exercises": [
-            {
-                "name": "quad_sets",
-                "sets": 3, "reps": 15,
-                "ROM_target_deg": 90,
-                "progression_criteria": "pain-free, no swelling",
-                "references": ["protocol-library/post-acl-week-3.yaml"],
-            },
-            {
-                "name": "heel_slides",
-                "sets": 3, "reps": 10,
-                "ROM_target_deg": 100,
-                "progression_criteria": "ROM > 100 deg",
-                "references": ["protocol-library/post-acl-week-3.yaml"],
-            },
-        ],
+        "patient": None,
+        "phase": "pending_intake",
+        "week": 0,
+        "exercises": [],
     }
