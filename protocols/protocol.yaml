@@ -1,6 +1,9 @@
 # Current rehab protocol for Andre.
 # This file IS the patient's program. Cursor cloud agents update it weekly
 # by opening a PR per the conventions in .cursorrules.
+#
+# Week-4 plan: evaluator = HOLD (−19 ms HRV / 7 d; .cursorrules). Library
+# week-4 progressions deferred (post-acl-week-4.yaml); references stay week-3.
 
 patient: Andre
 phase: post-ACL reconstruction
