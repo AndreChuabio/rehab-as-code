@@ -1,9 +1,11 @@
+from __future__ import annotations
 """
 health_mock.py - Wearable health data with 7-day trend history
 
 Data priority:
-  1. health_cache.json written by the iOS Shortcut via POST /health-sync
-  2. Mock data (realistic declining-trend week) as fallback
+  1. Open Wearables (if HEALTH_DATA_SOURCE permits and env is configured)
+  2. health_cache.json written by the iOS Shortcut via POST /health-sync
+  3. Mock data (realistic declining-trend week) as fallback
 
 Cache is considered fresh if the most recent entry is from today.
 The Shortcut posts raw Apple Watch metrics; sleep_score and recovery_score
@@ -15,6 +17,8 @@ import logging
 import os
 from datetime import date, timedelta
 from pathlib import Path
+
+from open_wearables_client import OpenWearablesClient, OpenWearablesConfig, OpenWearablesError
 
 logger = logging.getLogger(__name__)
 
@@ -29,12 +33,27 @@ MAX_HISTORY_DAYS = 7
 def get_health_data() -> dict:
     """
     Returns today's health metrics + 7-day history.
-    Prefers real Apple Watch data from cache; falls back to mock.
+    Source is controlled by HEALTH_DATA_SOURCE:
+      - open_wearables: force Open Wearables read path
+      - apple_cache: only use Apple cache + mock fallback
+      - auto (default): try Open Wearables when configured, then cache, then mock
     """
-    cache = _load_cache()
-    if cache and _is_fresh(cache):
-        return cache
-    return get_mock_health_data()
+    source_mode = (os.getenv("HEALTH_DATA_SOURCE") or "auto").strip().lower()
+
+    if source_mode == "open_wearables":
+        ow_data = _get_open_wearables_health_data()
+        if ow_data:
+            return ow_data
+        return _get_cache_or_mock()
+
+    if source_mode == "apple_cache":
+        return _get_cache_or_mock()
+
+    # auto mode
+    ow_data = _get_open_wearables_health_data()
+    if ow_data:
+        return ow_data
+    return _get_cache_or_mock()
 
 
 def ingest_shortcut_payload(payload: dict) -> dict:
@@ -66,6 +85,94 @@ def ingest_shortcut_payload(payload: dict) -> dict:
     record = _build_full_record(raw, history)
     _save_cache(record, history)
     return record
+
+
+def _get_cache_or_mock() -> dict:
+    cache = _load_cache()
+    if cache and _is_fresh(cache):
+        return cache
+    return get_mock_health_data()
+
+
+def _get_open_wearables_health_data() -> dict | None:
+    config = _build_open_wearables_config()
+    if not config:
+        return None
+
+    today = date.today()
+    start_date = today - timedelta(days=6)
+    try:
+        client = OpenWearablesClient(config)
+        daily = client.get_daily_summaries(start_date=start_date, end_date=today)
+        return _normalize_open_wearables_data(daily, today)
+    except OpenWearablesError as e:
+        logger.warning("Open Wearables read failed, falling back: %s", e)
+        return None
+    except Exception as e:
+        logger.warning("Unexpected Open Wearables error, falling back: %s", e)
+        return None
+
+
+def _build_open_wearables_config() -> OpenWearablesConfig | None:
+    base_url = (os.getenv("OPEN_WEARABLES_API_URL") or "").strip()
+    api_key = (os.getenv("OPEN_WEARABLES_API_KEY") or "").strip()
+    user_id = (os.getenv("OPEN_WEARABLES_USER_ID") or "").strip()
+
+    if not base_url or not api_key or not user_id:
+        return None
+
+    return OpenWearablesConfig(base_url=base_url, api_key=api_key, user_id=user_id)
+
+
+def _normalize_open_wearables_data(daily: dict, today: date) -> dict:
+    rows: list[dict] = []
+    raw_history: list[dict] = []
+    for offset in range(6, -1, -1):
+        day = today - timedelta(days=offset)
+        day_key = str(day)
+        row = daily.get(day_key, {})
+        raw = _build_open_wearables_raw(day_key, row, source="open_wearables")
+        record = _build_full_record(raw, raw_history + [raw])
+        rows.append(record)
+        raw_history.append(raw)
+
+    history = rows[:-1]
+    today_data = rows[-1]
+    trend = _analyze_trend(history, today_data)
+    return {**today_data, "history": history, "trend": trend}
+
+
+def _build_open_wearables_raw(day_key: str, row: dict, source: str) -> dict:
+    activity = row.get("activity") or {}
+    sleep = row.get("sleep") or {}
+    recovery = row.get("recovery") or {}
+
+    sleep_minutes = _to_number(sleep.get("duration_minutes"))
+    sleep_hours = round(sleep_minutes / 60.0, 2) if sleep_minutes > 0 else 0.0
+
+    hrv_ms = int(round(_to_number(recovery.get("avg_hrv_sdnn_ms"))))
+    resting_hr = int(round(_to_number(recovery.get("resting_heart_rate_bpm"))))
+    steps = int(round(_to_number(activity.get("steps"))))
+    total_calories = int(round(_to_number(activity.get("total_calories_kcal"))))
+
+    return {
+        "date": day_key,
+        "sleep_hours": sleep_hours,
+        "hrv_ms": hrv_ms,
+        "resting_hr": resting_hr,
+        "steps_yesterday": steps,
+        "calories_burned": total_calories,
+        "source": source,
+    }
+
+
+def _to_number(value) -> float:
+    try:
+        if value is None:
+            return 0.0
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 # ---------------------------------------------------------------------------
