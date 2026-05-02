@@ -4,7 +4,7 @@
 patient: Andre
 phase: post-ACL reconstruction
 week: 3
-generated_by: "care-plan-coordinator; researcher (post-acl-week-3); evaluator (HRV hold)"
+generated_by: "care-plan-coordinator; intake (Andre JSON); researcher (post-acl-week-3); evaluator (HRV hold)"
 last_updated: "2026-05-02"
 
 session_targets:
