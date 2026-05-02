@@ -381,8 +381,15 @@ def serve_shortcut(token: str):
 
 @app.get("/protocol")
 def protocol():
-    """Return the current rehab protocol from the rehab-protocols-andre repo."""
-    return {"repo": PROTOCOL_REPO, "protocol": fetch_protocol()}
+    """Return the current rehab protocol; falls back to demo snapshot when pending."""
+    import yaml as _yaml
+    p = fetch_protocol()
+    if not p.get("exercises") or p.get("phase") == "pending_intake":
+        snapshot = Path(__file__).parent.parent / "protocols" / ".demo-snapshots" / "protocol-week4.yaml"
+        if snapshot.exists():
+            with open(snapshot) as f:
+                p = _yaml.safe_load(f)
+    return {"repo": PROTOCOL_REPO, "protocol": p}
 
 
 @app.get("/protocol/exercises")
@@ -420,6 +427,7 @@ def protocol_exercises():
             "youtube_embed_url": card.get("youtube_embed_url", ""),
             "youtube_watch_url": card.get("youtube_watch_url", ""),
             "thumbnail_url": card.get("thumbnail_url", ""),
+            "generated_video_url": card.get("generated_video_url") or None,
             "cues": card.get("cues", []),
             "default_dose": card.get("default_dose", spec),
         })
