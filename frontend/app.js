@@ -853,7 +853,7 @@ function renderExerciseCardWithVideo(card) {
   let badge = "";
   if (genUrl) {
     videoHtml = `<div class="exercise-video-wrap">
-      <video src="${escapeHtml(genUrl)}" controls autoplay muted playsinline loop preload="auto"></video>
+      <video src="${escapeHtml(genUrl)}" controls muted playsinline preload="metadata"></video>
     </div>`;
     badge = `<span class="video-source sora">sora-2 generated</span>`;
   } else if (ytId || watchUrl) {
