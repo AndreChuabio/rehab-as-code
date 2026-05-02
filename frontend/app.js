@@ -12,14 +12,29 @@ const TRACE_GLYPH = {
   agent_failed:    "[fail]",
 };
 
+const intakeDone = localStorage.getItem("rehab_intake_complete") === "1";
+
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("dateDisplay").textContent = new Date().toLocaleDateString(
     "en-US", { weekday: "long", month: "long", day: "numeric" }
   );
   loadSidebar();
   loadProtocol();
-  switchStage("chat");  // default hero
+  switchStage("chat");
+  applyStepLocks();
+  if (!intakeDone) triggerIntake();
 });
+
+function applyStepLocks() {
+  const locked = !intakeDone;
+  ["generatePlanBtn", "reportSymptomBtn", "triggerCheckinBtn"].forEach((id) => {
+    const btn = document.getElementById(id);
+    if (!btn) return;
+    btn.disabled = locked;
+    btn.title = locked ? "Complete intake first" : btn.getAttribute("data-orig-title") || btn.title;
+    if (!btn.getAttribute("data-orig-title")) btn.setAttribute("data-orig-title", btn.title);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Stage tab toggle (chat | video)

@@ -317,15 +317,7 @@ def onboard_page(token: str):
 <body>
   <div class="card">
     <h1>Connect Apple Watch</h1>
-    <p class="subtitle">Sync your health data to RehabCoach in one tap.</p>
-
-    <a class="install-btn" href="{magic_link}">
-      Install Shortcut
-    </a>
-
-    <p style="font-size:12px;color:#8e8e93;margin-bottom:20px;">
-      Tap the button above on your iPhone. It opens the Shortcuts app and installs the sync automation.
-    </p>
+    <p class="subtitle">Two steps: copy your token, then install the Shortcut.</p>
 
     <div class="qr-wrap">{qr_svg}</div>
     <p style="font-size:12px;color:#8e8e93;margin-bottom:24px;">
@@ -346,25 +338,39 @@ def onboard_page(token: str):
       <span>In Shortcuts → Automation → create a personal automation to run this Shortcut daily (e.g. every morning).</span>
     </div>
 
-    <h2>Your token</h2>
-    <p class="token-label">Keep this private</p>
-    <div class="token">{token}</div>
+    <h2>Step 1 — Copy your token first</h2>
+    <p class="token-label">Tap to copy, then tap Install Shortcut. When Shortcuts asks for your token, paste it.</p>
+    <div class="token" onclick="navigator.clipboard.writeText('{token}').then(()=>this.style.background='#d1fae5').catch(()=>{{}})" style="cursor:pointer;font-size:15px;letter-spacing:0.5px">{token}</div>
+    <p style="font-size:12px;color:#8e8e93;margin:8px 0 0">(tap the token above to copy it)</p>
+
+    <h2 style="margin-top:20px">Step 2 — Install Shortcut</h2>
+    <a class="install-btn" href="{magic_link}" style="margin-top:8px">
+      Install Shortcut
+    </a>
+    <p style="font-size:12px;color:#8e8e93;margin-bottom:16px;">
+      Shortcuts will ask for your token — paste the one you copied above.
+    </p>
   </div>
 </body>
 </html>"""
 
 
+SIGNED_SHORTCUT = Path(__file__).parent / "static" / "rehab-coach.shortcut"
+
+
 @app.get("/shortcut/{token}")
 def serve_shortcut(token: str):
-    """Serve the .shortcut file for iOS Shortcuts import."""
+    """Serve the signed .shortcut file for iOS Shortcuts import.
+    Serves a pre-signed static file (signed on macOS via `shortcuts sign --mode anyone`).
+    The token is shown on the onboard page for the user to paste at install time."""
     if not token_exists(token):
         raise HTTPException(status_code=404, detail="unknown token")
-    base = _base_url()
-    plist_bytes = generate_shortcut(backend_url=base, token=token)
+    if not SIGNED_SHORTCUT.exists():
+        raise HTTPException(status_code=503, detail="shortcut file not available")
     return Response(
-        content=plist_bytes,
+        content=SIGNED_SHORTCUT.read_bytes(),
         media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="RehabCoach-{token[:8]}.shortcut"'},
+        headers={"Content-Disposition": 'attachment; filename="RehabCoach.shortcut"'},
     )
 
 
