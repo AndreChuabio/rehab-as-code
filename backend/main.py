@@ -1,3 +1,4 @@
+from __future__ import annotations
 """
 main.py - FastAPI backend for RehabAsCode
 
