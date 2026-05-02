@@ -1,0 +1,15 @@
+orchestrator/
+cron/
+plugin/
+knowledge/
+backend/cached_runs/__pycache__
+backend/__pycache__
+**/__pycache__
+**/*.pyc
+.env
+.env.local
+context.json
+users/
+PLAN.md
+AGENTS.md
+.cursorrules
