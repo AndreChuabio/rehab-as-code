@@ -1,19 +1,42 @@
-# Week outline — same exercise order each session; loads match protocol.yaml (week 1 init; wearable hold).
+# Three sessions/week; order bike first (warmup). Whole-protocol hold: HRV −19ms /7d;
+# week-4 ACL baseline from library — no fabricated progression.
 
-week: 1
+week: 4
 patient: Andre
+generated_by: care-plan-coordinator + sub-agents
 last_updated: "2026-05-02"
-hold_note: "HRV −19ms /7d (61→42), 3 low-HRV days — hold entire protocol (no progression). Recovery 65; sleep 71. Conservative volume for 7/10 pain + toe/foot swelling."
+
+hold_note: >-
+  HRV delta −19ms over 7d (≥8ms decline) → hold entire protocol per wearable rules — baseline week-4
+  template only. Intake: ACL recon ~4 weeks ago; mild pain near ~110° flexion; recovery 65; cleared
+  for structured rehab without advancing beyond library.
 
 session_order:
   - stationary_bike
+  - terminal_knee_extension
+  - mini_squats
   - heel_raises
   - single_leg_balance
 
 sessions:
   - day: Monday
-    exercises: [stationary_bike, heel_raises, single_leg_balance]
+    exercises:
+      - stationary_bike
+      - terminal_knee_extension
+      - mini_squats
+      - heel_raises
+      - single_leg_balance
   - day: Wednesday
-    exercises: [stationary_bike, heel_raises, single_leg_balance]
+    exercises:
+      - stationary_bike
+      - terminal_knee_extension
+      - mini_squats
+      - heel_raises
+      - single_leg_balance
   - day: Friday
-    exercises: [stationary_bike, heel_raises, single_leg_balance]
+    exercises:
+      - stationary_bike
+      - terminal_knee_extension
+      - mini_squats
+      - heel_raises
+      - single_leg_balance

@@ -1,17 +1,80 @@
-# Awaiting patient intake.
-# Click "1 intake" in the app to begin onboarding. The cursor cloud agent
-# will generate the initial protocol from intake answers by reading the
-# matching protocol-library/ entry, and open a PR for clinician approval.
+# Week 4 post-ACL recon (Andre). Baseline hold: HRV −19ms /7d (≥8ms decline) —
+# initialize from post-acl-week-4 library; no progression beyond template until HRV improves.
 
-patient: null
-phase: pending_intake
-week: 0
-generated_by: ""
+patient: Andre
+phase: post_acl_week_4_hold
+week: 4
+generated_by: care-plan-coordinator + sub-agents
 last_updated: "2026-05-02"
 
 session_targets:
-  frequency_per_week: 0
-  duration_min: 0
+  frequency_per_week: 3
+  duration_min: 45
   max_pain_during_session: 3
 
-exercises: []
+exercises:
+  - name: stationary_bike
+    duration_min: 15
+    intensity: RPE 5/10
+    progression_criteria: >-
+      Hold baseline (15 min, RPE 5/10) until 7d HRV trend improves (<8ms decline vs prior week)
+      and symptoms stable; then advance duration/RPE only per PT + library post-acl-week-4.
+    regression_criteria: >-
+      Increase in effusion, pain >3/10, or further HRV drop ≥8ms /7d — reduce time or RPE by ~20%
+      or pause cycling per PT; preserve audit and cite library hold rule.
+    references:
+      - protocol-library/post-acl-week-4.yaml
+
+  - name: terminal_knee_extension
+    sets: 3
+    reps: 15
+    load: green_band
+    ROM_target_deg: 0
+    progression_criteria: >-
+      Maintain sets/reps/band per week-4 template while on HRV hold; consider band/load progressions
+      only after HRV trend no longer meets hold threshold and terminal extension pain-free.
+    regression_criteria: >-
+      Pain or hesitation at end-range extension, rising effusion, or HRV decline ≥8ms /7d — reduce band
+      tension or volume per PT; do not advance ROM demands beyond 0° target.
+    references:
+      - protocol-library/post-acl-week-4.yaml
+
+  - name: mini_squats
+    sets: 3
+    reps: 12
+    load: bodyweight; wall-supported
+    ROM_target_deg: 60
+    progression_criteria: >-
+      Keep wall-supported depth to ~60° during HRV hold; deepen or load only after HRV improves,
+      pain at ~110° flexion stays mild/controlled, and PT clears.
+    regression_criteria: >-
+      Pain >3/10, buckling, or HRV decline ≥8ms /7d — increase support, reduce depth toward pain-free
+      window, or pause per PT (symptom-aligned regression; do not drop ROM_target_deg without cause).
+    references:
+      - protocol-library/post-acl-week-4.yaml
+
+  - name: heel_raises
+    sets: 3
+    reps: 15
+    load: bodyweight
+    progression_criteria: >-
+      Hold 3×15 bodyweight per week-4 baseline through HRV hold; add load or deficit only when HRV
+      trend clears and calf/knee symptoms remain mild.
+    regression_criteria: >-
+      Differential pain, swelling, or HRV decline ≥8ms /7d — reduce volume or switch to supported ROM
+      per PT; maintain references for traceability.
+    references:
+      - protocol-library/post-acl-week-4.yaml
+
+  - name: single_leg_balance
+    sets: 3
+    load: bodyweight
+    intensity: 3×30s holds per session
+    progression_criteria: >-
+      Maintain 3×~30s single-leg holds during HRV hold; progress surface/eyes-closed per library only
+      after HRV no longer triggers whole-protocol hold and balance is stable.
+    regression_criteria: >-
+      Balance loss, joint irritability, or HRV decline ≥8ms /7d — shorten holds, use fingertip support,
+      or bilateral stance per PT per regressions guidance.
+    references:
+      - protocol-library/post-acl-week-4.yaml
