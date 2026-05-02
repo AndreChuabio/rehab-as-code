@@ -156,14 +156,20 @@ function renderProtocol({ protocol }) {
     return;
   }
   list.innerHTML = exercises
-    .map(
-      (ex) => `
+    .map((ex) => {
+      const parts = [];
+      if (ex.sets && ex.reps) parts.push(`${ex.sets}x${ex.reps}`);
+      if (ex.duration_min) parts.push(`${ex.duration_min} min`);
+      if (ex.ROM_target_deg != null) parts.push(`ROM ${ex.ROM_target_deg} deg`);
+      if (ex.intensity) parts.push(ex.intensity);
+      const spec = parts.length ? parts.join(" - ") : "see protocol";
+      return `
     <li class="protocol-exercise">
-      <span class="ex-name">${ex.name || "unnamed"}</span>
-      <span class="ex-spec">${ex.sets ?? "?"}x${ex.reps ?? "?"} - ROM ${ex.ROM_target_deg ?? "?"} deg</span>
+      <span class="ex-name">${escapeHtml(ex.name || "unnamed")}</span>
+      <span class="ex-spec">${escapeHtml(spec)}</span>
     </li>
-  `,
-    )
+  `;
+    })
     .join("");
 }
 
@@ -360,8 +366,9 @@ function renderPullRequest(prUrl, branch) {
   bubble.className = "chat-bubble pr-result";
   bubble.innerHTML = `
     <div class="pr-result-header">pull request opened</div>
-    <a class="pr-result-link" href="${escapeHtml(prUrl)}" target="_blank">${escapeHtml(prUrl)}</a>
     ${branch ? `<div class="pr-result-branch">branch: ${escapeHtml(branch)}</div>` : ""}
+    <a class="pr-result-cta" href="${escapeHtml(prUrl)}" target="_blank" rel="noopener">View pull request on GitHub</a>
+    <a class="pr-result-link" href="${escapeHtml(prUrl)}" target="_blank" rel="noopener">${escapeHtml(prUrl)}</a>
   `;
   log.appendChild(bubble);
   scrollChatLog?.();
@@ -453,7 +460,9 @@ async function sendChat(message) {
     coachBubble.classList.remove("thinking");
     if (!coachBuffer.trim()) {
       coachBubble.remove();
+      return;
     }
+    coachBubble.innerHTML = renderCoachMarkdown(coachBuffer);
   };
 
   try {
@@ -701,6 +710,13 @@ function truncate(s, n) {
 // ---------------------------------------------------------------------------
 // Utilities
 // ---------------------------------------------------------------------------
+
+function renderCoachMarkdown(text) {
+  return escapeHtml(text).replace(
+    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener">$1</a>',
+  );
+}
 
 function escapeHtml(s) {
   return String(s)

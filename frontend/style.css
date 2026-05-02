@@ -945,14 +945,27 @@ body {
   color: var(--accent);
   font-weight: 600;
 }
-.pr-result-link {
-  color: var(--accent2);
-  text-decoration: none;
+.pr-result-cta {
+  display: inline-block;
+  align-self: flex-start;
+  background: var(--accent);
+  color: #0d1117;
+  padding: 8px 14px;
+  border-radius: 6px;
   font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: filter 0.12s ease;
+}
+.pr-result-cta:hover { filter: brightness(1.08); }
+.pr-result-link {
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 11px;
   font-family: ui-monospace, monospace;
   word-break: break-all;
 }
-.pr-result-link:hover { text-decoration: underline; }
+.pr-result-link:hover { color: var(--accent2); text-decoration: underline; }
 .pr-result-branch {
   color: var(--muted);
   font-size: 11px;
