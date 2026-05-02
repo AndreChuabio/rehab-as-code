@@ -15,6 +15,33 @@ const TRACE_GLYPH = {
 let intakeComplete = localStorage.getItem("rehab_intake_complete") === "1";
 let approvedPlanExercises = []; // exercises the user added in step 2
 
+// ---------------------------------------------------------------------------
+// Hash-based routing  /#intake  /#plan  /#exercise  /#checkin
+// ---------------------------------------------------------------------------
+
+const STEP_ROUTES = {
+  intake:   () => triggerIntake(),
+  plan:     () => triggerGeneratePlan(),
+  exercise: () => triggerExercise(),
+  checkin:  () => triggerCheckin(),
+};
+
+function navigateTo(step) {
+  if (window.location.hash !== `#${step}`) {
+    history.pushState(null, "", `#${step}`);
+  }
+  const fn = STEP_ROUTES[step];
+  if (fn) fn();
+}
+
+function routeFromHash() {
+  const hash = window.location.hash.replace("#", "") || "intake";
+  const fn = STEP_ROUTES[hash];
+  if (fn) fn(); else triggerIntake();
+}
+
+window.addEventListener("hashchange", routeFromHash);
+
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("dateDisplay").textContent = new Date().toLocaleDateString(
     "en-US", { weekday: "long", month: "long", day: "numeric" }
@@ -23,7 +50,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadProtocol();
   switchStage("chat");
   applyStepLocks();
-  triggerIntake();
+  routeFromHash(); // honour the URL on load; defaults to #intake
 });
 
 function applyStepLocks() {
@@ -535,6 +562,7 @@ const FLOW_META = {
 let activeFlow = null; // { type, step, answers }
 
 function triggerIntake() {
+  if (window.location.hash !== "#intake") history.pushState(null, "", "#intake");
   // Always reset state so sidebar starts empty for a fresh run
   intakeComplete = false;
   localStorage.removeItem("rehab_intake_complete");
@@ -664,6 +692,7 @@ function handleFlowAnswer(text) {
 }
 
 function triggerCheckin() {
+  if (window.location.hash !== "#checkin") history.pushState(null, "", "#checkin");
   switchStage("chat");
   clearChatLog();
   activeFlow = { type: "checkin", step: 0, answers: {} };
@@ -687,6 +716,7 @@ function setAgentButtonsDisabled(disabled) {
 // ---------------------------------------------------------------------------
 
 function triggerGeneratePlan() {
+  if (window.location.hash !== "#plan") history.pushState(null, "", "#plan");
   switchStage("chat");
   clearChatLog();
   appendChatBubble("coach", "Generating your weekly protocol — analyzing your wearables and intake...");
@@ -799,6 +829,7 @@ function finalizePlan() {
 // ---------------------------------------------------------------------------
 
 function triggerExercise() {
+  if (window.location.hash !== "#exercise") history.pushState(null, "", "#exercise");
   switchStage("chat");
   clearChatLog();
   loadExerciseCards();
