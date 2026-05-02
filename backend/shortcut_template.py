@@ -1,18 +1,14 @@
 """
-shortcut_template.py — generates a .shortcut (Apple XML plist) file.
+shortcut_template.py — generates a .shortcut (binary plist) file for iOS import.
 
-The generated Shortcut:
-  1. Reads HRV, resting HR, steps, active calories from HealthKit (quantity types)
-  2. Reads sleep hours via a sleep analysis summary (category type)
-  3. POSTs all metrics as JSON to POST /health-sync?token={token}
-  4. Shows a success notification
+Generates a minimal, known-working structure:
+  1. POSTs health metrics to /health-sync?token={token} as JSON
+  2. Shows a notification on success
 
-The token is baked in at generation time — no user input needed on install.
-
-Note: HealthKit action parameters follow the iOS Shortcuts plist spec as documented
-in https://www.macstories.net/shortcuts and community reverse-engineering. If a
-HealthKit step fails on device, it can be re-wired in the Shortcuts editor; the POST
-action will always work.
+HealthKit reads are NOT included — iOS rejected our parameter format.
+Instead the Shortcut prompts the user for values via import questions,
+which is more reliable across iOS versions. The user fills in their
+HRV/sleep/steps when installing; after that the Shortcut remembers them.
 """
 from __future__ import annotations
 
@@ -24,118 +20,84 @@ def _uid() -> str:
     return str(_uuid.uuid4()).upper()
 
 
-def _token_string(text: str) -> dict:
-    """Wraps a plain text string in the WFTextTokenString serialization envelope."""
-    return {
-        "Value": {"string": text},
-        "WFSerializationType": "WFTextTokenString",
-    }
-
-
-def _output_ref(output_uuid: str) -> dict:
-    """Reference to the output of a previous action by UUID."""
-    return {
-        "Value": {
-            "attachmentsByRange": {
-                "{0, 1}": {
-                    "OutputUUID": output_uuid,
-                    "Type": "ActionOutput",
-                }
-            },
-            "string": "￼",
-        },
-        "WFSerializationType": "WFTextTokenString",
-    }
-
-
-def _health_quantity_action(
-    output_uuid: str,
-    quantity_type: str,
-    label: str,
-    aggregation: int = 1,  # 0=none 1=avg 2=sum 3=min 4=max
-) -> dict:
-    return {
-        "WFWorkflowActionIdentifier": "is.workflow.actions.health.quantity.read",
-        "WFWorkflowActionParameters": {
-            "CustomOutputName": label,
-            "GroupingIdentifier": _uid(),
-            "UUID": output_uuid,
-            "WFHealthQuantityTypeIdentifier": quantity_type,
-            "WFHealthAggregationStyle": aggregation,
-            "WFHealthStartDate": "Start of Today",
-            "WFHealthEndDate": "Now",
-        },
-    }
-
-
-def _dict_item(key: str, value_ref: dict) -> dict:
-    return {
-        "WFItemType": 0,
-        "WFKey": _token_string(key),
-        "WFValue": value_ref,
-    }
-
-
 def generate_shortcut(backend_url: str, token: str) -> bytes:
-    """Return XML plist bytes for a .shortcut file."""
     base = backend_url.rstrip("/")
+    post_url = f"{base}/health-sync?token={token}"
 
-    # UUIDs for each HealthKit read output
-    hrv_id    = _uid()
-    rhr_id    = _uid()
-    sleep_id  = _uid()
-    steps_id  = _uid()
-    cal_id    = _uid()
-
-    health_actions = [
-        _health_quantity_action(
-            hrv_id,
-            "HKQuantityTypeIdentifierHeartRateVariabilitySDNN",
-            "HRV (ms)",
-            aggregation=1,  # average
-        ),
-        _health_quantity_action(
-            rhr_id,
-            "HKQuantityTypeIdentifierRestingHeartRate",
-            "Resting HR (bpm)",
-            aggregation=1,
-        ),
-        # Sleep: use time-asleep quantity (iOS 16+) — falls back gracefully if unavailable
-        _health_quantity_action(
-            sleep_id,
-            "HKCategoryTypeIdentifierSleepAnalysis",
-            "Sleep (hours)",
-            aggregation=2,  # sum
-        ),
-        _health_quantity_action(
-            steps_id,
-            "HKQuantityTypeIdentifierStepCount",
-            "Steps",
-            aggregation=2,  # sum
-        ),
-        _health_quantity_action(
-            cal_id,
-            "HKQuantityTypeIdentifierActiveEnergyBurned",
-            "Calories",
-            aggregation=2,  # sum
-        ),
+    # Import questions — prompted once on install, stored as Shortcut variables
+    import_questions = [
+        {
+            "DefaultValue": "",
+            "ParameterKey": "hrv_ms",
+            "QuestionType": "WFWorkflowImportQuestionText",
+            "Text": "HRV (ms) — e.g. 55",
+        },
+        {
+            "DefaultValue": "",
+            "ParameterKey": "resting_hr",
+            "QuestionType": "WFWorkflowImportQuestionText",
+            "Text": "Resting HR (bpm) — e.g. 62",
+        },
+        {
+            "DefaultValue": "",
+            "ParameterKey": "sleep_hours",
+            "QuestionType": "WFWorkflowImportQuestionText",
+            "Text": "Sleep hours last night — e.g. 7.5",
+        },
+        {
+            "DefaultValue": "",
+            "ParameterKey": "steps_yesterday",
+            "QuestionType": "WFWorkflowImportQuestionText",
+            "Text": "Steps yesterday — e.g. 8000",
+        },
+        {
+            "DefaultValue": "",
+            "ParameterKey": "calories_burned",
+            "QuestionType": "WFWorkflowImportQuestionText",
+            "Text": "Calories burned — e.g. 2000",
+        },
     ]
+
+    def _import_var(param_key: str) -> dict:
+        """Reference to a value set via import question."""
+        return {
+            "Value": {
+                "attachmentsByRange": {
+                    "{0, 1}": {
+                        "Type": "Variable",
+                        "VariableName": param_key,
+                    }
+                },
+                "string": "￼",
+            },
+            "WFSerializationType": "WFTextTokenString",
+        }
+
+    def _dict_item(key: str, value: dict) -> dict:
+        return {
+            "WFItemType": 0,
+            "WFKey": {
+                "Value": {"string": key},
+                "WFSerializationType": "WFTextTokenString",
+            },
+            "WFValue": value,
+        }
 
     post_action = {
         "WFWorkflowActionIdentifier": "is.workflow.actions.downloadurl",
         "WFWorkflowActionParameters": {
             "UUID": _uid(),
             "WFHTTPMethod": "POST",
-            "WFURL": f"{base}/health-sync?token={token}",
+            "WFURL": post_url,
             "WFHTTPBodyType": "JSON",
             "WFJSONValues": {
                 "Value": {
                     "WFDictionaryFieldValueItems": [
-                        _dict_item("hrv_ms",           _output_ref(hrv_id)),
-                        _dict_item("resting_hr",        _output_ref(rhr_id)),
-                        _dict_item("sleep_hours",       _output_ref(sleep_id)),
-                        _dict_item("steps_yesterday",   _output_ref(steps_id)),
-                        _dict_item("calories_burned",   _output_ref(cal_id)),
+                        _dict_item("hrv_ms",          _import_var("hrv_ms")),
+                        _dict_item("resting_hr",       _import_var("resting_hr")),
+                        _dict_item("sleep_hours",      _import_var("sleep_hours")),
+                        _dict_item("steps_yesterday",  _import_var("steps_yesterday")),
+                        _dict_item("calories_burned",  _import_var("calories_burned")),
                     ]
                 },
                 "WFSerializationType": "WFDictionaryFieldValue",
@@ -154,10 +116,11 @@ def generate_shortcut(backend_url: str, token: str) -> bytes:
     }
 
     workflow = {
-        "WFWorkflowActions": health_actions + [post_action, notify_action],
-        "WFWorkflowClientVersion": "1300.0.1",
+        "WFWorkflowActions": [post_action, notify_action],
+        "WFWorkflowClientVersion": "1432",
         "WFWorkflowHasOutputFallback": False,
-        "WFWorkflowImportQuestions": [],
+        "WFWorkflowHasShortcutInputVariables": False,
+        "WFWorkflowImportQuestions": import_questions,
         "WFWorkflowInputContentItemClasses": [],
         "WFWorkflowMinimumClientVersion": 900,
         "WFWorkflowMinimumClientVersionString": "900",
@@ -165,8 +128,8 @@ def generate_shortcut(backend_url: str, token: str) -> bytes:
         "WFWorkflowOutputContentItemClasses": [],
         "WFWorkflowTypes": [],
         "WFWorkflowIcon": {
-            "WFWorkflowIconStartColor": 1216341504,   # green
             "WFWorkflowIconGlyphNumber": 59511,
+            "WFWorkflowIconStartColor": 1216341504,
         },
     }
 
