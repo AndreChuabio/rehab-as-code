@@ -163,19 +163,19 @@
 
             <div class="quick-actions" role="group" aria-label="Patient journey quick actions">
               <button class="quick-action primary" id="triggerIntakeBtn"
-                      onclick="triggerIntake()" title="Patient intake Q&A">
+                      onclick="navigateTo('intake')" title="Patient intake Q&A">
                 1 intake
               </button>
               <button class="quick-action" id="generatePlanBtn"
-                      onclick="triggerGeneratePlan()" title="Generate + approve your weekly plan">
+                      onclick="navigateTo('plan')" title="Generate + approve your weekly plan">
                 2 generate plan
               </button>
               <button class="quick-action" id="exerciseBtn"
-                      onclick="triggerExercise()" title="Load exercise videos and start session">
+                      onclick="navigateTo('exercise')" title="Load exercise videos and start session">
                 3 guided exercise
               </button>
               <button class="quick-action" id="triggerCheckinBtn"
-                      onclick="triggerCheckin()" title="Daily check-in with Coach Maya video">
+                      onclick="navigateTo('checkin')" title="Daily check-in with Coach Maya video">
                 4 check-in
               </button>
             </div>

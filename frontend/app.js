@@ -15,6 +15,33 @@ const TRACE_GLYPH = {
 let intakeComplete = localStorage.getItem("rehab_intake_complete") === "1";
 let approvedPlanExercises = []; // exercises the user added in step 2
 
+// ---------------------------------------------------------------------------
+// Hash-based routing  /#intake  /#plan  /#exercise  /#checkin
+// ---------------------------------------------------------------------------
+
+const STEP_ROUTES = {
+  intake:   () => triggerIntake(),
+  plan:     () => triggerGeneratePlan(),
+  exercise: () => triggerExercise(),
+  checkin:  () => triggerCheckin(),
+};
+
+function navigateTo(step) {
+  if (window.location.hash !== `#${step}`) {
+    history.pushState(null, "", `#${step}`);
+  }
+  const fn = STEP_ROUTES[step];
+  if (fn) fn();
+}
+
+function routeFromHash() {
+  const hash = window.location.hash.replace("#", "") || "intake";
+  const fn = STEP_ROUTES[hash];
+  if (fn) fn(); else triggerIntake();
+}
+
+window.addEventListener("hashchange", routeFromHash);
+
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("dateDisplay").textContent = new Date().toLocaleDateString(
     "en-US", { weekday: "long", month: "long", day: "numeric" }
@@ -23,7 +50,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadProtocol();
   switchStage("chat");
   applyStepLocks();
-  triggerIntake();
+  routeFromHash(); // honour the URL on load; defaults to #intake
 });
 
 function applyStepLocks() {
@@ -32,6 +59,18 @@ function applyStepLocks() {
     const btn = document.getElementById(id);
     if (!btn) return;
     btn.disabled = locked;
+  });
+}
+
+function setActiveStepBtn(step) {
+  const map = {
+    intake:   "triggerIntakeBtn",
+    plan:     "generatePlanBtn",
+    exercise: "exerciseBtn",
+    checkin:  "triggerCheckinBtn",
+  };
+  Object.entries(map).forEach(([s, id]) => {
+    document.getElementById(id)?.classList.toggle("primary", s === step);
   });
 }
 
@@ -535,6 +574,8 @@ const FLOW_META = {
 let activeFlow = null; // { type, step, answers }
 
 function triggerIntake() {
+  if (window.location.hash !== "#intake") history.pushState(null, "", "#intake");
+  setActiveStepBtn("intake");
   // Always reset state so sidebar starts empty for a fresh run
   intakeComplete = false;
   localStorage.removeItem("rehab_intake_complete");
@@ -664,6 +705,8 @@ function handleFlowAnswer(text) {
 }
 
 function triggerCheckin() {
+  if (window.location.hash !== "#checkin") history.pushState(null, "", "#checkin");
+  setActiveStepBtn("checkin");
   switchStage("chat");
   clearChatLog();
   activeFlow = { type: "checkin", step: 0, answers: {} };
@@ -686,11 +729,132 @@ function setAgentButtonsDisabled(disabled) {
 // Step 2: Generate Plan — show plan + Approve button
 // ---------------------------------------------------------------------------
 
+const DAYS = ["M", "T", "W", "Th", "F", "S", "Su"];
+const DAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+let selectedDays = new Set(DAYS); // default: every day
+
 function triggerGeneratePlan() {
+  if (window.location.hash !== "#plan") history.pushState(null, "", "#plan");
+  setActiveStepBtn("plan");
   switchStage("chat");
   clearChatLog();
-  appendChatBubble("coach", "Generating your weekly protocol — analyzing your wearables and intake...");
-  invokeAgent("weekly_plan");
+  selectedDays = new Set(DAYS);
+  _pendingPlan.length = 0;
+  renderPlanBuilder();
+}
+
+async function renderPlanBuilder() {
+  const log = document.getElementById("chatLog");
+
+  const wrap = document.createElement("div");
+  wrap.className = "chat-bubble freq-picker-wrap";
+  wrap.id = "planBuilderWrap";
+
+  const dayBtns = DAYS.map((d, i) => `
+    <button class="day-btn active"
+            data-day="${d}"
+            title="${DAY_LABELS[i]}"
+            onclick="toggleDay(this, '${d}')">
+      ${d}
+    </button>`).join("");
+
+  wrap.innerHTML = `
+    <div class="freq-picker-label">Training days</div>
+    <div class="day-btn-row">${dayBtns}</div>
+    <div class="freq-summary" id="freqSummary">Every day (7 days/week)</div>
+    <div class="freq-picker-label" style="margin-top:14px">Add exercises to your plan</div>
+    <div class="plan-rows" id="planRowsInner"><div class="plan-loading">Loading exercises…</div></div>
+    <div class="pr-result-actions" style="margin-top:12px">
+      <button class="pr-approve-btn" id="confirmFreqBtn" disabled onclick="confirmFrequencyAndGenerate()">
+        Generate Plan (add exercises first)
+      </button>
+    </div>`;
+  log.appendChild(wrap);
+  scrollChatLog();
+
+  // Fetch exercises and inject rows
+  try {
+    const res = await fetch(`${API_BASE}/protocol/exercises`);
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const data = await res.json();
+    const exercises = data.exercises || [];
+    const rowsEl = document.getElementById("planRowsInner");
+    if (!rowsEl) return;
+    rowsEl.innerHTML = exercises.map(ex => `
+      <div class="plan-row">
+        <div class="plan-row-info">
+          <span class="plan-row-name">${escapeHtml(ex.name)}</span>
+          <span class="plan-row-spec">${escapeHtml(ex.spec || ex.default_dose || "")}</span>
+        </div>
+        <button class="plan-add-btn"
+                data-ex-id="${escapeHtml(ex.id || ex.name)}"
+                data-ex-name="${escapeHtml(ex.name)}"
+                data-ex-spec="${escapeHtml(ex.spec || ex.default_dose || "")}"
+                data-ex-gen-url="${escapeHtml(ex.generated_video_url || "")}"
+                data-ex-yt-id="${escapeHtml(ex.youtube_id || "")}"
+                data-ex-watch-url="${escapeHtml(ex.youtube_watch_url || "")}"
+                data-ex-thumb-url="${escapeHtml(ex.thumbnail_url || "")}"
+                data-ex-cues="${escapeHtml(JSON.stringify(ex.cues || []))}"
+                onclick="addToPlan(this)">
+          + Add
+        </button>
+      </div>`).join("");
+    scrollChatLog();
+  } catch (e) {
+    const rowsEl = document.getElementById("planRowsInner");
+    if (rowsEl) rowsEl.innerHTML = `<div style="color:var(--danger);font-size:12px">Could not load exercises: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function toggleDay(btn, day) {
+  if (selectedDays.has(day)) {
+    selectedDays.delete(day);
+    btn.classList.remove("active");
+  } else {
+    selectedDays.add(day);
+    btn.classList.add("active");
+  }
+  updateFreqSummary();
+}
+
+function updateFreqSummary() {
+  const el = document.getElementById("freqSummary");
+  const confirmBtn = document.getElementById("confirmFreqBtn");
+  if (!el) return;
+  const count = selectedDays.size;
+  if (count === 0) {
+    el.textContent = "No days selected";
+    if (confirmBtn) confirmBtn.disabled = true;
+    return;
+  }
+  if (confirmBtn) confirmBtn.disabled = false;
+  const ordered = DAYS.filter(d => selectedDays.has(d));
+  if (count === 7) {
+    el.textContent = "Every day (7 days/week)";
+  } else if (count === 5 && !selectedDays.has("S") && !selectedDays.has("Su")) {
+    el.textContent = "Weekdays only (Mon–Fri)";
+  } else if (count === 2 && selectedDays.has("S") && selectedDays.has("Su")) {
+    el.textContent = "Weekends only";
+  } else {
+    el.textContent = `${ordered.join(", ")} (${count} day${count > 1 ? "s" : ""}/week)`;
+  }
+}
+
+function confirmFrequencyAndGenerate() {
+  const btn = document.getElementById("confirmFreqBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "Generating..."; }
+
+  // Commit the pending exercise selections
+  approvedPlanExercises = [..._pendingPlan];
+  _pendingPlan.length = 0;
+
+  const ordered = DAYS.filter(d => selectedDays.has(d));
+  const freqNote = `Training days: ${ordered.join(", ")} (${ordered.length}/week). Exercises: ${approvedPlanExercises.map(e => e.name).join(", ")}.`;
+
+  appendChatBubble("coach", `Scheduled reminder set for ${ordered.join(", ")}. Generating your protocol...`);
+  onPlanApproved();
+  invokeAgent("weekly_plan", { intake_text: freqNote });
+  setTimeout(() => triggerExercise(), 2400);
 }
 
 // Exercises the user staged in step 2 (by clicking "+ Add to plan")
@@ -774,10 +938,10 @@ function addToPlan(btn) {
   btn.disabled = true;
   btn.classList.add("added");
 
-  const genBtn = document.getElementById("generatePlanFinalBtn");
+  const genBtn = document.getElementById("confirmFreqBtn");
   if (genBtn) {
     genBtn.disabled = false;
-    genBtn.textContent = `Generate Plan (${_pendingPlan.length} selected)`;
+    genBtn.textContent = `Generate Plan (${_pendingPlan.length} exercise${_pendingPlan.length > 1 ? "s" : ""} selected)`;
   }
 }
 
@@ -799,6 +963,8 @@ function finalizePlan() {
 // ---------------------------------------------------------------------------
 
 function triggerExercise() {
+  if (window.location.hash !== "#exercise") history.pushState(null, "", "#exercise");
+  setActiveStepBtn("exercise");
   switchStage("chat");
   clearChatLog();
   loadExerciseCards();
