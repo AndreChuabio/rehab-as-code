@@ -5,7 +5,7 @@
 patient: Andre
 phase: acute/subacute lateral ankle sprain (~1 wk); lower-limb library exercises adapted (no ankle-specific library entry)
 week: 1
-generated_by: "care-plan-coordinator; researcher; evaluator; planner"
+generated_by: "care-plan-coordinator; researcher; evaluator; planner; intake=data/intake.json"
 last_updated: "2026-05-02"
 
 session_targets:
