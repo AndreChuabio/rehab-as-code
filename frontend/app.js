@@ -715,12 +715,89 @@ function setAgentButtonsDisabled(disabled) {
 // Step 2: Generate Plan — show plan + Approve button
 // ---------------------------------------------------------------------------
 
+const DAYS = ["M", "T", "W", "Th", "F", "S", "Su"];
+const DAY_LABELS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+let selectedDays = new Set(DAYS); // default: every day
+
 function triggerGeneratePlan() {
   if (window.location.hash !== "#plan") history.pushState(null, "", "#plan");
   switchStage("chat");
   clearChatLog();
-  appendChatBubble("coach", "Generating your weekly protocol — analyzing your wearables and intake...");
-  invokeAgent("weekly_plan");
+  selectedDays = new Set(DAYS); // reset to all days on each entry
+  renderFrequencyPicker();
+}
+
+function renderFrequencyPicker() {
+  const log = document.getElementById("chatLog");
+
+  const wrap = document.createElement("div");
+  wrap.className = "chat-bubble freq-picker-wrap";
+  wrap.id = "freqPickerWrap";
+
+  const dayBtns = DAYS.map((d, i) => `
+    <button class="day-btn active"
+            data-day="${d}"
+            title="${DAY_LABELS[i]}"
+            onclick="toggleDay(this, '${d}')">
+      ${d}
+    </button>`).join("");
+
+  wrap.innerHTML = `
+    <div class="freq-picker-label">How many days per week?</div>
+    <div class="day-btn-row">${dayBtns}</div>
+    <div class="freq-summary" id="freqSummary">Every day (7 days/week)</div>
+    <div class="pr-result-actions" style="margin-top:12px">
+      <button class="pr-approve-btn" id="confirmFreqBtn" onclick="confirmFrequencyAndGenerate()">
+        Generate Plan
+      </button>
+    </div>`;
+  log.appendChild(wrap);
+  scrollChatLog();
+}
+
+function toggleDay(btn, day) {
+  if (selectedDays.has(day)) {
+    selectedDays.delete(day);
+    btn.classList.remove("active");
+  } else {
+    selectedDays.add(day);
+    btn.classList.add("active");
+  }
+  updateFreqSummary();
+}
+
+function updateFreqSummary() {
+  const el = document.getElementById("freqSummary");
+  const confirmBtn = document.getElementById("confirmFreqBtn");
+  if (!el) return;
+  const count = selectedDays.size;
+  if (count === 0) {
+    el.textContent = "No days selected";
+    if (confirmBtn) confirmBtn.disabled = true;
+    return;
+  }
+  if (confirmBtn) confirmBtn.disabled = false;
+  const ordered = DAYS.filter(d => selectedDays.has(d));
+  if (count === 7) {
+    el.textContent = "Every day (7 days/week)";
+  } else if (count === 5 && !selectedDays.has("S") && !selectedDays.has("Su")) {
+    el.textContent = "Weekdays only (Mon–Fri)";
+  } else if (count === 2 && selectedDays.has("S") && selectedDays.has("Su")) {
+    el.textContent = "Weekends only";
+  } else {
+    el.textContent = `${ordered.join(", ")} (${count} day${count > 1 ? "s" : ""}/week)`;
+  }
+}
+
+function confirmFrequencyAndGenerate() {
+  const btn = document.getElementById("confirmFreqBtn");
+  if (btn) { btn.disabled = true; btn.textContent = "Generating..."; }
+
+  const ordered = DAYS.filter(d => selectedDays.has(d));
+  const freqNote = `Training days: ${ordered.join(", ")} (${ordered.length}/week).`;
+
+  appendChatBubble("coach", `Got it — ${freqNote.toLowerCase()} Generating your weekly protocol...`);
+  invokeAgent("weekly_plan", { intake_text: freqNote });
 }
 
 // Exercises the user staged in step 2 (by clicking "+ Add to plan")
