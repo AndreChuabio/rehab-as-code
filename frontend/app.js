@@ -959,47 +959,26 @@ function renderExerciseCard(card) {
   const log = document.getElementById("chatLog");
   const wrap = document.createElement("div");
   wrap.className = "exercise-card";
-  const cuesHtml = (card.cues || [])
-    .map((c) => `<li>${escapeHtml(c)}</li>`)
-    .join("");
+
+  const cuesHtml = (card.cues || []).map((c) => `<li>${escapeHtml(c)}</li>`).join("");
   const dose = card.default_dose
-    ? `<span class="exercise-dose">${escapeHtml(card.default_dose)}</span>`
-    : "";
+    ? `<span class="exercise-dose">${escapeHtml(card.default_dose)}</span>` : "";
 
-  // Source-of-truth precedence: Sora-generated MP4 > YouTube iframe > thumbnail.
-  // The agent abstraction picks one server-side; the frontend just renders.
-  let embed;
-  let sourceBadge = "";
-  if (card.generated_video_url) {
-    embed = `<div class="exercise-video-wrap">
-      <video src="${escapeHtml(card.generated_video_url)}" controls autoplay muted playsinline loop preload="metadata"></video>
-    </div>`;
-    sourceBadge = `<span class="video-source sora">sora-2 generated</span>`;
-  } else if (card.youtube_id || card.youtube_watch_url) {
-    const watchUrl = escapeHtml(card.youtube_watch_url || `https://www.youtube.com/watch?v=${card.youtube_id}`);
-    const thumb = escapeHtml(card.thumbnail_url || `https://img.youtube.com/vi/${card.youtube_id}/hqdefault.jpg`);
-    embed = `<a class="exercise-video-wrap exercise-video-thumb" href="${watchUrl}" target="_blank" rel="noopener" title="Watch on YouTube">
-      <img src="${thumb}" alt="${escapeHtml(card.name || "exercise")}" />
-      <span class="play-btn">▶</span>
-    </a>`;
-    sourceBadge = `<span class="video-source youtube">curated</span>`;
-  } else {
-    embed = `<div class="exercise-video-wrap">
-      <img src="${escapeHtml(card.thumbnail_url || "")}" alt="${escapeHtml(card.name || "")}" />
-    </div>`;
-  }
-
-  const watch = card.youtube_watch_url
-    ? `<a class="exercise-action-btn" href="${escapeHtml(card.youtube_watch_url)}" target="_blank">reference clip</a>`
-    : "";
+  // Store video data on the element — revealed after "Add to today"
+  wrap.dataset.generatedUrl = card.generated_video_url || "";
+  wrap.dataset.youtubeId    = card.youtube_id || "";
+  wrap.dataset.watchUrl     = card.youtube_watch_url || "";
+  wrap.dataset.thumbUrl     = card.thumbnail_url || "";
+  wrap.dataset.cardName     = card.name || card.id || "";
 
   wrap.innerHTML = `
-    ${embed}
+    <div class="exercise-video-placeholder">
+      <span class="video-placeholder-text">Add to today to load video</span>
+    </div>
     <div class="exercise-meta">
       <div class="exercise-title-row">
         <span class="exercise-title">${escapeHtml(card.name || card.id || "")}</span>
         ${dose}
-        ${sourceBadge}
       </div>
       <ul class="exercise-cues">${cuesHtml}</ul>
       <div class="exercise-actions">
@@ -1007,14 +986,48 @@ function renderExerciseCard(card) {
                 data-add-id="${escapeHtml(card.id || "")}"
                 data-add-name="${escapeHtml(card.name || card.id || "")}"
                 onclick="addToTodayFromBtn(this)">
-          Add to today
+          ＋ Add to today
         </button>
-        ${watch}
       </div>
     </div>
   `;
   log.appendChild(wrap);
   scrollChatLog();
+}
+
+function revealVideoOnCard(wrap) {
+  const genUrl   = wrap.dataset.generatedUrl;
+  const ytId     = wrap.dataset.youtubeId;
+  const watchUrl = wrap.dataset.watchUrl;
+  const thumb    = wrap.dataset.thumbUrl || (ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : "");
+  const name     = wrap.dataset.cardName;
+
+  let embed = "";
+  let badge = "";
+
+  if (genUrl) {
+    embed = `<div class="exercise-video-wrap">
+      <video src="${escapeHtml(genUrl)}" controls autoplay muted playsinline loop preload="auto"></video>
+    </div>`;
+    badge = `<span class="video-source sora">sora-2 generated</span>`;
+  } else if (ytId || watchUrl) {
+    const href = escapeHtml(watchUrl || `https://www.youtube.com/watch?v=${ytId}`);
+    embed = `<a class="exercise-video-wrap exercise-video-thumb" href="${href}" target="_blank" rel="noopener">
+      <img src="${escapeHtml(thumb)}" alt="${escapeHtml(name)}" />
+      <span class="play-btn">▶</span>
+    </a>`;
+    badge = `<span class="video-source youtube">curated</span>`;
+  }
+
+  if (!embed) return;
+
+  // Swap placeholder → video
+  const placeholder = wrap.querySelector(".exercise-video-placeholder");
+  if (placeholder) placeholder.outerHTML = embed;
+
+  // Add source badge next to title
+  const titleRow = wrap.querySelector(".exercise-title-row");
+  if (titleRow && badge) titleRow.insertAdjacentHTML("beforeend", badge);
 }
 
 function scrollChatLog() {
@@ -1042,7 +1055,14 @@ function addToTodayFromBtn(btn) {
   }
   todaySession.push({ id, name, addedAt: new Date().toISOString() });
   renderTodaySession();
-  appendChatBubble("coach", `Added ${name} to today's session.`);
+
+  // Reveal the video on the card now that the exercise is confirmed
+  const wrap = btn.closest(".exercise-card");
+  if (wrap) revealVideoOnCard(wrap);
+
+  btn.textContent = "✓ Added";
+  btn.disabled = true;
+  btn.classList.remove("primary");
 }
 
 function renderTodaySession() {

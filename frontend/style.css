@@ -536,6 +536,20 @@ body {
   object-fit: cover;
   background: #000;
 }
+.exercise-video-placeholder {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  background: #1a1a2e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px 4px 0 0;
+}
+.video-placeholder-text {
+  color: #555;
+  font-size: 0.8rem;
+  font-style: italic;
+}
 .exercise-video-thumb { display: block; text-decoration: none; }
 .exercise-video-thumb:hover img { opacity: 0.8; }
 .exercise-video-thumb img { transition: opacity 0.15s; }
