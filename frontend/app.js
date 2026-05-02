@@ -269,6 +269,10 @@ async function invokeAgent(flow, body = {}) {
       }
       setAgentButtonsDisabled(false);
       setAgentStatus("done", "ready");
+      // Pull the latest protocol from GitHub so the left rail reflects any
+      // changes the agent committed. checkin / symptom flows may not change
+      // protocol.yaml, but refreshing is cheap and keeps state consistent.
+      refreshProtocol();
     });
   } catch (e) {
     console.error(e);
@@ -556,6 +560,7 @@ function handleChatEvent(event, coachBubble, appendDelta) {
             renderPullRequest(event.result.pr_url, event.result.branch);
           }
           setAgentStatus("done", "ready");
+          refreshProtocol();
         });
         const providerEl = document.getElementById("providerName");
         if (providerEl) {
@@ -680,7 +685,9 @@ function renderExerciseCard(card) {
       <ul class="exercise-cues">${cuesHtml}</ul>
       <div class="exercise-actions">
         <button class="exercise-action-btn primary"
-                onclick="sendChatPreset('Add ${escapeHtml(card.id)} to today and log a check-in.')">
+                data-add-id="${escapeHtml(card.id || "")}"
+                data-add-name="${escapeHtml(card.name || card.id || "")}"
+                onclick="addToTodayFromBtn(this)">
           Add to today
         </button>
         ${watch}
@@ -694,6 +701,72 @@ function renderExerciseCard(card) {
 function scrollChatLog() {
   const log = document.getElementById("chatLog");
   if (log) log.scrollTop = log.scrollHeight;
+}
+
+// ---------------------------------------------------------------------------
+// Today's session (ephemeral, local-only)
+// ---------------------------------------------------------------------------
+// Adds from the chat exercise cards land here, NOT in the protocol. Protocol
+// changes go through a real cloud-agent flow (weekly_plan / symptom /
+// intake / checkin). "Add to today" is a click-through to "I'll do this in
+// today's workout" - no PR, no waiting.
+
+const todaySession = [];
+
+function addToTodayFromBtn(btn) {
+  const id   = btn.dataset.addId   || "";
+  const name = btn.dataset.addName || id || "exercise";
+  if (!id) return;
+  if (todaySession.some((e) => e.id === id)) {
+    showToast(`${name} is already in today's session`, "info");
+    return;
+  }
+  todaySession.push({ id, name, addedAt: new Date().toISOString() });
+  renderTodaySession();
+  appendChatBubble("coach", `Added ${name} to today's session.`);
+}
+
+function renderTodaySession() {
+  const card = document.getElementById("todaySessionCard");
+  const list = document.getElementById("todaySessionList");
+  if (!card || !list) return;
+  if (!todaySession.length) {
+    card.style.display = "none";
+    return;
+  }
+  card.style.display = "block";
+  list.innerHTML = todaySession
+    .map(
+      (e) => `
+    <li class="today-session-item">
+      <span class="today-session-name">${escapeHtml(e.name)}</span>
+      <button class="today-session-remove" onclick="removeFromToday('${escapeHtml(e.id)}')"
+              title="Remove">x</button>
+    </li>
+  `,
+    )
+    .join("");
+}
+
+function removeFromToday(id) {
+  const i = todaySession.findIndex((e) => e.id === id);
+  if (i >= 0) {
+    todaySession.splice(i, 1);
+    renderTodaySession();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Protocol re-fetch (called after a real protocol-changing PR opens)
+// ---------------------------------------------------------------------------
+async function refreshProtocol() {
+  try {
+    const res = await fetch(`${API_BASE}/protocol`);
+    const data = await res.json();
+    renderProtocol(data);
+  } catch (e) {
+    console.error("protocol refresh failed:", e);
+  }
 }
 
 function setChatBusy(busy, sendBtn, input) {
