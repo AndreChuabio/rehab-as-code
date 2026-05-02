@@ -13,6 +13,7 @@ const TRACE_GLYPH = {
 };
 
 let intakeComplete = localStorage.getItem("rehab_intake_complete") === "1";
+let approvedPlanExercises = []; // exercises the user added in step 2
 
 document.addEventListener("DOMContentLoaded", () => {
   document.getElementById("dateDisplay").textContent = new Date().toLocaleDateString(
@@ -676,6 +677,10 @@ function triggerGeneratePlan() {
   invokeAgent("weekly_plan");
 }
 
+// Exercises the user staged in step 2 (by clicking "+ Add to plan")
+// These are the only ones shown in step 3 guided exercise.
+const _pendingPlan = []; // { id, name, spec, ...card data }
+
 async function showPlanWithApprove() {
   const log = document.getElementById("chatLog");
   if (!log) return;
@@ -688,27 +693,89 @@ async function showPlanWithApprove() {
     const header = document.createElement("div");
     header.className = "chat-bubble coach";
     header.innerHTML = `<strong>Week ${data.week || 1} Protocol — ${data.phase || "rehab"}</strong><br>
-      ${exercises.map(e => `• ${escapeHtml(e.name)} &nbsp;<span style="color:#666;font-size:0.85em">${escapeHtml(e.spec || e.default_dose || "")}</span>`).join("<br>")}`;
+      Add each exercise to your plan, then hit Generate Plan.`;
     log.appendChild(header);
 
-    // Approve Plan button
-    const approveWrap = document.createElement("div");
-    approveWrap.className = "chat-bubble pr-result";
-    approveWrap.innerHTML = `
-      <div class="pr-result-header">Protocol ready — approve to add to your session</div>
-      <div class="pr-result-actions">
-        <button class="pr-approve-btn" id="approvePlanBtn" onclick="approvePlan()">Approve Plan</button>
+    // Per-exercise rows with "Add to plan" buttons
+    const planWrap = document.createElement("div");
+    planWrap.className = "chat-bubble pr-result plan-builder";
+    planWrap.id = "planBuilderWrap";
+
+    const rows = exercises.map(ex => `
+      <div class="plan-row" id="plan-row-${escapeHtml(ex.id || ex.name)}">
+        <div class="plan-row-info">
+          <span class="plan-row-name">${escapeHtml(ex.name)}</span>
+          <span class="plan-row-spec">${escapeHtml(ex.spec || ex.default_dose || "")}</span>
+        </div>
+        <button class="plan-add-btn"
+                data-ex-id="${escapeHtml(ex.id || ex.name)}"
+                data-ex-name="${escapeHtml(ex.name)}"
+                data-ex-spec="${escapeHtml(ex.spec || ex.default_dose || "")}"
+                data-ex-gen-url="${escapeHtml(ex.generated_video_url || "")}"
+                data-ex-yt-id="${escapeHtml(ex.youtube_id || "")}"
+                data-ex-watch-url="${escapeHtml(ex.youtube_watch_url || "")}"
+                data-ex-thumb-url="${escapeHtml(ex.thumbnail_url || "")}"
+                data-ex-cues="${escapeHtml(JSON.stringify(ex.cues || []))}"
+                onclick="addToPlan(this)">
+          + Add to plan
+        </button>
+      </div>
+    `).join("");
+
+    planWrap.innerHTML = `
+      <div class="pr-result-header">Protocol ready — add exercises to your plan</div>
+      <div class="plan-rows">${rows}</div>
+      <div class="pr-result-actions" style="margin-top:12px">
+        <button class="pr-approve-btn" id="generatePlanFinalBtn"
+                disabled onclick="finalizePlan()">
+          Generate Plan (0 selected)
+        </button>
       </div>`;
-    log.appendChild(approveWrap);
+    log.appendChild(planWrap);
     scrollChatLog();
   } catch (e) {
     appendChatBubble("error", `Could not load plan: ${e.message}`);
   }
 }
 
-function approvePlan() {
-  const btn = document.getElementById("approvePlanBtn");
-  if (btn) { btn.textContent = "✓ Approved"; btn.disabled = true; }
+function addToPlan(btn) {
+  const id       = btn.dataset.exId;
+  const name     = btn.dataset.exName;
+  if (_pendingPlan.some(e => e.id === id)) return;
+
+  _pendingPlan.push({
+    id,
+    name,
+    spec:              btn.dataset.exSpec,
+    generated_video_url: btn.dataset.exGenUrl,
+    youtube_id:        btn.dataset.exYtId,
+    youtube_watch_url: btn.dataset.exWatchUrl,
+    thumbnail_url:     btn.dataset.exThumbUrl,
+    cues:              (() => { try { return JSON.parse(btn.dataset.exCues); } catch { return []; } })(),
+  });
+
+  btn.textContent = "✓ Added";
+  btn.disabled = true;
+  btn.classList.add("added");
+
+  const genBtn = document.getElementById("generatePlanFinalBtn");
+  if (genBtn) {
+    genBtn.disabled = false;
+    genBtn.textContent = `Generate Plan (${_pendingPlan.length} selected)`;
+  }
+}
+
+function finalizePlan() {
+  if (!_pendingPlan.length) return;
+  approvedPlanExercises = [..._pendingPlan];
+  _pendingPlan.length = 0;
+
+  const genBtn = document.getElementById("generatePlanFinalBtn");
+  if (genBtn) { genBtn.textContent = "✓ Plan generated"; genBtn.disabled = true; }
+
+  appendChatBubble("coach",
+    `Plan locked: ${approvedPlanExercises.map(e => e.name).join(", ")}. Head to step 3 to start your session.`
+  );
   onPlanApproved();
 }
 
@@ -726,9 +793,17 @@ async function loadExerciseCards() {
   const log = document.getElementById("chatLog");
   const header = document.createElement("div");
   header.className = "chat-bubble coach";
-  header.innerHTML = "<strong>Your Exercise Session</strong><br>Add each exercise to today — the video loads when you confirm it.";
+  header.innerHTML = "<strong>Guided Exercise Session</strong><br>Your approved exercises are below — click Add to today to load the video.";
   log.appendChild(header);
   scrollChatLog();
+
+  if (approvedPlanExercises.length) {
+    approvedPlanExercises.forEach((ex) => renderExerciseCard(ex));
+    scrollChatLog();
+    return;
+  }
+
+  // Fallback: fetch all protocol exercises (demo mode / fresh load)
   try {
     const res = await fetch(`${API_BASE}/protocol/exercises`);
     if (!res.ok) throw new Error(`status ${res.status}`);

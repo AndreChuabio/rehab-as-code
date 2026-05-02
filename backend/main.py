@@ -381,14 +381,9 @@ def serve_shortcut(token: str):
 
 @app.get("/protocol")
 def protocol():
-    """Return the current rehab protocol; falls back to demo snapshot when pending."""
-    import yaml as _yaml
+    """Return the current rehab protocol. Returns pending_intake state as-is so the
+    sidebar starts empty until the patient completes intake."""
     p = fetch_protocol()
-    if not p.get("exercises") or p.get("phase") == "pending_intake":
-        snapshot = Path(__file__).parent.parent / "protocols" / ".demo-snapshots" / "protocol-week4.yaml"
-        if snapshot.exists():
-            with open(snapshot) as f:
-                p = _yaml.safe_load(f)
     return {"repo": PROTOCOL_REPO, "protocol": p}
 
 

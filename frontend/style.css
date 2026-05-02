@@ -1061,6 +1061,35 @@ body {
   font-family: ui-monospace, monospace;
 }
 
+/* Plan builder (step 2 — per-exercise add rows) */
+.plan-builder .plan-rows { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
+.plan-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--surface2);
+  border-radius: 8px;
+}
+.plan-row-info { display: flex; flex-direction: column; gap: 2px; }
+.plan-row-name { font-size: 13px; font-weight: 500; }
+.plan-row-spec { font-size: 11px; color: var(--muted); }
+.plan-add-btn {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.plan-add-btn:hover:not(:disabled) { background: var(--accent); color: #000; }
+.plan-add-btn.added { border-color: var(--muted); color: var(--muted); cursor: default; }
+
 /* Today's session card (ephemeral, local-only adds) */
 .today-session-card .today-session-list {
   list-style: none;
