@@ -601,6 +601,17 @@ def apply_pr(req: ApplyPrRequest):
         raise HTTPException(status_code=504, detail="merge timed out")
 
     if result.returncode != 0:
+        # Cursor cloud agents auto-merge their own PRs, so by the time the
+        # clinician clicks Approve the PR may already be closed/merged. Treat
+        # that as success — the goal (state advanced on main) is achieved.
+        stderr_lower = (result.stderr or "").lower()
+        already_done = any(
+            phrase in stderr_lower
+            for phrase in ("already been merged", "pull request is closed", "not open", "no commits between")
+        )
+        if already_done:
+            logger.info("PR #%s already merged/closed — treating as applied", pr_num)
+            return {"applied": True, "pr_number": pr_num, "note": "already merged"}
         # Don't surface raw stderr — could leak token/auth info
         logger.warning("gh pr merge %s failed: %s", pr_num, result.stderr[:200])
         raise HTTPException(
