@@ -27,12 +27,10 @@ document.addEventListener("DOMContentLoaded", () => {
 
 function applyStepLocks() {
   const locked = !intakeComplete;
-  ["generatePlanBtn", "triggerCheckinBtn", "guidedExerciseBtn"].forEach((id) => {
+  ["generatePlanBtn", "exerciseBtn", "triggerCheckinBtn"].forEach((id) => {
     const btn = document.getElementById(id);
     if (!btn) return;
     btn.disabled = locked;
-    btn.title = locked ? "Complete intake first" : btn.getAttribute("data-orig-title") || btn.title;
-    if (!btn.getAttribute("data-orig-title")) btn.setAttribute("data-orig-title", btn.title);
   });
 }
 
@@ -40,10 +38,16 @@ function onIntakeComplete() {
   intakeComplete = true;
   localStorage.setItem("rehab_intake_complete", "1");
   applyStepLocks();
-  // Shift the primary highlight from intake → weekly plan
   document.getElementById("triggerIntakeBtn")?.classList.remove("primary");
   document.getElementById("generatePlanBtn")?.classList.add("primary");
   showToast("Intake complete — now generate your weekly plan!", "info");
+}
+
+function onPlanApproved() {
+  localStorage.setItem("rehab_plan_approved", "1");
+  document.getElementById("generatePlanBtn")?.classList.remove("primary");
+  document.getElementById("exerciseBtn")?.classList.add("primary");
+  showToast("Plan approved! Go to step 3 to start your exercise session.", "info");
 }
 
 // ---------------------------------------------------------------------------
@@ -333,9 +337,8 @@ async function invokeAgent(flow, body = {}) {
       setAgentButtonsDisabled(false);
       setAgentStatus("done", "ready");
       refreshProtocol();
-      // For plan-generating flows, show the plan inline — no PR approve step
       if (flow === "intake" || flow === "weekly_plan") {
-        await showPlanInline();
+        await showPlanWithApprove();
       }
     });
   } catch (e) {
@@ -656,20 +659,26 @@ function triggerCheckin() {
 }
 
 function setAgentButtonsDisabled(disabled) {
-  ["generatePlanBtn", "triggerIntakeBtn", "triggerCheckinBtn", "guidedExerciseBtn"].forEach((id) => {
+  ["generatePlanBtn", "triggerIntakeBtn", "triggerCheckinBtn", "exerciseBtn"].forEach((id) => {
     const btn = document.getElementById(id);
     if (btn) btn.disabled = disabled;
   });
 }
 
 // ---------------------------------------------------------------------------
-// Plan display — used after intake/generate-plan completes
+// Step 2: Generate Plan — show plan + Approve button
 // ---------------------------------------------------------------------------
 
-async function showPlanInline() {
+function triggerGeneratePlan() {
+  switchStage("chat");
+  clearChatLog();
+  appendChatBubble("coach", "Generating your weekly protocol — analyzing your wearables and intake...");
+  invokeAgent("weekly_plan");
+}
+
+async function showPlanWithApprove() {
   const log = document.getElementById("chatLog");
   if (!log) return;
-
   try {
     const res = await fetch(`${API_BASE}/protocol/exercises`);
     if (!res.ok) throw new Error(`status ${res.status}`);
@@ -678,63 +687,56 @@ async function showPlanInline() {
 
     const header = document.createElement("div");
     header.className = "chat-bubble coach";
-    header.innerHTML = `<strong>Your Week ${data.week || 1} Protocol — ${data.phase || "rehab"}</strong><br>${exercises.length} exercises ready. Hit <em>4 guided exercise</em> to work through them with video.`;
+    header.innerHTML = `<strong>Week ${data.week || 1} Protocol — ${data.phase || "rehab"}</strong><br>
+      ${exercises.map(e => `• ${escapeHtml(e.name)} &nbsp;<span style="color:#666;font-size:0.85em">${escapeHtml(e.spec || e.default_dose || "")}</span>`).join("<br>")}`;
     log.appendChild(header);
 
-    exercises.forEach((ex) => renderExerciseCard(ex));
+    // Approve Plan button
+    const approveWrap = document.createElement("div");
+    approveWrap.className = "chat-bubble pr-result";
+    approveWrap.innerHTML = `
+      <div class="pr-result-header">Protocol ready — approve to add to your session</div>
+      <div class="pr-result-actions">
+        <button class="pr-approve-btn" id="approvePlanBtn" onclick="approvePlan()">Approve Plan</button>
+      </div>`;
+    log.appendChild(approveWrap);
     scrollChatLog();
-
-    // Shift the primary button to step 4 now that plan is ready
-    document.getElementById("generatePlanBtn")?.classList.remove("primary");
-    document.getElementById("guidedExerciseBtn")?.classList.add("primary");
   } catch (e) {
     appendChatBubble("error", `Could not load plan: ${e.message}`);
   }
 }
 
+function approvePlan() {
+  const btn = document.getElementById("approvePlanBtn");
+  if (btn) { btn.textContent = "✓ Approved"; btn.disabled = true; }
+  onPlanApproved();
+}
+
 // ---------------------------------------------------------------------------
-// Step 4: Guided Exercise — load all protocol exercises as video cards
+// Step 3: Exercise — load exercises, reveal Sora video on Add to today
 // ---------------------------------------------------------------------------
 
-async function loadGuidedExercises() {
+function triggerExercise() {
   switchStage("chat");
   clearChatLog();
-  const log = document.getElementById("chatLog");
+  loadExerciseCards();
+}
 
+async function loadExerciseCards() {
+  const log = document.getElementById("chatLog");
   const header = document.createElement("div");
   header.className = "chat-bubble coach";
-  header.innerHTML = "<strong>Your Guided Exercise Session</strong><br>Here's your full plan for this week. Watch each video, then chat with me below.";
+  header.innerHTML = "<strong>Your Exercise Session</strong><br>Add each exercise to today — the video loads when you confirm it.";
   log.appendChild(header);
   scrollChatLog();
-
   try {
     const res = await fetch(`${API_BASE}/protocol/exercises`);
     if (!res.ok) throw new Error(`status ${res.status}`);
     const data = await res.json();
-    const exercises = data.exercises || [];
-
-    if (!exercises.length) {
-      const empty = document.createElement("div");
-      empty.className = "chat-bubble coach";
-      empty.textContent = "No exercises found — generate your weekly plan first (step 2).";
-      log.appendChild(empty);
-      scrollChatLog();
-      return;
-    }
-
-    exercises.forEach((ex) => renderExerciseCard(ex));
-
-    const footer = document.createElement("div");
-    footer.className = "chat-bubble coach";
-    footer.textContent = `${exercises.length} exercises loaded. Ask me about any of them or tell me how the session went.`;
-    log.appendChild(footer);
+    (data.exercises || []).forEach((ex) => renderExerciseCard(ex));
     scrollChatLog();
   } catch (e) {
-    const err = document.createElement("div");
-    err.className = "chat-bubble error";
-    err.textContent = `Could not load exercises: ${e.message}`;
-    log.appendChild(err);
-    scrollChatLog();
+    appendChatBubble("error", `Could not load exercises: ${e.message}`);
   }
 }
 
