@@ -1,15 +1,16 @@
 # Three sessions/week (Mon/Wed/Fri): bike warmup → extension bias → quad sets → flexion/heel slides.
+# HOLD: whole plan stays week-3 library baseline (no advancement to week-4 content).
 
 week: 3
 patient: Andre
-generated_by: care-plan-coordinator
+generated_by: "care-plan-coordinator; researcher (post-acl-week-3); evaluator (HRV hold)"
 last_updated: "2026-05-02"
 
 hold_note: >-
-  Evaluator: progress — 7d HRV average vs prior 7d is −5 ms (above the −8 ms hold threshold). Recovery 65
-  (≥60). Week-3 post-ACL library only; keep volume conservative and do not advance to week-4 content. Optional
-  caution: soft HRV trend and stress wording in snapshot — bias easy days, sleep, and load tolerance without
-  a protocol-wide hold.
+  Evaluator HOLD: HRV drop >8 ms — no advancement to week-4 content; maintain week-3 post-acl library baseline
+  until readiness improves and clinician clears progression. Intake: Andre (26), ACL reconstruction 3 weeks ago,
+  pain 3/10, mild pain at ~110° flexion; exercises match protocol-library/post-acl-week-3.yaml only. Session order
+  below is fixed each visit.
 
 session_order:
   - stationary_bike

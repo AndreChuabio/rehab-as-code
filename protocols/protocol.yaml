@@ -1,65 +1,51 @@
+# Current rehab protocol for Andre (week 3 baseline; evaluator HRV hold).
+# Cursor cloud agents update this via PR per .cursorrules.
+
 patient: Andre
 phase: post-ACL reconstruction
 week: 3
-generated_by: care-plan-coordinator
+generated_by: "care-plan-coordinator; researcher (post-acl-week-3); evaluator (HRV hold)"
 last_updated: "2026-05-02"
 
 session_targets:
   frequency_per_week: 3
-  duration_min: 50
+  duration_min: 30
   max_pain_during_session: 3
 
 exercises:
-  - name: quad_sets
-    sets: 3
-    reps: 15
-    load: bodyweight
-    ROM_target_deg: 90
-    progression_criteria: >-
-      Able to complete all sets with a 10-second isometric hold each rep, heel drive maintained, and
-      no increase in effusion or session pain above targets — advance only with PT clearance (no week-4
-      template until autonomic/readiness and symptoms support it).
-    regression_criteria: >-
-      Rising pain during holds, quadriceps lag on terminal extension, or effusion worsening after sessions —
-      reduce hold time or reps per PT and stop short of sharp pain.
+  - name: stationary_bike
+    duration_min: 10
+    intensity: "RPE 4 of 10"
+    progression_criteria: "tolerates 12 min"
+    regression_criteria: "patellofemoral pain mid-session"
     references:
-      - protocol-library/post-acl-week-3.yaml:13-19
-
-  - name: heel_slides
-    sets: 3
-    reps: 10
-    ROM_target_deg: 100
-    progression_criteria: >-
-      Active flexion toward ROM_target without provoke effusion; mild discomfort above target flexion is
-      acceptable if settled post-session — keep volume conservative (no week-4 progression this week).
-    regression_criteria: >-
-      Increase in effusion, pain above agreed max during slides, or loss of extension — reduce reps or
-      range per PT while preserving extension goals.
-    references:
-      - protocol-library/post-acl-week-3.yaml:21-26
+      - protocol-library/post-acl-week-3.yaml
 
   - name: terminal_knee_extension
     sets: 3
     reps: 12
     load: yellow_band
     ROM_target_deg: 0
-    progression_criteria: >-
-      12 reps per set with yellow band, full terminal extension emphasis, no quad lag tolerated — continue
-      week-3 load only; no band upgrade or week-4 advancement without clinician approval.
-    regression_criteria: >-
-      Visible quad lag, anterior knee pain escalating, or inability to complete sets — ease band tension
-      or volume per PT.
+    progression_criteria: "matches contralateral extension"
+    regression_criteria: "extension lag > 5 deg"
     references:
-      - protocol-library/post-acl-week-3.yaml:28-33
+      - protocol-library/post-acl-week-3.yaml
 
-  - name: stationary_bike
-    duration_min: 10
-    intensity: RPE 4 of 10
-    progression_criteria: >-
-      10 minutes at RPE 4 without pain or swelling carry-over; add resistance only if pain-free and
-      readiness stable — keep conservative if HRV trend remains soft.
-    regression_criteria: >-
-      Pain with cycling through ROM, swelling afterward, or pain above session max — reduce duration,
-      intensity, or pause resistance per PT.
+  - name: quad_sets
+    sets: 3
+    reps: 15
+    load: bodyweight
+    ROM_target_deg: 90
+    progression_criteria: "pain-free, no swelling next morning"
+    regression_criteria: "any swelling within 24h"
     references:
-      - protocol-library/post-acl-week-3.yaml:35-38
+      - protocol-library/post-acl-week-3.yaml
+
+  - name: heel_slides
+    sets: 3
+    reps: 10
+    ROM_target_deg: 100
+    progression_criteria: "ROM > 100 deg, painless"
+    regression_criteria: "ROM regression > 5 deg week-over-week"
+    references:
+      - protocol-library/post-acl-week-3.yaml
