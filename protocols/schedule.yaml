@@ -3,7 +3,7 @@
 
 week: 3
 patient: Andre
-generated_by: "care-plan-coordinator (intake summary); researcher (PRIMARY post-acl-week-3.yaml); evaluator (HOLD: HRV >8 ms vs prior + streak)"
+generated_by: "care-plan-coordinator (intake summary); researcher (PRIMARY post-acl-week-3.yaml, no week-4 substitution until clearance+HRV stable); evaluator (HOLD: >8 ms HRV decline vs prior window/low-HRV streak, hold entire protocol; no advancement, no arbitrary broad regression)"
 last_updated: "2026-05-02"
 
 hold_note: >-
