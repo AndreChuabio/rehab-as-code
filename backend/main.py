@@ -579,6 +579,16 @@ def apply_pr(req: ApplyPrRequest):
         raise HTTPException(status_code=400, detail="pr_number or pr_url required")
 
     repo = os.getenv("PROTOCOL_REPO", "AndreChuabio/rehab-as-code")
+
+    # Cursor SDK opens PRs as draft. Mark ready first; ignore failure (already ready).
+    try:
+        subprocess.run(
+            ["gh", "pr", "ready", str(pr_num), "--repo", repo],
+            capture_output=True, text=True, timeout=15,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
     try:
         result = subprocess.run(
             ["gh", "pr", "merge", str(pr_num), "--squash", "--delete-branch",
