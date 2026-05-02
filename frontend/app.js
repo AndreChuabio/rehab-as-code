@@ -860,6 +860,7 @@ function renderExerciseGallery(exercises) {
   }).join("");
 
   wrap.innerHTML = `
+    <div class="gallery-thumbs">${thumbsHtml}</div>
     <div class="gallery-main">
       <div class="gallery-video-wrap" id="galleryVideoWrap"></div>
       <div class="gallery-main-info">
@@ -869,7 +870,6 @@ function renderExerciseGallery(exercises) {
       </div>
       <ul class="gallery-cues" id="galleryCues"></ul>
     </div>
-    <div class="gallery-thumbs">${thumbsHtml}</div>
   `;
   log.appendChild(wrap);
 
