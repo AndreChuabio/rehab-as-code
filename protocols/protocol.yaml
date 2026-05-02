@@ -4,9 +4,9 @@
 
 patient: Andre
 phase: post-ACL reconstruction
-week: 3
-generated_by: seed
-last_updated: 2026-05-02
+week: 4
+generated_by: "care-plan-coordinator; hold (HRV -19ms)"
+last_updated: "2026-05-02"
 
 session_targets:
   frequency_per_week: 4

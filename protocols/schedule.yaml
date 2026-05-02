@@ -1,0 +1,22 @@
+# Week outline — same exercise order each session; loads match protocol.yaml (week-3 hold).
+
+week: 4
+patient: Andre
+last_updated: "2026-05-02"
+hold_note: "HRV hold — week counter advanced; prescription unchanged from week 3."
+
+session_order:
+  - quad_sets
+  - heel_slides
+  - terminal_knee_extension
+  - stationary_bike
+
+sessions:
+  - day: Monday
+    exercises: [quad_sets, heel_slides, terminal_knee_extension, stationary_bike]
+  - day: Wednesday
+    exercises: [quad_sets, heel_slides, terminal_knee_extension, stationary_bike]
+  - day: Friday
+    exercises: [quad_sets, heel_slides, terminal_knee_extension, stationary_bike]
+  - day: Saturday
+    exercises: [quad_sets, heel_slides, terminal_knee_extension, stationary_bike]
