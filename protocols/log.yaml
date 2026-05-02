@@ -1,0 +1,19 @@
+# Rehabilitation check-in log (append-only).
+# Convention: check_ins is chronological; newest entry is always LAST. Append new items at the end of the list.
+
+check_ins:
+  - date: "2026-05-02"
+    wearables_ref: data/wearables-2026-05-02.json
+    wearables_highlights:
+      sleep_score: 71
+      hrv_ms: 42
+      recovery: 65
+      hrv_delta_7d_ms: -19
+      consecutive_days_low_hrv: 3
+    symptom_summary: "final live confirmation"
+    evaluator_stance: >
+      Hold entire protocol. HRV 7d decline ~19 ms triggers .cursorrules hold (≥8 ms). Recovery 65
+      (borderline vs <60). Symptoms non-clinical; no pain.
+    notes: >
+      HOLD per HRV; no symptom-driven regression. Week-4 progression deferred until HRV improves
+      (protocol-library/post-acl-week-4 clearance).
