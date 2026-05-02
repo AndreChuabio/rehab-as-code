@@ -377,29 +377,165 @@ function renderPullRequest(prUrl, branch) {
 }
 
 function reportSymptom() {
-  const text = prompt(
-    "What did you feel during the exercise? (e.g., 'knee felt tweaky on single-leg squats')",
+  switchStage("chat");
+  clearChatLog();
+  activeFlow = { type: "symptom", step: 0, answers: {} };
+  updateFlowUI(true);
+  appendChatBubble("coach",
+    "Let's log your symptom. Type **cancel** at any time to stop.\n\n" +
+    SYMPTOM_QUESTIONS[0].q
   );
-  if (!text || !text.trim()) return;
-  invokeAgent("symptom_adjustment", { symptom_text: text.trim() });
+  document.getElementById("chatInput")?.focus();
 }
 
+// ---------------------------------------------------------------------------
+// Guided flows: intake / symptom / check-in
+// ---------------------------------------------------------------------------
+
+const INTAKE_QUESTIONS = [
+  { key: "name",     q: "What's your name?",                                                          hint: "e.g. Andre" },
+  { key: "age",      q: "How old are you?",                                                            hint: "e.g. 26" },
+  { key: "injury",   q: "What was your injury or surgery?",                                            hint: "e.g. ACL reconstruction" },
+  { key: "timing",   q: "When was your surgery or injury?",                                            hint: "e.g. 3 weeks ago" },
+  { key: "pain",     q: "On a scale of 1–10, what's your current pain level?",                        hint: "e.g. 3" },
+  { key: "symptoms", q: "Any specific symptoms or limitations? (or type \"none\")",                    hint: "e.g. mild pain at 110° flexion" },
+];
+
+const SYMPTOM_QUESTIONS = [
+  { key: "location",  q: "Where is the pain or discomfort?",                                          hint: "e.g. inner knee" },
+  { key: "type",      q: "How would you describe it?",                                                 hint: "e.g. sharp, dull, ache, tightness" },
+  { key: "level",     q: "Pain level 1–10?",                                                          hint: "e.g. 4" },
+  { key: "trigger",   q: "When does it happen?",                                                      hint: "e.g. during single-leg squats" },
+  { key: "duration",  q: "How long has this been going on?",                                          hint: "e.g. started today" },
+];
+
+const CHECKIN_QUESTIONS = [
+  { key: "rating",     q: "How did today's session go overall? (1–10)",                               hint: "e.g. 8" },
+  { key: "completed",  q: "Which exercises did you complete?",                                        hint: "e.g. heel slides, quad sets, straight leg raises" },
+  { key: "strong",     q: "What felt strong or improved today?",                                      hint: "e.g. quad set felt stronger than yesterday" },
+  { key: "difficult",  q: "Anything that felt difficult or caused discomfort? (or type \"none\")",    hint: "e.g. single-leg balance was shaky" },
+];
+
+const FLOW_META = {
+  intake:  { questions: INTAKE_QUESTIONS,  label: "Intake" },
+  symptom: { questions: SYMPTOM_QUESTIONS, label: "Symptom" },
+  checkin: { questions: CHECKIN_QUESTIONS, label: "Check-in" },
+};
+
+let activeFlow = null; // { type, step, answers }
+
 function triggerIntake() {
-  const text = prompt(
-    "Patient intake (free-text): age / injury / date of surgery / current pain level",
-    "Andre, 26, ACL reconstruction 3 weeks ago, mild pain at 110 flexion",
+  switchStage("chat");
+  clearChatLog();
+  activeFlow = { type: "intake", step: 0, answers: {} };
+  updateFlowUI(true);
+  appendChatBubble("coach",
+    "I'll walk you through a quick intake. Type **cancel** at any time to stop.\n\n" +
+    INTAKE_QUESTIONS[0].q
   );
-  if (!text || !text.trim()) return;
-  invokeAgent("intake", { intake_text: text.trim() });
+  document.getElementById("chatInput")?.focus();
+}
+
+function cancelFlow() {
+  const label = activeFlow ? FLOW_META[activeFlow.type]?.label : "Flow";
+  activeFlow = null;
+  updateFlowUI(false);
+  resetInputPlaceholder();
+  appendChatBubble("coach", `${label} cancelled.`);
+}
+
+function updateFlowUI(active) {
+  const bar = document.getElementById("intakeProgressBar");
+  const cancelBtn = document.getElementById("intakeCancelBtn");
+  const suggestions = document.getElementById("chatSuggestions");
+  const quickActions = document.querySelector(".quick-actions");
+  if (bar) bar.style.display = active ? "flex" : "none";
+  if (cancelBtn) cancelBtn.style.display = active ? "inline-flex" : "none";
+  if (suggestions) suggestions.style.display = active ? "none" : "flex";
+  if (quickActions) quickActions.style.display = active ? "none" : "flex";
+  if (active) updateFlowProgress();
+}
+
+function updateFlowProgress() {
+  if (!activeFlow) return;
+  const meta = FLOW_META[activeFlow.type];
+  const total = meta.questions.length;
+  const label = document.getElementById("intakeProgressLabel");
+  if (label) label.textContent = `${meta.label} — question ${activeFlow.step + 1} of ${total}`;
+  const fill = document.getElementById("intakeProgressFill");
+  if (fill) fill.style.width = `${(activeFlow.step / total) * 100}%`;
+  const input = document.getElementById("chatInput");
+  if (input) input.placeholder = meta.questions[activeFlow.step]?.hint || "Type your answer...";
+}
+
+function resetInputPlaceholder() {
+  const input = document.getElementById("chatInput");
+  if (input) input.placeholder = "Type to Coach Maya - ask, swap, plan, log...";
+}
+
+function clearChatLog() {
+  const log = document.getElementById("chatLog");
+  if (!log) return;
+  log.innerHTML = `<div class="chat-empty" id="chatEmpty" style="display:none"></div>`;
+}
+
+function handleFlowAnswer(text) {
+  if (!activeFlow) return false;
+  if (text.toLowerCase() === "cancel") { cancelFlow(); return true; }
+
+  const meta = FLOW_META[activeFlow.type];
+  const q = meta.questions[activeFlow.step];
+  activeFlow.answers[q.key] = text;
+  activeFlow.step++;
+
+  if (activeFlow.step < meta.questions.length) {
+    updateFlowProgress();
+    appendChatBubble("coach", meta.questions[activeFlow.step].q);
+    return true;
+  }
+
+  // All questions answered — build payload and submit
+  const a = activeFlow.answers;
+  const type = activeFlow.type;
+  activeFlow = null;
+  updateFlowUI(false);
+  resetInputPlaceholder();
+
+  if (type === "intake") {
+    const intake_text =
+      `${a.name}, ${a.age} years old. Injury: ${a.injury}, ${a.timing}. ` +
+      `Pain level ${a.level || a.pain}/10. Symptoms: ${a.symptoms}`;
+    appendChatBubble("coach", "Got it! Generating your personalized protocol...");
+    invokeAgent("intake", { intake_text });
+
+  } else if (type === "symptom") {
+    const symptom_text =
+      `${a.location} — ${a.type}, level ${a.level}/10. ` +
+      `Occurs ${a.trigger}. Duration: ${a.duration}`;
+    appendChatBubble("coach", "Logged. Adjusting your protocol...");
+    invokeAgent("symptom_adjustment", { symptom_text });
+
+  } else if (type === "checkin") {
+    const checkin_text =
+      `Session rating ${a.rating}/10. Completed: ${a.completed}. ` +
+      `Strong: ${a.strong}. Difficult: ${a.difficult}`;
+    appendChatBubble("coach", "Check-in logged. Updating your record...");
+    invokeAgent("checkin", { checkin_text });
+  }
+
+  return true;
 }
 
 function triggerCheckin() {
-  const text = prompt(
-    "Today's check-in (how did the session go?)",
-    "Hit all 3 sets of heel slides, quad set felt stronger than yesterday",
+  switchStage("chat");
+  clearChatLog();
+  activeFlow = { type: "checkin", step: 0, answers: {} };
+  updateFlowUI(true);
+  appendChatBubble("coach",
+    "Quick session check-in! Type **cancel** at any time to stop.\n\n" +
+    CHECKIN_QUESTIONS[0].q
   );
-  if (!text || !text.trim()) return;
-  invokeAgent("checkin", { checkin_text: text.trim() });
+  document.getElementById("chatInput")?.focus();
 }
 
 function setAgentButtonsDisabled(disabled) {
@@ -434,7 +570,9 @@ function onChatSubmit(event) {
   const text = input.value.trim();
   if (!text) return;
   input.value = "";
-  sendChat(text);
+  appendChatBubble("user", text);
+  if (handleFlowAnswer(text)) return;
+  sendChat(text, { skipUserBubble: true });
 }
 
 function sendChatPreset(text) {
@@ -443,7 +581,7 @@ function sendChatPreset(text) {
   sendChat(text);
 }
 
-async function sendChat(message) {
+async function sendChat(message, { skipUserBubble = false } = {}) {
   const empty = document.getElementById("chatEmpty");
   if (empty) empty.remove();
 
@@ -451,7 +589,7 @@ async function sendChat(message) {
   const input = document.getElementById("chatInput");
   setChatBusy(true, sendBtn, input);
 
-  appendChatBubble("user", message);
+  if (!skipUserBubble) appendChatBubble("user", message);
   const coachBubble = appendChatBubble("coach", "", { thinking: true });
 
   let coachBuffer = "";

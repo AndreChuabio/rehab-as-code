@@ -127,6 +127,16 @@
             <div class="chat-header">
               <h3>Coach Maya</h3>
               <span class="chat-tag">grounded in exercise library + cloud agent tools</span>
+              <button class="intake-cancel-btn" id="intakeCancelBtn"
+                      style="display:none" onclick="cancelFlow()">
+                ✕ cancel intake
+              </button>
+            </div>
+            <div class="intake-progress" id="intakeProgressBar" style="display:none">
+              <span class="intake-progress-label" id="intakeProgressLabel">Question 1 of 6</span>
+              <div class="intake-progress-track">
+                <div class="intake-progress-fill" id="intakeProgressFill"></div>
+              </div>
             </div>
             <div class="chat-log" id="chatLog">
               <div class="chat-empty" id="chatEmpty">
