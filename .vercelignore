@@ -1,7 +1,6 @@
 orchestrator/
 cron/
 plugin/
-knowledge/
 backend/cached_runs/__pycache__
 backend/__pycache__
 **/__pycache__
