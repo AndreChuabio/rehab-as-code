@@ -1,21 +1,21 @@
-# Current rehab protocol for Andre (week 3 baseline; evaluator HRV hold).
-# Cursor cloud agents update this via PR per .cursorrules.
+# HRV hold per wearables (-19 ms vs prior 7-day average); ~20% session intensity reduction
+# (sleep score mean <70 over last 3 days). Week 3 baseline only — no week-4 progression.
 
 patient: Andre
 phase: post-ACL reconstruction
 week: 3
-generated_by: "care-plan-coordinator; researcher (post-acl-week-3); evaluator (HRV hold)"
+generated_by: "care-plan-coordinator; researcher (post-acl-week-3/week-4 clearance); evaluator (HRV hold + sleep intensity)"
 last_updated: "2026-05-02"
 
 session_targets:
   frequency_per_week: 3
-  duration_min: 30
+  duration_min: 24
   max_pain_during_session: 3
 
 exercises:
   - name: stationary_bike
-    duration_min: 10
-    intensity: "RPE 4 of 10"
+    duration_min: 8
+    intensity: "RPE 3 of 10"
     progression_criteria: "tolerates 12 min"
     regression_criteria: "patellofemoral pain mid-session"
     references:

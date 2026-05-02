@@ -3,14 +3,14 @@
 
 week: 3
 patient: Andre
-generated_by: "care-plan-coordinator; researcher (post-acl-week-3); evaluator (HRV hold)"
+generated_by: "care-plan-coordinator; researcher (post-acl-week-3/week-4 clearance); evaluator (HRV hold + sleep intensity)"
 last_updated: "2026-05-02"
 
 hold_note: >-
-  Evaluator HOLD: HRV drop >8 ms — no advancement to week-4 content; maintain week-3 post-acl library baseline
-  until readiness improves and clinician clears progression. Intake: Andre (26), ACL reconstruction 3 weeks ago,
-  pain 3/10, mild pain at ~110° flexion; exercises match protocol-library/post-acl-week-3.yaml only. Session order
-  below is fixed each visit.
+  Evaluator HOLD: HRV -19 ms vs prior 7-day average (worse than -8 ms threshold); recovery 65 (not <60).
+  Sleep mean 69.67 over last 3 days (<70) → apply ~20% session intensity reduction (protocol duration_min 24; bike shortened, lower RPE).
+  No advancement to post-acl-week-4 exercises; maintain week-3 list from protocol-library/post-acl-week-3.yaml only until clinician clears.
+  Intake: Andre (26), ACL reconstruction 3 weeks ago, pain 3/10, mild pain at ~110° flexion. Session order below is fixed each visit.
 
 session_order:
   - stationary_bike
