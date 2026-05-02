@@ -42,14 +42,13 @@ function onIntakeComplete() {
   document.getElementById("triggerIntakeBtn")?.classList.remove("primary");
   document.getElementById("generatePlanBtn")?.classList.add("primary");
   showToast("Intake complete — now generate your weekly plan!", "info");
-  loadProtocol(); // now that intake is done, show whatever's on main
 }
 
 function onPlanApproved() {
   localStorage.setItem("rehab_plan_approved", "1");
   document.getElementById("generatePlanBtn")?.classList.remove("primary");
   document.getElementById("exerciseBtn")?.classList.add("primary");
-  showToast("Plan approved! Go to step 3 to start your exercise session.", "info");
+  loadProtocol(); // sidebar now shows the approved protocol
 }
 
 // ---------------------------------------------------------------------------
@@ -160,7 +159,8 @@ function renderCalendar(events) {
 // ---------------------------------------------------------------------------
 
 async function loadProtocol() {
-  if (!intakeComplete) {
+  const planApproved = localStorage.getItem("rehab_plan_approved") === "1";
+  if (!intakeComplete || !planApproved) {
     renderProtocol({ protocol: { phase: "pending_intake", exercises: [] } });
     return;
   }
