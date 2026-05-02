@@ -535,6 +535,18 @@ const FLOW_META = {
 let activeFlow = null; // { type, step, answers }
 
 function triggerIntake() {
+  // Always reset state so sidebar starts empty for a fresh run
+  intakeComplete = false;
+  localStorage.removeItem("rehab_intake_complete");
+  localStorage.removeItem("rehab_plan_approved");
+  approvedPlanExercises = [];
+  applyStepLocks();
+  // Reset primary button highlight back to step 1
+  document.getElementById("triggerIntakeBtn")?.classList.add("primary");
+  document.getElementById("generatePlanBtn")?.classList.remove("primary");
+  document.getElementById("exerciseBtn")?.classList.remove("primary");
+  loadProtocol(); // will now render "awaiting intake"
+
   switchStage("chat");
   clearChatLog();
   activeFlow = { type: "intake", step: 0, answers: {} };
@@ -543,7 +555,6 @@ function triggerIntake() {
     "I'll walk you through a quick intake. Press Enter to use each default — it's fast for demo.\n\n" +
     INTAKE_QUESTIONS[0].q
   );
-  // Defer so the input is pre-filled after any pending DOM flushes
   setTimeout(prefillFlowInput, 50);
 }
 
