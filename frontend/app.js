@@ -216,10 +216,10 @@ function renderProtocol({ protocol }) {
     !protocol.patient;
 
   if (isPendingIntake) {
-    meta.textContent = "no patient yet";
+    meta.textContent = "no protocol yet";
     list.innerHTML = `
       <li class="protocol-empty">
-        <div class="empty-headline">Awaiting intake</div>
+        <div class="empty-headline">No protocol yet</div>
         <div class="empty-sub">Click <strong>1 intake</strong> below to onboard the patient. The cloud agent will generate the initial protocol.</div>
       </li>
     `;
