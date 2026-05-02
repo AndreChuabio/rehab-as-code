@@ -1,0 +1,21 @@
+{
+  "flow": "symptom_adjustment",
+  "pr_url": "https://github.com/AndreChuabio/rehab-protocols-andre/pull/5",
+  "branch": "adjustment-tweaky-knee",
+  "artifacts": [
+    {"type": "issue", "number": 8}
+  ],
+  "events": [
+    {"type": "agent_started",   "timestamp": 0.0, "label": "Cursor cloud agent triggered by mid-session symptom report"},
+    {"type": "file_read",       "timestamp": 0.8, "label": "read data/symptoms-2026-05-02-midsession.md"},
+    {"type": "file_read",       "timestamp": 1.7, "label": "read protocol.yaml (week 4)"},
+    {"type": "tool_call",       "timestamp": 2.6, "label": "evaluate symptom: 'tweaky' on single_leg_squats -> regress load"},
+    {"type": "file_read",       "timestamp": 3.5, "label": "read protocol-library/regressions/single_leg_squat.yaml"},
+    {"type": "branch_created",  "timestamp": 4.2, "label": "git checkout -b adjustment-tweaky-knee"},
+    {"type": "file_edit",       "timestamp": 5.0, "label": "swap single_leg_squats -> assisted_split_squats (regression)"},
+    {"type": "commit_created",  "timestamp": 5.8, "label": "Adjust: regress single-leg squats per mid-session symptom report"},
+    {"type": "pr_opened",       "timestamp": 6.7, "label": "PR #5 opened",
+     "payload": {"pr_url": "https://github.com/AndreChuabio/rehab-protocols-andre/pull/5"}},
+    {"type": "agent_completed", "timestamp": 6.9, "label": "Revised plan ready"}
+  ]
+}

@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+anthropic
+httpx
+python-dotenv
+requests
+pydantic
+google-api-python-client
+google-auth
+google-auth-oauthlib
+mcp

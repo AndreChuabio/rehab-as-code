@@ -1,0 +1,58 @@
+# Secrets & credentials (NEVER commit)
+.env
+.env.*
+!.env.example
+credentials.json
+token.pickle
+*.pem
+*.key
+
+# AI agent instruction files / private prompts
+.cursor/
+.claude/
+CLAUDE.md
+AGENTS-private.md
+.github/instructions/
+
+# Python
+__pycache__/
+*.py[cod]
+*.so
+.Python
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+dist/
+build/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+.turbo/
+
+# Local app data
+context.json
+health_cache.json
+*.sqlite
+*.db
+
+# Logs / caches
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

@@ -1,0 +1,14 @@
+{
+  "name": "healthmaxx-data-engine",
+  "version": "1.0.0",
+  "description": "Healthmaxx Data Engine for Tavus Context. Fetches real Apple Health data via Transition API.",
+  "mcp": {
+    "servers": {
+      "healthmaxx-data": {
+        "command": "python3",
+        "args": ["./server.py"],
+        "env": {}
+      }
+    }
+  }
+}

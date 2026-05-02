@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "RehabProtocol",
+  "type": "object",
+  "required": ["patient", "phase", "week", "exercises"],
+  "properties": {
+    "patient": {"type": "string"},
+    "phase":   {"type": "string"},
+    "week":    {"type": "integer", "minimum": 0},
+    "generated_by":  {"type": "string"},
+    "last_updated":  {"type": "string"},
+    "session_targets": {
+      "type": "object",
+      "properties": {
+        "frequency_per_week":     {"type": "integer"},
+        "duration_min":           {"type": "integer"},
+        "max_pain_during_session":{"type": "integer", "minimum": 0, "maximum": 10}
+      }
+    },
+    "exercises": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "references"],
+        "properties": {
+          "name": {"type": "string"},
+          "sets": {"type": "integer"},
+          "reps": {"type": "integer"},
+          "duration_min": {"type": "number"},
+          "load": {"type": "string"},
+          "intensity": {"type": "string"},
+          "ROM_target_deg": {"type": "number"},
+          "progression_criteria": {"type": "string"},
+          "regression_criteria":  {"type": "string"},
+          "references": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string"}
+          }
+        }
+      }
+    }
+  }
+}
