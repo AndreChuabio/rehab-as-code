@@ -4,8 +4,8 @@
 
 patient: Andre
 phase: post-ACL reconstruction
-week: 3
-generated_by: seed
+week: 4
+generated_by: planner
 last_updated: 2026-05-02
 
 session_targets:
@@ -36,13 +36,14 @@ exercises:
 
   - name: terminal_knee_extension
     sets: 3
-    reps: 12
-    load: yellow_band
+    reps: 15
+    load: green_band
     ROM_target_deg: 0   # full extension target
-    progression_criteria: "matches contralateral extension"
-    regression_criteria: "extension lag > 5 deg"
+    progression_criteria: "pain-free 3x15 with green band; extension matches contralateral"
+    regression_criteria: "extension lag > 5 deg or load intolerance (step band down before changing ROM)"
     references:
       - protocol-library/post-acl-week-3.yaml
+      - protocol-library/post-acl-week-4.yaml
 
   - name: stationary_bike
     duration_min: 10
