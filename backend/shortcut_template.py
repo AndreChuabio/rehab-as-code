@@ -170,4 +170,4 @@ def generate_shortcut(backend_url: str, token: str) -> bytes:
         },
     }
 
-    return plistlib.dumps(workflow, fmt=plistlib.FMT_XML)
+    return plistlib.dumps(workflow, fmt=plistlib.FMT_BINARY)

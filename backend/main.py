@@ -31,6 +31,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import quote
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -241,7 +242,7 @@ def connect_apple_health():
     token = create_token()
     base = _base_url()
     onboard_url = f"{base}/onboard/{token}"
-    magic_link = f"shortcuts://import-shortcut?url={base}/shortcut/{token}&name=RehabCoach%20Sync"
+    magic_link = f"shortcuts://import-shortcut?url={quote(f'{base}/shortcut/{token}', safe='')}&name=RehabCoach%20Sync"
     return {
         "token": token,
         "onboard_url": onboard_url,
@@ -273,7 +274,7 @@ def onboard_page(token: str):
         raise HTTPException(status_code=404, detail="unknown token")
 
     base = _base_url()
-    magic_link = f"shortcuts://import-shortcut?url={base}/shortcut/{token}&name=RehabCoach%20Sync"
+    magic_link = f"shortcuts://import-shortcut?url={quote(f'{base}/shortcut/{token}', safe='')}&name=RehabCoach%20Sync"
     qr_svg = _qr_svg(magic_link)
 
     return f"""<!DOCTYPE html>
