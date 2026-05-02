@@ -23,9 +23,37 @@
       </div>
     </header>
 
-    <main class="main">
+    <!-- 4-step navigation -->
+    <nav class="step-nav" role="tablist" aria-label="Patient journey steps">
+      <button class="step-btn active" id="stepBtn1" data-step="1" onclick="switchStep(1)"
+              role="tab" aria-selected="true">
+        <span class="step-circle">1</span>
+        <span class="step-label">Intake</span>
+      </button>
+      <div class="step-connector" id="conn12"></div>
+      <button class="step-btn locked" id="stepBtn2" data-step="2" onclick="switchStep(2)"
+              role="tab" aria-selected="false">
+        <span class="step-circle">2</span>
+        <span class="step-label">Weekly Plan</span>
+      </button>
+      <div class="step-connector" id="conn23"></div>
+      <button class="step-btn locked" id="stepBtn3" data-step="3" onclick="switchStep(3)"
+              role="tab" aria-selected="false">
+        <span class="step-circle">3</span>
+        <span class="step-label">Check-in</span>
+      </button>
+      <div class="step-connector" id="conn34"></div>
+      <button class="step-btn locked" id="stepBtn4" data-step="4" onclick="switchStep(4)"
+              role="tab" aria-selected="false">
+        <span class="step-circle">4</span>
+        <span class="step-label">Start Session</span>
+      </button>
+    </nav>
 
-      <aside class="sidebar">
+    <main class="main" id="mainContent">
+
+      <!-- Sidebar: hidden until intake complete -->
+      <aside class="sidebar" id="sidebar" hidden>
         <section class="card health-card">
           <h3>Wearable Signals
             <span id="dataSourceBadge" class="source-badge mock">Mock</span>
@@ -41,15 +69,6 @@
           <h3>Current Protocol</h3>
           <div id="protocolMeta" class="protocol-meta">Loading...</div>
           <ul class="protocol-exercises" id="protocolExercises"></ul>
-        </section>
-
-        <section class="card today-session-card" id="todaySessionCard"
-                 style="display:none">
-          <h3>Today's Session</h3>
-          <ul class="today-session-list" id="todaySessionList"></ul>
-          <p class="today-session-hint">
-            Local-only. Use chat for protocol changes (those open a PR).
-          </p>
         </section>
 
         <section class="card status-card">
@@ -78,59 +97,19 @@
         </section>
       </aside>
 
-      <section class="center-panel">
-        <div class="stage-tabs" role="tablist" aria-label="Coach Maya stage">
-          <button class="stage-tab active" data-mode="chat" id="tabChat"
-                  role="tab" aria-selected="true" onclick="switchStage('chat')">
-            Coach Chat
-          </button>
-          <button class="stage-tab" data-mode="video" id="tabVideo"
-                  role="tab" aria-selected="false" onclick="switchStage('video')">
-            Video Call
-          </button>
-        </div>
+      <!-- Step panes -->
+      <div class="step-content">
 
-        <!-- VIDEO MODE -->
-        <div class="stage-pane stage-video" id="stageVideo" role="tabpanel"
-             aria-labelledby="tabVideo" hidden>
-          <div class="video-container" id="videoContainer">
-            <div class="pre-session" id="preSession">
-              <div class="avatar-placeholder">
-                <p class="avatar-name">Coach Maya</p>
-                <p class="avatar-subtitle">Post-op rehab specialist</p>
-              </div>
-              <button class="start-btn" id="startBtn" onclick="startSession()">
-                Start Video Session
-              </button>
-              <p class="video-hint">
-                Video is the visceral surface. The chat tab is where actions happen.
-              </p>
-            </div>
-            <div class="loading-session" id="loadingSession" style="display:none">
-              <div class="spinner"></div>
-              <p>Coach Maya is preparing your session...</p>
-            </div>
-            <iframe
-              id="tavusFrame"
-              class="tavus-frame"
-              style="display:none"
-              allow="camera; microphone; autoplay"
-              allowfullscreen
-            ></iframe>
-          </div>
-        </div>
-
-        <!-- CHAT MODE (default) -->
-        <div class="stage-pane stage-chat" id="stageChat" role="tabpanel"
-             aria-labelledby="tabChat">
+        <!-- Step 1: Intake -->
+        <section class="step-pane" id="pane1" role="tabpanel">
           <div class="chat-card">
             <div class="chat-header">
-              <h3>Coach Maya</h3>
-              <span class="chat-tag">grounded in exercise library + cloud agent tools</span>
+              <div>
+                <h3>Patient Intake</h3>
+                <span class="chat-tag">A few quick questions to build your protocol</span>
+              </div>
               <button class="intake-cancel-btn" id="intakeCancelBtn"
-                      style="display:none" onclick="cancelFlow()">
-                ✕ cancel intake
-              </button>
+                      style="display:none" onclick="cancelFlow()">✕ cancel</button>
             </div>
             <div class="intake-progress" id="intakeProgressBar" style="display:none">
               <span class="intake-progress-label" id="intakeProgressLabel">Question 1 of 6</span>
@@ -140,59 +119,90 @@
             </div>
             <div class="chat-log" id="chatLog">
               <div class="chat-empty" id="chatEmpty">
-                Ask Coach Maya to swap an exercise, log a symptom, or plan next week.
-                Every recommendation links to a video. Every command opens a PR.
+                Answer a few quick questions and your personalized protocol will be ready.
               </div>
             </div>
-            <div class="chat-suggestions" id="chatSuggestions">
-              <button class="chat-chip" onclick="sendChatPreset('My knee felt tweaky on single-leg squats today, what should I swap to?')">
-                knee feels tweaky
-              </button>
-              <button class="chat-chip" onclick="sendChatPreset('Show me my mobility exercises for this week.')">
-                show mobility exercises
-              </button>
-              <button class="chat-chip" onclick="sendChatPreset('I am ready to progress - plan next week.')">
-                ready to progress
-              </button>
-            </div>
-
-            <div class="quick-actions" role="group" aria-label="Patient journey quick actions">
-              <button class="quick-action" id="triggerIntakeBtn"
-                      onclick="triggerIntake()" title="Patient intake">
-                1 intake
-              </button>
-              <button class="quick-action primary" id="generatePlanBtn"
-                      onclick="invokeAgent('weekly_plan')" title="Generate next week's protocol">
-                2 weekly plan
-              </button>
-              <button class="quick-action" id="triggerCheckinBtn"
-                      onclick="triggerCheckin()" title="Log today's check-in">
-                3 check-in
-              </button>
-              <button class="quick-action" id="reportSymptomBtn"
-                      onclick="reportSymptom()" title="Report a mid-session symptom">
-                4 symptom
-              </button>
-            </div>
-
             <form class="chat-input-row" id="chatInputRow" onsubmit="onChatSubmit(event)">
-              <input
-                type="text"
-                id="chatInput"
-                class="chat-input"
-                placeholder="Type to Coach Maya - ask, swap, plan, log..."
-                autocomplete="off"
-              />
+              <input type="text" id="chatInput" class="chat-input"
+                     placeholder="Press Enter to use the default, or type your answer..."
+                     autocomplete="off" />
               <button type="submit" class="chat-send-btn" id="chatSendBtn">Send</button>
             </form>
           </div>
-        </div>
-      </section>
+        </section>
 
+        <!-- Step 2: Weekly Plan -->
+        <section class="step-pane" id="pane2" hidden role="tabpanel">
+          <div class="plan-pane">
+            <div class="plan-cta" id="planCta">
+              <p class="plan-cta-label">Intake complete — generate this week's protocol.</p>
+              <button class="start-btn" id="generatePlanBtn"
+                      onclick="invokeAgent('weekly_plan')">
+                Generate Weekly Plan
+              </button>
+            </div>
+            <section class="card agent-trace-card" id="agentTraceCard" style="display:none">
+              <h4 class="trace-title">
+                Agent Trace
+                <span class="trace-meta" id="traceMeta"></span>
+              </h4>
+              <div class="trace-log" id="traceLog"></div>
+            </section>
+            <section class="card pr-diff-card" id="prDiffCard" style="display:none">
+              <h4>Protocol PR</h4>
+              <div id="prDiffContent"></div>
+            </section>
+          </div>
+        </section>
+
+        <!-- Step 3: Check-in -->
+        <section class="step-pane" id="pane3" hidden role="tabpanel">
+          <div class="chat-card">
+            <div class="chat-header">
+              <div>
+                <h3>Daily Check-in</h3>
+                <span class="chat-tag">Symptoms · session log · progress notes</span>
+              </div>
+              <button class="intake-cancel-btn" id="checkinCancelBtn"
+                      style="display:none" onclick="cancelFlow()">✕ cancel</button>
+            </div>
+            <div class="intake-progress" id="checkinProgressBar" style="display:none">
+              <span class="intake-progress-label" id="checkinProgressLabel">Question 1 of 5</span>
+              <div class="intake-progress-track">
+                <div class="intake-progress-fill" id="checkinProgressFill"></div>
+              </div>
+            </div>
+            <div class="chat-log" id="checkinLog">
+              <div class="chat-empty" id="checkinEmpty">
+                Ready to log your check-in when you are.
+              </div>
+            </div>
+            <form class="chat-input-row" onsubmit="onCheckinSubmit(event)">
+              <input type="text" id="checkinInput" class="chat-input"
+                     placeholder="Type your answer or press Enter for the default..."
+                     autocomplete="off" />
+              <button type="submit" class="chat-send-btn">Send</button>
+            </form>
+          </div>
+        </section>
+
+        <!-- Step 4: Start Session -->
+        <section class="step-pane" id="pane4" hidden role="tabpanel">
+          <div class="session-pane">
+            <div class="session-header">
+              <h2 id="sessionTitle">Today's Session</h2>
+              <p class="session-meta" id="sessionMeta"></p>
+            </div>
+            <div class="exercise-grid" id="exerciseGrid">
+              <p class="loading-text">Loading exercises...</p>
+            </div>
+          </div>
+        </section>
+
+      </div><!-- .step-content -->
     </main>
 
     <div class="toast" id="toast"></div>
-
   </div>
 
   <script src="/static/app.js"></script>
