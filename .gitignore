@@ -35,6 +35,10 @@ node_modules/
 out/
 .turbo/
 
+# Orchestrator local install mirror (native deps built outside space-path)
+orchestrator/node_modules
+orchestrator/package-lock.json
+
 # Local app data
 context.json
 health_cache.json

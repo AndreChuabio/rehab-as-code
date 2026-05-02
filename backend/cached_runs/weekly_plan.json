@@ -1,25 +1,26 @@
 {
   "flow": "weekly_plan",
-  "pr_url": "https://github.com/AndreChuabio/rehab-protocols-andre/pull/4",
-  "branch": "week-4-protocol",
+  "pr_url": "https://github.com/AndreChuabio/rehab-as-code/pull/2",
+  "branch": "protocols/week-4-progression",
   "artifacts": [
-    {"type": "issue", "number": 7},
-    {"type": "screenshot", "path": "artifacts/week4-diff.png"}
+    {"type": "issue", "number": 7}
   ],
   "events": [
-    {"type": "agent_started",   "timestamp": 0.0,  "label": "Cursor cloud agent picked up issue #7"},
-    {"type": "file_read",       "timestamp": 1.2,  "label": "read .cursorrules"},
-    {"type": "file_read",       "timestamp": 2.0,  "label": "read protocol.yaml"},
-    {"type": "file_read",       "timestamp": 3.1,  "label": "read data/wearables-2026-05-02.json"},
-    {"type": "file_read",       "timestamp": 4.0,  "label": "read data/symptoms-2026-05-02.md"},
-    {"type": "file_read",       "timestamp": 5.4,  "label": "read protocol-library/post-acl-week-4.yaml"},
-    {"type": "tool_call",       "timestamp": 6.8,  "label": "compute HRV trend (last 7d): 32 -> 41 ms"},
-    {"type": "tool_call",       "timestamp": 7.5,  "label": "evaluate progression criteria: load_tolerance ✓, ROM ✓"},
-    {"type": "branch_created",  "timestamp": 8.2,  "label": "git checkout -b week-4-protocol"},
-    {"type": "file_edit",       "timestamp": 9.0,  "label": "edit protocol.yaml: added single_leg_balance, increased squat depth"},
-    {"type": "commit_created",  "timestamp": 9.8,  "label": "Week 4 progression: load tolerance + neuro"},
-    {"type": "pr_opened",       "timestamp": 11.0, "label": "PR #4 opened against main",
-     "payload": {"pr_url": "https://github.com/AndreChuabio/rehab-protocols-andre/pull/4"}},
+    {"type": "agent_started",   "timestamp": 0.0,  "label": "orchestrator care-plan-coordinator starting flow weekly_plan", "payload": {"subagents": ["researcher", "evaluator", "planner"]}},
+    {"type": "file_read",       "timestamp": 1.2,  "label": "read protocols/.cursorrules"},
+    {"type": "file_read",       "timestamp": 2.0,  "label": "read protocols/protocol.yaml"},
+    {"type": "file_read",       "timestamp": 3.1,  "label": "read protocols/data/wearables-2026-05-02.json"},
+    {"type": "tool_call",       "timestamp": 4.0,  "label": "spawn sub-agent: evaluator", "payload": {"subagent": "evaluator"}},
+    {"type": "tool_call",       "timestamp": 5.2,  "label": "classify: progress (HRV trend 32 -> 41 ms, ROM 95)", "payload": {"classification": "progress"}},
+    {"type": "tool_call",       "timestamp": 6.0,  "label": "spawn sub-agent: researcher", "payload": {"subagent": "researcher"}},
+    {"type": "file_read",       "timestamp": 6.8,  "label": "read protocols/protocol-library/post-acl-week-4.yaml"},
+    {"type": "tool_call",       "timestamp": 7.6,  "label": "cite post-acl-week-4:34 (single_leg_balance)", "payload": {"citation": "post-acl-week-4:34"}},
+    {"type": "tool_call",       "timestamp": 8.2,  "label": "spawn sub-agent: planner", "payload": {"subagent": "planner"}},
+    {"type": "branch_created",  "timestamp": 9.0,  "label": "git checkout -b protocols/week-4-progression"},
+    {"type": "file_edit",       "timestamp": 9.8,  "label": "edit protocols/protocol.yaml: added single_leg_balance, increased squat depth"},
+    {"type": "commit_created",  "timestamp": 10.4, "label": "protocols: week-4-progression"},
+    {"type": "pr_opened",       "timestamp": 11.0, "label": "PR #2 opened against main",
+     "payload": {"prUrl": "https://github.com/AndreChuabio/rehab-as-code/pull/2"}},
     {"type": "agent_completed", "timestamp": 11.2, "label": "PR ready for review"}
   ]
 }

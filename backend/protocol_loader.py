@@ -1,5 +1,5 @@
 """
-Loader + writer for the rehab-protocols-andre repo.
+Loader + writer for the protocols/ subdirectory of the rehab-as-code repo.
 
 The repo is the message bus between backend and Cursor cloud agents:
   - Backend WRITES context files (wearables snapshot, symptom log) before
@@ -23,12 +23,20 @@ import httpx
 
 logger = logging.getLogger(__name__)
 
-PROTOCOL_REPO = os.getenv("PROTOCOL_REPO", "AndreChuabio/rehab-protocols-andre")
+PROTOCOL_REPO = os.getenv("PROTOCOL_REPO", "AndreChuabio/rehab-as-code")
 DEFAULT_BRANCH = os.getenv("PROTOCOL_BRANCH", "main")
+PROTOCOL_SUBDIR = os.getenv("PROTOCOL_SUBDIR", "protocols")
 
 
 def _raw_url(repo: str, branch: str, path: str) -> str:
     return f"https://raw.githubusercontent.com/{repo}/{branch}/{path}"
+
+
+def _in_subdir(path: str) -> str:
+    """Prefix a path with the protocol subdir. Safe to call with absolute paths."""
+    if path.startswith(f"{PROTOCOL_SUBDIR}/"):
+        return path
+    return f"{PROTOCOL_SUBDIR}/{path}" if PROTOCOL_SUBDIR else path
 
 
 def fetch_protocol(branch: str = DEFAULT_BRANCH) -> dict:
@@ -37,7 +45,7 @@ def fetch_protocol(branch: str = DEFAULT_BRANCH) -> dict:
     Falls back to a local stub if the repo isn't reachable yet (e.g., before
     seeding). Keeps the rest of the app working in offline dev.
     """
-    url = _raw_url(PROTOCOL_REPO, branch, "protocol.yaml")
+    url = _raw_url(PROTOCOL_REPO, branch, _in_subdir("protocol.yaml"))
     try:
         r = httpx.get(url, timeout=10.0)
         r.raise_for_status()
@@ -58,12 +66,14 @@ def write_context_files(
     repo before invoking an agent.
 
     Returns the mapping (caller decides how to push: gh CLI, API, etc).
+    All paths are under PROTOCOL_SUBDIR so the agent's file tool stays
+    scoped to the protocols/ area of the repo.
     """
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     suffix = "" if flow == "weekly_plan" else f"-{flow.replace('_', '-')}"
     files = {
-        f"data/wearables-{today}.json": json.dumps(wearables, indent=2),
-        f"data/symptoms-{today}{suffix}.md": _format_symptom_log(symptom_log),
+        _in_subdir(f"data/wearables-{today}.json"): json.dumps(wearables, indent=2),
+        _in_subdir(f"data/symptoms-{today}{suffix}.md"): _format_symptom_log(symptom_log),
     }
     return files
 

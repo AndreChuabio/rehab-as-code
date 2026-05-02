@@ -5,8 +5,10 @@ Selection is driven by the AGENT_PROVIDER env var. Defaults to cached replay
 (demo-safe). Switching providers is a config change, not a code change.
 
 Supported values:
-    cursor_github   -- primary path: @cursor GitHub mention via gh CLI
-    cursor_api      -- fallback: direct Cursor API (stub until access confirmed)
+    cursor_sdk      -- live path: Cursor TypeScript SDK via Node helper
+                       (orchestrator/), supports parent + named sub-agents
+    cursor_github   -- fallback path: @cursor GitHub mention via gh CLI
+    cursor_api      -- stub: direct REST (kept for future use)
     cached_replay   -- demo path: replay pre-captured trace JSON
     mock            -- dev path: hardcoded fake PR
 """
@@ -44,6 +46,9 @@ def get_agent(provider: str | None = None) -> CodingAgent:
     """
     name = (provider or os.getenv("AGENT_PROVIDER") or "cached_replay").lower()
 
+    if name == "cursor_sdk":
+        from .cursor_sdk import CursorSdkAgent
+        return CursorSdkAgent()
     if name == "cursor_github":
         from .cursor_github import CursorGitHubAgent
         return CursorGitHubAgent()
@@ -59,5 +64,6 @@ def get_agent(provider: str | None = None) -> CodingAgent:
 
     raise ValueError(
         f"Unknown AGENT_PROVIDER {name!r}. "
-        f"Expected one of: cursor_github, cursor_api, cached_replay, mock."
+        f"Expected one of: cursor_sdk, cursor_github, cursor_api, "
+        f"cached_replay, mock."
     )

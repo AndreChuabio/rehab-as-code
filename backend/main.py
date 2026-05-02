@@ -86,14 +86,17 @@ def root():
 def debug_env():
     """Quick check that all env vars are loaded (values masked)."""
     def mask(val):
-        if not val: return "❌ MISSING"
-        return f"✅ {val[:6]}..."
+        if not val:
+            return "MISSING"
+        return f"set ({val[:6]}...)"
     return {
         "ANTHROPIC_API_KEY":   mask(os.getenv("ANTHROPIC_API_KEY")),
         "TAVUS_API_KEY":       mask(os.getenv("TAVUS_API_KEY")),
         "TAVUS_REPLICA_ID":    mask(os.getenv("TAVUS_REPLICA_ID")),
         "TAVUS_PERSONA_ID":    mask(os.getenv("TAVUS_PERSONA_ID")),
-        "TRANSITION_API_KEY": mask(os.getenv("TRANSITION_API_KEY")),
+        "CURSOR_API_KEY":      mask(os.getenv("CURSOR_API_KEY")),
+        "AGENT_PROVIDER":      os.getenv("AGENT_PROVIDER") or "cached_replay",
+        "DEMO_LIVE_AGENT":     os.getenv("DEMO_LIVE_AGENT") or "0",
     }
 
 
@@ -202,37 +205,153 @@ def protocol():
 
 
 class AgentInvokeRequest(BaseModel):
-    flow: str = "weekly_plan"               # weekly_plan | symptom_adjustment
+    flow: str = "weekly_plan"               # weekly_plan | symptom_adjustment | intake | checkin
     symptom_text: str = ""                  # used for symptom_adjustment
+    intake_text: str = ""                   # used for intake
+    checkin_text: str = ""                  # used for checkin
     provider: str | None = None             # override AGENT_PROVIDER per call
 
 
-@app.post("/agent/invoke")
-async def agent_invoke(req: AgentInvokeRequest):
-    """Kick off a Cursor cloud agent run.
+async def _invoke_with_fallback(
+    req: AgentInvokeRequest,
+) -> tuple[object, "AgentInvocation"]:
+    """Run the agent. On any live-provider failure, fall back to cached_replay.
 
-    Provider is resolved by the factory in agents/__init__.py — this endpoint
-    is provider-agnostic. The same code path works for live Cursor runs and
-    cached-replay demo playback.
+    The demo path is always cached_replay unless DEMO_LIVE_AGENT=1. This keeps
+    the stage deterministic while still letting us flip to the live orchestrator
+    for real captures and sponsor-table demos.
     """
-    agent = get_agent(req.provider)
+    demo_live = os.getenv("DEMO_LIVE_AGENT", "0") == "1"
+    provider = req.provider
+    if provider is None:
+        provider = (
+            os.getenv("AGENT_PROVIDER", "cached_replay") if demo_live else "cached_replay"
+        )
+
     health = get_health_data()
+    symptom_or_note = req.symptom_text or req.intake_text or req.checkin_text
     context_files = write_context_files(
         flow=req.flow,
         wearables=health,
-        symptom_log=req.symptom_text or "(no symptom report attached)",
+        symptom_log=symptom_or_note or "(no patient note attached)",
     )
-    prompt = _build_agent_prompt(req.flow, health, req.symptom_text)
-
+    prompt = _build_agent_prompt(
+        flow=req.flow,
+        health=health,
+        symptom_text=req.symptom_text,
+        intake_text=req.intake_text,
+        checkin_text=req.checkin_text,
+    )
     invocation_request = InvocationRequest(
         repo=PROTOCOL_REPO,
         prompt=prompt,
         context_files=context_files,
         flow=req.flow,  # type: ignore[arg-type]
     )
-    invocation = await agent.invoke(invocation_request)
+
+    agent = get_agent(provider)
+    try:
+        invocation = await agent.invoke(invocation_request)
+        return agent, invocation
+    except Exception as exc:
+        logger.warning(
+            "live agent provider %s failed (%s); falling back to cached_replay",
+            provider,
+            exc,
+        )
+        fallback = get_agent("cached_replay")
+        invocation = await fallback.invoke(invocation_request)
+        return fallback, invocation
+
+
+@app.post("/agent/invoke")
+async def agent_invoke(req: AgentInvokeRequest):
+    """Kick off a cloud-agent orchestrated run.
+
+    Provider selection, live/replay gating, and auto-fallback live in
+    _invoke_with_fallback(). Every trigger endpoint below funnels through it.
+    """
+    agent, invocation = await _invoke_with_fallback(req)
     _INVOCATIONS[invocation.invocation_id] = (agent, invocation)
     return {
+        "invocation_id": invocation.invocation_id,
+        "pr_url": invocation.pr_url,
+        "branch": invocation.branch,
+        "provider": agent.name,
+    }
+
+
+# ---- Patient-journey trigger endpoints ----------------------------------
+# All four trigger endpoints funnel through the same orchestrator. Only the
+# `flow` and body fields change. This is the "5 triggers, 1 orchestrator"
+# story for the pitch. Apple Health sync stays on /health-sync above.
+
+
+class IntakeRequest(BaseModel):
+    intake_text: str
+
+
+class CheckinRequest(BaseModel):
+    checkin_text: str
+
+
+class SymptomRequest(BaseModel):
+    symptom_text: str
+
+
+@app.post("/triggers/intake")
+async def trigger_intake(body: IntakeRequest):
+    """Patient intake form submitted -> initialize protocol."""
+    req = AgentInvokeRequest(flow="intake", intake_text=body.intake_text)
+    agent, invocation = await _invoke_with_fallback(req)
+    _INVOCATIONS[invocation.invocation_id] = (agent, invocation)
+    return {
+        "trigger": "intake",
+        "invocation_id": invocation.invocation_id,
+        "pr_url": invocation.pr_url,
+        "branch": invocation.branch,
+        "provider": agent.name,
+    }
+
+
+@app.post("/triggers/weekly-cron")
+async def trigger_weekly_cron():
+    """Weekly schedule -> generate next week's protocol."""
+    req = AgentInvokeRequest(flow="weekly_plan")
+    agent, invocation = await _invoke_with_fallback(req)
+    _INVOCATIONS[invocation.invocation_id] = (agent, invocation)
+    return {
+        "trigger": "weekly-cron",
+        "invocation_id": invocation.invocation_id,
+        "pr_url": invocation.pr_url,
+        "branch": invocation.branch,
+        "provider": agent.name,
+    }
+
+
+@app.post("/triggers/checkin")
+async def trigger_checkin(body: CheckinRequest):
+    """Daily check-in logged -> append to log, evaluate trend."""
+    req = AgentInvokeRequest(flow="checkin", checkin_text=body.checkin_text)
+    agent, invocation = await _invoke_with_fallback(req)
+    _INVOCATIONS[invocation.invocation_id] = (agent, invocation)
+    return {
+        "trigger": "checkin",
+        "invocation_id": invocation.invocation_id,
+        "pr_url": invocation.pr_url,
+        "branch": invocation.branch,
+        "provider": agent.name,
+    }
+
+
+@app.post("/triggers/symptom")
+async def trigger_symptom(body: SymptomRequest):
+    """Mid-session symptom report -> patch protocol."""
+    req = AgentInvokeRequest(flow="symptom_adjustment", symptom_text=body.symptom_text)
+    agent, invocation = await _invoke_with_fallback(req)
+    _INVOCATIONS[invocation.invocation_id] = (agent, invocation)
+    return {
+        "trigger": "symptom",
         "invocation_id": invocation.invocation_id,
         "pr_url": invocation.pr_url,
         "branch": invocation.branch,
@@ -262,24 +381,50 @@ async def agent_stream(invocation_id: str):
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
-def _build_agent_prompt(flow: str, health: dict, symptom_text: str) -> str:
-    """Compose the natural-language task we'll hand to the cloud agent."""
+def _build_agent_prompt(
+    flow: str,
+    health: dict,
+    symptom_text: str = "",
+    intake_text: str = "",
+    checkin_text: str = "",
+) -> str:
+    """Compose the natural-language task addendum for a given flow.
+
+    The orchestrator config's `parent.prompt` + the flow's `addon` already
+    carry the role + objective. This function supplies only the
+    per-invocation context (wearables summary, patient note) that changes
+    between runs.
+    """
+    summary = (
+        f"Wearables snapshot: sleep_score={health.get('sleep_score', 'n/a')}, "
+        f"hrv_ms={health.get('hrv_ms', 'n/a')}, "
+        f"recovery_score={health.get('recovery_score', 'n/a')}."
+    )
+
     if flow == "symptom_adjustment":
         return (
-            "Patient reported a symptom mid-session. "
-            "Adjust the current week's protocol minimally to accommodate.\n\n"
-            f"Symptom report: {symptom_text}\n\n"
+            f"{summary}\n\n"
+            f"Patient symptom report: {symptom_text or '(none)'}\n\n"
             "Cite a regression entry from protocol-library/regressions/ in the PR body."
         )
-    # Default: weekly plan generation
+    if flow == "intake":
+        return (
+            f"{summary}\n\n"
+            f"Intake form: {intake_text or '(none — initialize with phase defaults)'}\n\n"
+            "Initialize protocol.yaml from the matching protocol-library/ entry."
+        )
+    if flow == "checkin":
+        return (
+            f"{summary}\n\n"
+            f"Today's check-in: {checkin_text or '(no note)'}\n\n"
+            "Append to log.yaml. Flag any trend that should trigger a follow-up PR."
+        )
+    # Default: weekly_plan
     return (
-        "Generate the next week's protocol for the patient. "
-        "Read the just-pushed wearables snapshot, evaluate progression criteria "
-        "from the current protocol.yaml, and consult protocol-library/ for the "
-        "appropriate next-phase progressions.\n\n"
-        f"HRV trend visible in data/wearables-*.json. Current sleep score: "
-        f"{health.get('sleep_score', 'n/a')}.\n\n"
-        "Open a PR following .cursorrules conventions."
+        f"{summary}\n\n"
+        "Generate the next week's protocol. Evaluate progression criteria on the "
+        "current protocol.yaml and consult protocol-library/ for phase-appropriate "
+        "progressions."
     )
 
 

@@ -41,13 +41,14 @@ async def main() -> None:
         flow="weekly_plan",
     )
 
-    # Exercise both demo-safe providers. Live providers (cursor_github,
-    # cursor_api) are skipped here — they need GitHub auth + Cursor access.
-    for provider in ("mock", "cached_replay"):
+    # Exercise the demo-safe providers plus cursor_sdk (which needs
+    # CURSOR_API_KEY + orchestrator/ installed). Missing deps are logged, not
+    # fatal — we only need one working provider for the demo.
+    for provider in ("mock", "cached_replay", "cursor_sdk"):
         try:
             await exercise(provider, request)
         except Exception as exc:
-            print(f"  FAILED: {exc}")
+            print(f"  SKIPPED/FAILED ({provider}): {exc}")
 
 
 if __name__ == "__main__":

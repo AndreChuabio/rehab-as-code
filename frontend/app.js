@@ -193,7 +193,7 @@ function renderFocus(items) {
 // Cloud agent invocation + SSE trace stream
 // ---------------------------------------------------------------------------
 
-async function invokeAgent(flow, symptomText = "") {
+async function invokeAgent(flow, body = {}) {
   const traceCard = document.getElementById("agentTraceCard");
   const traceList = document.getElementById("traceList");
   const prCard = document.getElementById("prDiffCard");
@@ -201,13 +201,16 @@ async function invokeAgent(flow, symptomText = "") {
   traceList.innerHTML = "";
   prCard.style.display = "none";
 
+  resetAgentTeam();
+  activateTeamNode("parent");
   setAgentButtonsDisabled(true);
 
   try {
+    const payload = { flow, ...body };
     const res = await fetch(`${API_BASE}/agent/invoke`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ flow, symptom_text: symptomText }),
+      body: JSON.stringify(payload),
     });
     if (!res.ok) throw new Error(`invoke failed: ${res.status}`);
     const { invocation_id, pr_url, branch, provider } = await res.json();
@@ -230,16 +233,35 @@ function streamTrace(invocationId, onDone) {
   const traceList = document.getElementById("traceList");
   const url = `${API_BASE}/agent/stream/${encodeURIComponent(invocationId)}`;
   const source = new EventSource(url);
+  let activeSubagent = null;
 
   source.onmessage = (e) => {
     try {
       const event = JSON.parse(e.data);
+
+      // Light up the team-node strip when a sub-agent is spawned.
+      const subagent = event?.payload?.subagent;
+      if (subagent) {
+        activateTeamNode(subagent);
+        activeSubagent = subagent;
+      } else if (event.type === "pr_opened" || event.type === "agent_completed") {
+        activeSubagent = null;
+      }
+
       const li = document.createElement("li");
       li.className = `trace-event trace-${event.type}`;
+      if (activeSubagent && !subagent) {
+        li.classList.add("trace-child");
+        li.dataset.subagent = activeSubagent;
+      }
       const glyph = TRACE_GLYPH[event.type] || "[event]";
+      const subBadge = subagent
+        ? `<span class="trace-subagent">${escapeHtml(subagent)}</span>`
+        : "";
       li.innerHTML = `
         <span class="trace-glyph">${glyph}</span>
         <span class="trace-ts">${event.timestamp.toFixed(1)}s</span>
+        ${subBadge}
         <span class="trace-label">${escapeHtml(event.label)}</span>
       `;
       traceList.appendChild(li);
@@ -261,6 +283,17 @@ function streamTrace(invocationId, onDone) {
   };
 }
 
+function resetAgentTeam() {
+  document.querySelectorAll(".team-node").forEach((n) => {
+    n.classList.remove("active");
+  });
+}
+
+function activateTeamNode(role) {
+  const node = document.querySelector(`.team-node[data-role="${role}"]`);
+  if (node) node.classList.add("active");
+}
+
 function renderPullRequest(prUrl, branch) {
   const card = document.getElementById("prDiffCard");
   document.getElementById("prLink").href = prUrl;
@@ -276,12 +309,34 @@ function reportSymptom() {
     "What did you feel during the exercise? (e.g., 'knee felt tweaky on single-leg squats')",
   );
   if (!text || !text.trim()) return;
-  invokeAgent("symptom_adjustment", text.trim());
+  invokeAgent("symptom_adjustment", { symptom_text: text.trim() });
+}
+
+function triggerIntake() {
+  const text = prompt(
+    "Patient intake (free-text): age / injury / date of surgery / current pain level",
+    "Andre, 26, ACL reconstruction 3 weeks ago, mild pain at 110 flexion",
+  );
+  if (!text || !text.trim()) return;
+  invokeAgent("intake", { intake_text: text.trim() });
+}
+
+function triggerCheckin() {
+  const text = prompt(
+    "Today's check-in (how did the session go?)",
+    "Hit all 3 sets of heel slides, quad set felt stronger than yesterday",
+  );
+  if (!text || !text.trim()) return;
+  invokeAgent("checkin", { checkin_text: text.trim() });
 }
 
 function setAgentButtonsDisabled(disabled) {
-  document.getElementById("generatePlanBtn").disabled = disabled;
-  document.getElementById("reportSymptomBtn").disabled = disabled;
+  ["generatePlanBtn", "reportSymptomBtn", "triggerIntakeBtn", "triggerCheckinBtn"].forEach(
+    (id) => {
+      const btn = document.getElementById(id);
+      if (btn) btn.disabled = disabled;
+    },
+  );
 }
 
 // ---------------------------------------------------------------------------

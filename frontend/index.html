@@ -80,18 +80,44 @@
 
       <aside class="agent-panel">
         <section class="card agent-actions-card">
-          <h3>Cloud Agent</h3>
-          <p class="agent-blurb">Cursor cloud agent updates protocol.yaml in
-            <a href="#" id="repoLink" target="_blank">rehab-protocols-andre</a>.
+          <h3>Cloud Agent Orchestrator</h3>
+          <p class="agent-blurb">Parent + 3 sub-agents edit protocol.yaml in
+            <a href="https://github.com/AndreChuabio/rehab-as-code/tree/main/protocols" id="repoLink" target="_blank">rehab-as-code/protocols</a>.
           </p>
-          <div class="agent-buttons">
-            <button class="agent-btn primary" id="generatePlanBtn"
-                    onclick="invokeAgent('weekly_plan')">
-              Generate this week's plan
+
+          <div class="agent-team" id="agentTeam" aria-label="Agent team">
+            <div class="team-node parent" data-role="parent" title="Orchestrator">
+              <span class="team-label">coordinator</span>
+            </div>
+            <div class="team-children">
+              <div class="team-node" data-role="researcher" title="Researcher">
+                <span class="team-label">researcher</span>
+              </div>
+              <div class="team-node" data-role="evaluator" title="Evaluator">
+                <span class="team-label">evaluator</span>
+              </div>
+              <div class="team-node" data-role="planner" title="Planner">
+                <span class="team-label">planner</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="trigger-strip" role="group" aria-label="Patient journey triggers">
+            <button class="trigger-btn" id="triggerIntakeBtn"
+                    onclick="triggerIntake()" title="Intake form submitted">
+              <span class="trigger-num">1</span><span class="trigger-name">intake</span>
             </button>
-            <button class="agent-btn secondary" id="reportSymptomBtn"
-                    onclick="reportSymptom()">
-              Report a symptom
+            <button class="trigger-btn primary" id="generatePlanBtn"
+                    onclick="invokeAgent('weekly_plan')" title="Generate next week's protocol">
+              <span class="trigger-num">2</span><span class="trigger-name">weekly plan</span>
+            </button>
+            <button class="trigger-btn" id="triggerCheckinBtn"
+                    onclick="triggerCheckin()" title="Log today's check-in">
+              <span class="trigger-num">3</span><span class="trigger-name">check-in</span>
+            </button>
+            <button class="trigger-btn" id="reportSymptomBtn"
+                    onclick="reportSymptom()" title="Report a mid-session symptom">
+              <span class="trigger-num">4</span><span class="trigger-name">symptom</span>
             </button>
           </div>
         </section>

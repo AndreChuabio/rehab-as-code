@@ -89,6 +89,93 @@ body {
 .agent-btn.secondary:hover:not(:disabled) { background: #232a37; border-color: var(--accent2); }
 .agent-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* ── Agent team strip ──────────────────────────────────────────────── */
+.agent-team {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 6px 14px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+.team-children {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+}
+.team-node {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--muted);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+.team-node.parent {
+  padding: 5px 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.team-node.active {
+  background: rgba(63, 182, 139, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(63, 182, 139, 0.08);
+}
+
+/* ── Patient-journey trigger strip ────────────────────────────────── */
+.trigger-strip {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  margin-top: 4px;
+}
+.trigger-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  transition: all 0.12s ease;
+}
+.trigger-btn:hover:not(:disabled) {
+  border-color: var(--accent2);
+  background: #232a37;
+}
+.trigger-btn.primary {
+  background: var(--accent);
+  color: #0d1117;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.trigger-btn.primary:hover:not(:disabled) { filter: brightness(1.1); }
+.trigger-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.trigger-num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  background: rgba(0,0,0,0.25);
+  font-size: 10px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+.trigger-btn.primary .trigger-num { background: rgba(0,0,0,0.15); }
+.trigger-name { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+
 /* Trace list */
 .agent-trace-card {
   max-height: 360px;
@@ -97,7 +184,7 @@ body {
 .trace-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
 .trace-event {
   display: grid;
-  grid-template-columns: 64px 44px 1fr;
+  grid-template-columns: 64px 44px auto 1fr;
   gap: 8px;
   align-items: baseline;
   padding: 6px 8px;
@@ -108,8 +195,23 @@ body {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   animation: fadeIn 0.25s ease-out;
 }
+.trace-event.trace-child {
+  margin-left: 14px;
+  border-left-color: var(--accent2);
+  background: rgba(74, 144, 217, 0.06);
+}
 .trace-glyph { color: var(--muted); font-weight: 600; }
 .trace-ts { color: var(--muted); text-align: right; }
+.trace-subagent {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(74, 144, 217, 0.18);
+  color: var(--accent2);
+  font-weight: 600;
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
 .trace-label { color: var(--text); word-break: break-word; }
 .trace-pr_opened { border-left-color: var(--accent); }
 .trace-pr_opened .trace-glyph { color: var(--accent); }

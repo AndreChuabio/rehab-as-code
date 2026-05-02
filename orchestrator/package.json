@@ -1,0 +1,24 @@
+{
+  "name": "rehab-orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cursor cloud-agent orchestrator for RehabAsCode. Reads a YAML config, runs a parent agent with named sub-agents, streams NDJSON trace events to stdout.",
+  "type": "module",
+  "bin": {
+    "rehab-orchestrator": "./src/orchestrator.ts"
+  },
+  "scripts": {
+    "run": "tsx src/orchestrator.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@cursor/sdk": "^1.0.0",
+    "js-yaml": "^4.1.0"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.4.0"
+  }
+}
