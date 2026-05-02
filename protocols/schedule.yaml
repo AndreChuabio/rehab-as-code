@@ -3,14 +3,15 @@
 
 week: 3
 patient: Andre
-generated_by: "care-plan-coordinator (intake summary); researcher (PRIMARY post-acl-week-3.yaml); evaluator (HOLD: HRV >8 ms vs prior + streak)"
+generated_by: "care-plan-coordinator (intake: Andre); researcher PRIMARY protocol-library/post-acl-week-3.yaml; evaluator HOLD — HRV ~19 ms / 7 d decline exceeds -8 ms threshold"
 last_updated: "2026-05-02"
 
 hold_note: >-
-  Evaluator HOLD: wearable HRV rule — >8 ms decline vs prior window with declining trend / low-HRV streak;
-  hold entire protocol (no week-4 progression, no broad arbitrary regression). Maintain week-3 baseline from
-  protocol-library/post-acl-week-3.yaml only. Intake: Andre (26), ACL reconstruction ~3 weeks ago, pain 3/10,
-  mild pain ~110° flexion; ROM targets stay staged to library week 3. Mon/Wed/Fri session order below is fixed.
+  Evaluator HOLD: wearable HRV rule — ~19 ms decline over 7 days vs prior window exceeds the -8 ms hold threshold;
+  hold entire protocol (no advancement to week 4 until clearance + HRV improves; no progression from researcher
+  library beyond post-acl-week-3 baseline). Maintain exercises per protocol-library/post-acl-week-3.yaml only.
+  Intake: Andre (26), ACL ~3 wk post-op, pain 3/10; mild pain at ~110° flexion supports keeping heel_slides
+  ROM_target_deg 100 (library milestone; do not decrease ROM without pain at target ROM). Mon/Wed/Fri order below.
 
 session_order:
   - stationary_bike

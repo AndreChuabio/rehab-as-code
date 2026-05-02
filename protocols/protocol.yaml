@@ -4,7 +4,7 @@
 patient: Andre
 phase: post-ACL reconstruction
 week: 3
-generated_by: "care-plan-coordinator (intake summary); researcher (PRIMARY post-acl-week-3.yaml, no week-4 substitution until clearance+HRV stable); evaluator (HOLD: >8 ms HRV decline vs prior window/low-HRV streak, hold entire protocol; no advancement, no arbitrary broad regression)"
+generated_by: "care-plan-coordinator (intake: Andre, 26, ACL reconstruction ~3 wk, pain 3/10); researcher PRIMARY protocol-library/post-acl-week-3.yaml (week_range [3,3]); evaluator HOLD — wearable HRV rule: ~19 ms decline over 7 d vs prior window exceeds -8 ms threshold; hold entire protocol (no week-4 progression)."
 last_updated: "2026-05-02"
 
 session_targets:
