@@ -1061,6 +1061,71 @@ body {
   font-family: ui-monospace, monospace;
 }
 
+/* Exercise gallery (step 3) */
+.exercise-gallery {
+  width: 100%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+  margin: 8px 0;
+}
+.gallery-main { position: relative; }
+.gallery-video-wrap { width: 100%; background: #000; aspect-ratio: 16/9; }
+.gallery-video-wrap video,
+.gallery-video-wrap img,
+.gallery-video-wrap a { width: 100%; height: 100%; display: block; object-fit: cover; }
+.gallery-video-wrap a { position: relative; }
+.gallery-video-wrap .play-btn {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 48px; color: #fff; text-shadow: 0 2px 8px rgba(0,0,0,.6);
+  background: rgba(0,0,0,.25);
+}
+.gallery-video-wrap .play-btn:hover { background: rgba(0,0,0,.4); }
+.gallery-main-info {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px 4px;
+  flex-wrap: wrap;
+}
+.gallery-main-title { font-weight: 600; font-size: 15px; }
+.gallery-main-dose  { font-size: 12px; color: var(--muted); }
+.gallery-cues {
+  list-style: none; padding: 0 14px 12px; margin: 0;
+  display: flex; flex-wrap: wrap; gap: 6px;
+}
+.gallery-cues li {
+  font-size: 12px; color: var(--muted);
+  background: var(--surface2); border-radius: 6px; padding: 3px 8px;
+}
+.gallery-thumbs {
+  display: flex; gap: 0;
+  border-top: 1px solid var(--border);
+  overflow-x: auto;
+}
+.gallery-thumb-btn {
+  flex: 1; min-width: 80px;
+  background: none; border: none; border-right: 1px solid var(--border);
+  cursor: pointer; padding: 0; display: flex; flex-direction: column;
+  align-items: center; gap: 0; transition: background 0.15s;
+}
+.gallery-thumb-btn:last-child { border-right: none; }
+.gallery-thumb-btn:hover { background: var(--surface2); }
+.gallery-thumb-btn.active { background: var(--surface2); box-shadow: inset 0 2px 0 var(--accent); }
+.gallery-thumb-video,
+.gallery-thumb-img,
+.gallery-thumb-blank {
+  width: 100%; aspect-ratio: 16/9; object-fit: cover;
+  display: block; pointer-events: none;
+}
+.gallery-thumb-blank { background: var(--surface2); }
+.gallery-thumb-label {
+  font-size: 10px; color: var(--muted);
+  padding: 4px 6px; text-align: center;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%;
+}
+.gallery-thumb-btn.active .gallery-thumb-label { color: var(--accent); }
+
 /* Plan builder (step 2 — per-exercise add rows) */
 .plan-builder .plan-rows { display: flex; flex-direction: column; gap: 6px; margin: 10px 0; }
 .plan-row {
