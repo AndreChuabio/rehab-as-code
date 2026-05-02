@@ -387,29 +387,46 @@ def protocol():
 
 @app.get("/protocol/exercises")
 def protocol_exercises():
-    """Return protocol exercises enriched with KB video data for the Guided Exercise view."""
+    """Return protocol exercises enriched with KB video data for the Guided Exercise view.
+    Falls back to the week-4 demo snapshot when the live protocol has no exercises yet."""
     import exercise_kb
+    import yaml as _yaml
     p = fetch_protocol()
+    exercises_raw = p.get("exercises", [])
+
+    # Demo fallback: if protocol is still pending or has no exercises, use the snapshot
+    if not exercises_raw:
+        snapshot = Path(__file__).parent.parent / "protocols" / ".demo-snapshots" / "protocol-week4.yaml"
+        if snapshot.exists():
+            with open(snapshot) as f:
+                demo = _yaml.safe_load(f)
+            exercises_raw = demo.get("exercises", [])
+            p = demo
+
     enriched = []
-    for ex in p.get("exercises", []):
+    for ex in exercises_raw:
         ex_id = ex.get("id") or ex.get("name", "")
         kb = exercise_kb.find_by_id(ex_id) or exercise_kb.find_by_id(ex_id.replace(" ", "_").lower())
         card = exercise_kb.to_card(kb) if kb else {}
+        spec = (
+            f"{ex.get('sets', '')}×{ex.get('reps', '')} {ex.get('load', '')}".strip(" ×")
+            or ex.get("sets_reps") or ex.get("spec") or ""
+        )
         enriched.append({
             "id": ex_id,
             "name": ex.get("name") or ex_id,
-            "spec": ex.get("sets_reps") or ex.get("spec") or "",
+            "spec": spec,
             "youtube_id": card.get("youtube_id", ""),
             "youtube_embed_url": card.get("youtube_embed_url", ""),
             "youtube_watch_url": card.get("youtube_watch_url", ""),
             "thumbnail_url": card.get("thumbnail_url", ""),
             "cues": card.get("cues", []),
-            "default_dose": card.get("default_dose", ex.get("sets_reps", "")),
+            "default_dose": card.get("default_dose", spec),
         })
     return {
-        "patient": p.get("patient"),
-        "phase": p.get("phase"),
-        "week": p.get("week"),
+        "patient": p.get("patient") or "Andre",
+        "phase": p.get("phase") or "post-ACL reconstruction",
+        "week": p.get("week") or 1,
         "exercises": enriched,
     }
 

@@ -325,16 +325,14 @@ async function invokeAgent(flow, body = {}) {
     const providerEl = document.getElementById("providerName");
     if (providerEl) providerEl.textContent = provider;
 
-    streamTrace(invocation_id, () => {
-      if (pr_url) {
-        renderPullRequest(pr_url, branch);
-      }
+    streamTrace(invocation_id, async () => {
       setAgentButtonsDisabled(false);
       setAgentStatus("done", "ready");
-      // Pull the latest protocol from GitHub so the left rail reflects any
-      // changes the agent committed. checkin / symptom flows may not change
-      // protocol.yaml, but refreshing is cheap and keeps state consistent.
       refreshProtocol();
+      // For plan-generating flows, show the plan inline — no PR approve step
+      if (flow === "intake" || flow === "weekly_plan") {
+        await showPlanInline();
+      }
     });
   } catch (e) {
     console.error(e);
@@ -658,6 +656,36 @@ function setAgentButtonsDisabled(disabled) {
     const btn = document.getElementById(id);
     if (btn) btn.disabled = disabled;
   });
+}
+
+// ---------------------------------------------------------------------------
+// Plan display — used after intake/generate-plan completes
+// ---------------------------------------------------------------------------
+
+async function showPlanInline() {
+  const log = document.getElementById("chatLog");
+  if (!log) return;
+
+  try {
+    const res = await fetch(`${API_BASE}/protocol/exercises`);
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const data = await res.json();
+    const exercises = data.exercises || [];
+
+    const header = document.createElement("div");
+    header.className = "chat-bubble coach";
+    header.innerHTML = `<strong>Your Week ${data.week || 1} Protocol — ${data.phase || "rehab"}</strong><br>${exercises.length} exercises ready. Hit <em>4 guided exercise</em> to work through them with video.`;
+    log.appendChild(header);
+
+    exercises.forEach((ex) => renderExerciseCard(ex));
+    scrollChatLog();
+
+    // Shift the primary button to step 4 now that plan is ready
+    document.getElementById("generatePlanBtn")?.classList.remove("primary");
+    document.getElementById("guidedExerciseBtn")?.classList.add("primary");
+  } catch (e) {
+    appendChatBubble("error", `Could not load plan: ${e.message}`);
+  }
 }
 
 // ---------------------------------------------------------------------------
