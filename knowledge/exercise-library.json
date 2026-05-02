@@ -1,0 +1,126 @@
+{
+  "schema_version": "1.0.0",
+  "description": "Curated post-ACL rehab exercise library. Each entry maps a protocol exercise id to a YouTube video and 3 verbal cues. Used by coach_chat.py for grounded recommendations and by the chat UI for embedded video cards.",
+  "exercises": [
+    {
+      "id": "quad_sets",
+      "name": "Quad Sets",
+      "phase": ["acute", "subacute"],
+      "youtube_id": "RZkbu3WVeoI",
+      "thumbnail_url": "https://img.youtube.com/vi/RZkbu3WVeoI/hqdefault.jpg",
+      "cues": [
+        "Lock the knee fully straight",
+        "Drive your heel into the table",
+        "Hold each contraction 5 seconds"
+      ],
+      "regression_of": null,
+      "progression_to": ["terminal_knee_extension"],
+      "default_dose": "3 x 15, 5s holds"
+    },
+    {
+      "id": "heel_slides",
+      "name": "Heel Slides",
+      "phase": ["acute", "subacute"],
+      "youtube_id": "B1Iiq_XfNUI",
+      "thumbnail_url": "https://img.youtube.com/vi/B1Iiq_XfNUI/hqdefault.jpg",
+      "cues": [
+        "Slide heel toward the glute, active only",
+        "Stop at first sign of swelling",
+        "Pause 2 seconds at end-range"
+      ],
+      "regression_of": null,
+      "progression_to": ["stationary_bike"],
+      "default_dose": "3 x 10, ROM target 100 deg"
+    },
+    {
+      "id": "terminal_knee_extension",
+      "name": "Terminal Knee Extension (band)",
+      "phase": ["subacute"],
+      "youtube_id": "C-cn_NfOpTU",
+      "thumbnail_url": "https://img.youtube.com/vi/C-cn_NfOpTU/hqdefault.jpg",
+      "cues": [
+        "Loop band behind knee, anchor in front",
+        "Lock out the last 30 degrees only",
+        "No quad lag - re-cue if heel lifts"
+      ],
+      "regression_of": null,
+      "progression_to": ["mini_squat"],
+      "default_dose": "3 x 12, yellow band"
+    },
+    {
+      "id": "stationary_bike",
+      "name": "Stationary Bike (ROM-focus)",
+      "phase": ["subacute", "strength"],
+      "youtube_id": "AB3hp4cP6XU",
+      "thumbnail_url": "https://img.youtube.com/vi/AB3hp4cP6XU/hqdefault.jpg",
+      "cues": [
+        "Start with seat high, lower 1cm per session",
+        "RPE 4 out of 10 - conversational",
+        "Add resistance only if pain-free"
+      ],
+      "regression_of": null,
+      "progression_to": ["wall_sit"],
+      "default_dose": "10 min, RPE 4"
+    },
+    {
+      "id": "glute_bridge",
+      "name": "Glute Bridge",
+      "phase": ["acute", "subacute"],
+      "youtube_id": "8bbE64NuDTU",
+      "thumbnail_url": "https://img.youtube.com/vi/8bbE64NuDTU/hqdefault.jpg",
+      "cues": [
+        "Squeeze glutes before you lift",
+        "Drive through both heels evenly",
+        "Pause 2 seconds at the top"
+      ],
+      "regression_of": null,
+      "progression_to": ["single_leg_glute_bridge"],
+      "default_dose": "3 x 12"
+    },
+    {
+      "id": "wall_sit",
+      "name": "Wall Sit",
+      "phase": ["subacute", "strength"],
+      "youtube_id": "y-wV4Venusw",
+      "thumbnail_url": "https://img.youtube.com/vi/y-wV4Venusw/hqdefault.jpg",
+      "cues": [
+        "Knees track over toes, do not cave in",
+        "Start at 60 degrees, deepen weekly",
+        "Stop if anterior knee pain"
+      ],
+      "regression_of": "single_leg_squat",
+      "progression_to": ["mini_squat"],
+      "default_dose": "3 x 30s holds"
+    },
+    {
+      "id": "mini_squat",
+      "name": "Mini Squat (0-45 deg)",
+      "phase": ["strength"],
+      "youtube_id": "aclHkVaku9U",
+      "thumbnail_url": "https://img.youtube.com/vi/aclHkVaku9U/hqdefault.jpg",
+      "cues": [
+        "Hinge at hips first, then bend knees",
+        "Stop at 45 degrees - no deeper this week",
+        "Even weight in both feet, mirror check"
+      ],
+      "regression_of": "single_leg_squat",
+      "progression_to": ["single_leg_squat"],
+      "default_dose": "3 x 12, bodyweight"
+    },
+    {
+      "id": "single_leg_squat",
+      "name": "Single-Leg Squat",
+      "phase": ["strength"],
+      "youtube_id": "vPmxC44yOOY",
+      "thumbnail_url": "https://img.youtube.com/vi/vPmxC44yOOY/hqdefault.jpg",
+      "cues": [
+        "Hip, knee, and second toe stay aligned",
+        "Counterbalance with arms forward",
+        "Slow descent: 3 seconds down, 1 up"
+      ],
+      "regression_of": null,
+      "progression_to": ["box_jump"],
+      "default_dose": "3 x 8 per side"
+    }
+  ]
+}

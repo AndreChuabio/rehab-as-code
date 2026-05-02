@@ -128,7 +128,7 @@ async def main() -> int:
     )
     parser.add_argument(
         "--repo",
-        default=os.getenv("PROTOCOL_REPO", "AndreChuabio/rehab-protocols-andre"),
+        default=os.getenv("PROTOCOL_REPO", "AndreChuabio/rehab-as-code"),
         help="target repo (owner/name)",
     )
     args = parser.parse_args()

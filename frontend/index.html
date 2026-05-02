@@ -72,6 +72,40 @@
           ></iframe>
         </div>
 
+        <section class="card chat-card">
+          <div class="chat-header">
+            <h3>Coach Chat</h3>
+            <span class="chat-tag">grounded in exercise library</span>
+          </div>
+          <div class="chat-log" id="chatLog">
+            <div class="chat-empty" id="chatEmpty">
+              Ask Coach Maya to swap an exercise, log a symptom, or plan next week.
+              Every recommendation links to a video. Every command opens a PR.
+            </div>
+          </div>
+          <div class="chat-suggestions" id="chatSuggestions">
+            <button class="chat-chip" onclick="sendChatPreset('My knee felt tweaky on single-leg squats today, what should I swap to?')">
+              knee feels tweaky
+            </button>
+            <button class="chat-chip" onclick="sendChatPreset('Show me my mobility exercises for this week.')">
+              show mobility exercises
+            </button>
+            <button class="chat-chip" onclick="sendChatPreset('I am ready to progress - plan next week.')">
+              ready to progress
+            </button>
+          </div>
+          <form class="chat-input-row" id="chatInputRow" onsubmit="onChatSubmit(event)">
+            <input
+              type="text"
+              id="chatInput"
+              class="chat-input"
+              placeholder="Type to Coach Maya..."
+              autocomplete="off"
+            />
+            <button type="submit" class="chat-send-btn" id="chatSendBtn">Send</button>
+          </form>
+        </section>
+
         <div class="recommendations" id="recommendations" style="display:none">
           <h3>Session Focus</h3>
           <div class="rec-cards" id="recCards"></div>

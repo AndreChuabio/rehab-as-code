@@ -38,6 +38,7 @@ from context_builder import build_system_prompt
 from tavus_client import create_conversation
 from agents import AgentInvocation, InvocationRequest, get_agent
 from protocol_loader import fetch_protocol, write_context_files, PROTOCOL_REPO
+import coach_chat
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,8 @@ def debug_env():
         "TAVUS_REPLICA_ID":    mask(os.getenv("TAVUS_REPLICA_ID")),
         "TAVUS_PERSONA_ID":    mask(os.getenv("TAVUS_PERSONA_ID")),
         "CURSOR_API_KEY":      mask(os.getenv("CURSOR_API_KEY")),
+        "OPENAI_API_KEY":      mask(os.getenv("OPENAI_API_KEY")),
+        "OPENAI_MODEL":        os.getenv("OPENAI_MODEL") or "gpt-4o-mini",
         "AGENT_PROVIDER":      os.getenv("AGENT_PROVIDER") or "cached_replay",
         "DEMO_LIVE_AGENT":     os.getenv("DEMO_LIVE_AGENT") or "0",
     }
@@ -426,6 +429,75 @@ def _build_agent_prompt(
         "current protocol.yaml and consult protocol-library/ for phase-appropriate "
         "progressions."
     )
+
+
+# -------------------------------------------------------------------------
+# Coach chat co-pilot (OpenAI) - /chat SSE endpoint
+# -------------------------------------------------------------------------
+
+
+class ChatTurn(BaseModel):
+    role: str                                # "user" | "assistant"
+    content: str
+
+
+class ChatRequest(BaseModel):
+    session_id: str = "default"
+    message: str
+    history: list[ChatTurn] = []
+
+
+async def _chat_trigger_executor(flow: str, payload: dict) -> dict:
+    """Run a /triggers/* equivalent from inside the chat tool dispatch.
+
+    Funnels through the SAME _invoke_with_fallback() as the four buttons,
+    so the trace and PR cards on the frontend behave identically. Registers
+    the invocation in _INVOCATIONS so the existing /agent/stream/{id}
+    consumer can attach.
+    """
+    req = AgentInvokeRequest(
+        flow=flow,
+        symptom_text=payload.get("symptom_text", ""),
+        intake_text=payload.get("intake_text", ""),
+        checkin_text=payload.get("checkin_text", ""),
+    )
+    agent, invocation = await _invoke_with_fallback(req)
+    _INVOCATIONS[invocation.invocation_id] = (agent, invocation)
+    return {
+        "invocation_id": invocation.invocation_id,
+        "pr_url": invocation.pr_url,
+        "branch": invocation.branch,
+        "provider": agent.name,
+        "flow": flow,
+    }
+
+
+@app.post("/chat")
+async def chat(req: ChatRequest):
+    """Stream a coach chat response. SSE; same framing as /agent/stream/{id}."""
+    health = get_health_data()
+    protocol_payload = fetch_protocol() or {}
+    messages = [
+        {"role": turn.role, "content": turn.content} for turn in req.history
+    ]
+    messages.append({"role": "user", "content": req.message})
+
+    async def gen():
+        try:
+            async for event in coach_chat.chat_stream(
+                messages=messages,
+                health=health,
+                protocol=protocol_payload,
+                trigger_executor=_chat_trigger_executor,
+            ):
+                yield f"data: {json.dumps(event)}\n\n"
+        except Exception as exc:
+            logger.exception("chat stream failed")
+            err = {"type": "error", "message": str(exc)}
+            yield f"data: {json.dumps(err)}\n\n"
+        yield "event: done\ndata: {}\n\n"
+
+    return StreamingResponse(gen(), media_type="text/event-stream")
 
 
 if __name__ == "__main__":
