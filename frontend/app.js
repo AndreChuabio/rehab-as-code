@@ -22,7 +22,12 @@ document.addEventListener("DOMContentLoaded", () => {
   loadProtocol();
   switchStage("chat");
   applyStepLocks();
-  if (!intakeComplete) triggerIntake();
+  if (intakeComplete) {
+    document.getElementById("triggerIntakeBtn")?.classList.remove("primary");
+    document.getElementById("generatePlanBtn")?.classList.add("primary");
+  } else {
+    triggerIntake();
+  }
 });
 
 function applyStepLocks() {
@@ -40,6 +45,9 @@ function onIntakeComplete() {
   intakeComplete = true;
   localStorage.setItem("rehab_intake_complete", "1");
   applyStepLocks();
+  // Shift the primary highlight from intake → weekly plan
+  document.getElementById("triggerIntakeBtn")?.classList.remove("primary");
+  document.getElementById("generatePlanBtn")?.classList.add("primary");
   showToast("Intake complete — now generate your weekly plan!", "info");
 }
 
