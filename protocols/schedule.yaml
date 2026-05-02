@@ -2,15 +2,15 @@
 # HOLD: whole plan stays week-3 library baseline (no advancement to week-4 content).
 
 week: 3
-patient: Andre
+patient: andre
 generated_by: care-plan-coordinator + sub-agents (HRV hold; synced with patient protocol artifact)
 last_updated: "2026-05-02"
 
 hold_note: >-
-  Evaluator HOLD: HRV Δ −19 ms over 7d (threshold −8 ms) — keep conservative week-3 template only until
-  autonomic/readiness improves and clinician resets rules. Recovery score 65 (≥60 cleared for structured rehab
-  volume but without progression). Intake: Andre (26), right ACL reconstruction ~1 month, pain reported 7/10,
-  ambulation with crutches; week-3 post-acl library exercises only, identical ordering each session below.
+  Evaluator HOLD: HRV dropped 19 ms over 7d (worse than −8 ms threshold per .cursorrules) — keep conservative
+  week-3 template only until autonomic/readiness improves and clinician resets rules. Recovery score 65 (≥60
+  cleared for structured rehab volume without progression). Intake: andre, 36, ACL reconstruction ~1 month,
+  pain 5/10; week-3 post-acl library exercises only, identical ordering each session below.
 
 session_order:
   - stationary_bike

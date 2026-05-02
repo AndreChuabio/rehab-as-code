@@ -1,17 +1,51 @@
-# Awaiting patient intake.
-# Click "1 intake" in the app to begin onboarding. The cursor cloud agent
-# will generate the initial protocol from intake answers by reading the
-# matching protocol-library/ entry, and open a PR for clinician approval.
+# Week 3 post-ACL protocol. Week-4 library content deferred per HRV clearance.
 
-patient: null
-phase: pending_intake
-week: 0
-generated_by: ""
+patient: andre
+phase: post-ACL reconstruction
+week: 3
+generated_by: "Researcher: defer week-4 until HRV stable/improving; Evaluator HOLD (HRV −19ms/7d vs −8ms)."
 last_updated: "2026-05-02"
 
 session_targets:
-  frequency_per_week: 0
-  duration_min: 0
-  max_pain_during_session: 3
+  frequency_per_week: 3
+  duration_min: 32
+  max_pain_during_session: 5
 
-exercises: []
+exercises:
+  - name: stationary_bike
+    duration_min: 10
+    intensity: "RPE 4 of 10"
+    progression_criteria: "tolerates 12 min"
+    regression_criteria: "patellofemoral pain mid-session"
+    references:
+      - protocol-library/post-acl-week-3.yaml
+
+  - name: terminal_knee_extension
+    sets: 3
+    reps: 12
+    load: yellow_band
+    ROM_target_deg: 0
+    progression_criteria: "matches contralateral extension"
+    regression_criteria: "extension lag > 5 deg"
+    references:
+      - protocol-library/post-acl-week-3.yaml
+
+  - name: quad_sets
+    sets: 3
+    reps: 15
+    load: bodyweight
+    ROM_target_deg: 90
+    progression_criteria: "pain-free, no swelling next morning"
+    regression_criteria: "any swelling within 24h"
+    references:
+      - protocol-library/post-acl-week-3.yaml
+
+  - name: heel_slides
+    sets: 3
+    reps: 10
+    load: bodyweight
+    ROM_target_deg: 100
+    progression_criteria: "ROM > 100 deg, painless"
+    regression_criteria: "ROM regression > 5 deg week-over-week"
+    references:
+      - protocol-library/post-acl-week-3.yaml
