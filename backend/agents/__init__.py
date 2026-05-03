@@ -5,6 +5,8 @@ Selection is driven by the AGENT_PROVIDER env var. Defaults to cached replay
 (demo-safe). Switching providers is a config change, not a code change.
 
 Supported values:
+    ag2             -- live path: AG2 (AutoGen) multi-agent framework + Claude
+                       pure Python, no Node/TypeScript dependency
     cursor_sdk      -- live path: Cursor TypeScript SDK via Node helper
                        (orchestrator/), supports parent + named sub-agents
     cursor_github   -- fallback path: @cursor GitHub mention via gh CLI
@@ -46,6 +48,9 @@ def get_agent(provider: str | None = None) -> CodingAgent:
     """
     name = (provider or os.getenv("AGENT_PROVIDER") or "cached_replay").lower()
 
+    if name == "ag2":
+        from .ag2_agent import AG2Agent
+        return AG2Agent()
     if name == "cursor_sdk":
         from .cursor_sdk import CursorSdkAgent
         return CursorSdkAgent()
@@ -64,6 +69,6 @@ def get_agent(provider: str | None = None) -> CodingAgent:
 
     raise ValueError(
         f"Unknown AGENT_PROVIDER {name!r}. "
-        f"Expected one of: cursor_sdk, cursor_github, cursor_api, "
+        f"Expected one of: ag2, cursor_sdk, cursor_github, cursor_api, "
         f"cached_replay, mock."
     )
