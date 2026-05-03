@@ -1,15 +1,18 @@
-# Week 3 schedule - Mon/Wed/Fri. Session order matches protocol exercise list.
+# Three sessions/week (Mon/Wed/Fri): bike warmup, extension bias, quad sets, heel slides.
+# HOLD: week-3 library baseline only (no advancement to week-4 content).
 
 week: 3
 patient: Andre
+generated_by: "Researcher PRIMARY protocol-library/post-acl-week-3.yaml; Evaluator HOLD — HRV ~19 ms / 7 d decline exceeds -8 ms threshold; recovery 65; heel_slides ROM 100 deg per library given pain near 110 deg on intake."
 last_updated: "2026-05-03"
 
 hold_note: >-
-  Evaluator: HOLD entire protocol - wearable HRV ~19 ms decline over 7 days vs prior exceeds the -8 ms threshold.
-  Recovery score 65 does not, by itself, justify a separate hold path; sleep / intensity rules do not force a -20%
-  intensity reduction from a single day at 71. Researcher: week 3 PRIMARY protocol-library/post-acl-week-3.yaml only;
-  heel_slides ROM_target_deg stays at the library milestone 100 deg (not 110 deg) given pain near 110 deg flexion on intake.
-  No exercises outside the week-3 library.
+  Evaluator: HOLD entire protocol — wearable HRV ~19 ms decline over 7 days vs prior window exceeds the -8 ms threshold;
+  recovery score 65 does not independently hold; sleep / intensity rules show no -20% drop from provided data (single-day sleep 71).
+  Researcher: PRIMARY protocol-library/post-acl-week-3.yaml (week 3 post-ACL); exercises — stationary_bike 10 min RPE 4/10,
+  terminal_knee_extension 3x12 yellow band ROM 0, quad_sets 3x15 bodyweight ROM 90, heel_slides 3x10 ROM 100;
+  mild pain at ~110 deg flexion on intake keeps heel_slides at library milestone 100 deg (not beyond target). No dedicated
+  heel_slides regression entry in library (only regressions/single_leg_squat.yaml). Mon/Wed/Fri order below.
 
 session_order:
   - stationary_bike
