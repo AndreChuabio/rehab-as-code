@@ -1,10 +1,13 @@
-# Current rehab protocol for Andre (week 3 baseline; evaluator HRV hold).
-# Cursor cloud agents update this via PR per .cursorrules.
+# Rehab protocol - Andre, week 3. Updated via agent PR per .cursorrules.
 
 patient: Andre
 phase: post-ACL reconstruction
 week: 3
-generated_by: "Researcher PRIMARY protocol-library/post-acl-week-3.yaml (week_range [3,3]); evaluator HOLD — HRV ~19 ms decline over 7 d vs prior exceeds -8 ms threshold (whole protocol held); recovery 65 and sleep data do not trigger additional holds (no -20% intensity rule from provided data)."
+generated_by: >-
+  Researcher PRIMARY protocol-library/post-acl-week-3.yaml
+  (heel_slides ROM_target_deg 100 deg milestone, not 110 deg despite pain near 110 deg flexion);
+  Evaluator HOLD entire protocol - HRV ~19 ms decline over 7 d vs prior exceeds -8 ms threshold;
+  recovery 65; sleep rule does not force -20% intensity from single-day 71.
 last_updated: "2026-05-03"
 
 session_targets:
@@ -16,8 +19,8 @@ exercises:
   - name: stationary_bike
     duration_min: 10
     intensity: "RPE 4 of 10"
-    progression_criteria: "tolerates 12 min"
-    regression_criteria: "patellofemoral pain mid-session"
+    progression_criteria: "HRV hold clears and session tolerated without pain or effusion; clinician may advance per library"
+    regression_criteria: "patellofemoral pain, swelling, or inability to complete duration at RPE 4"
     references:
       - protocol-library/post-acl-week-3.yaml
 
@@ -26,8 +29,8 @@ exercises:
     reps: 12
     load: yellow_band
     ROM_target_deg: 0
-    progression_criteria: "matches contralateral extension"
-    regression_criteria: "extension lag > 5 deg"
+    progression_criteria: "full active extension matching contralateral without lag; hold lifts per clinician"
+    regression_criteria: "extension lag, increased effusion, or pain beyond acceptable session limit"
     references:
       - protocol-library/post-acl-week-3.yaml
 
@@ -36,8 +39,8 @@ exercises:
     reps: 15
     load: bodyweight
     ROM_target_deg: 90
-    progression_criteria: "pain-free, no swelling next morning"
-    regression_criteria: "any swelling within 24h"
+    progression_criteria: "clean repeated holds without quadriceps lag; no next-day swelling"
+    regression_criteria: "increased swelling within 24 h or pain that changes gait"
     references:
       - protocol-library/post-acl-week-3.yaml
 
@@ -45,7 +48,7 @@ exercises:
     sets: 3
     reps: 10
     ROM_target_deg: 100
-    progression_criteria: "pain-free sustained 100° active flexion (library milestone); defer higher ROM until hold clears/clinician ok"
-    regression_criteria: "ROM regression > 5 deg week-over-week"
+    progression_criteria: "pain-free active flexion to 100 deg per library milestone; defer past 100 deg until hold clears"
+    regression_criteria: "ROM drops >5 deg vs prior session or effusion after flexion work"
     references:
       - protocol-library/post-acl-week-3.yaml
