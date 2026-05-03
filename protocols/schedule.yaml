@@ -3,7 +3,7 @@
 
 week: 3
 patient: Andre
-generated_by: "Researcher PRIMARY protocol-library/post-acl-week-3.yaml; evaluator HOLD — HRV ~19 ms / 7 d decline exceeds -8 ms threshold (recovery 65, sleep no -20% intensity trigger)."
+generated_by: "Intake form (Andre, ACL Week ~3); researcher PRIMARY protocol-library/post-acl-week-3.yaml; evaluator HOLD — HRV ~19 ms / 7 d decline exceeds -8 ms threshold (recovery 65, sleep no -20% intensity trigger)."
 last_updated: "2026-05-03"
 
 hold_note: >-

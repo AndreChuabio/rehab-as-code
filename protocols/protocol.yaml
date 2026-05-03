@@ -4,7 +4,7 @@
 patient: Andre
 phase: post-ACL reconstruction
 week: 3
-generated_by: "Researcher PRIMARY protocol-library/post-acl-week-3.yaml (week_range [3,3]); evaluator HOLD — HRV ~19 ms decline over 7 d vs prior exceeds -8 ms threshold (whole protocol held); recovery 65 and sleep data do not trigger additional holds (no -20% intensity rule from provided data)."
+generated_by: "Intake form (Andre, 26, ACL Week ~3); researcher PRIMARY protocol-library/post-acl-week-3.yaml (week_range [3,3]); evaluator HOLD — HRV ~19 ms decline over 7 d vs prior exceeds -8 ms threshold (whole protocol held); recovery 65 and sleep data do not trigger additional holds (no -20% intensity rule from provided data)."
 last_updated: "2026-05-03"
 
 session_targets:
