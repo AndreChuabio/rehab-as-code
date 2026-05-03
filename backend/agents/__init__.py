@@ -23,6 +23,9 @@ from .base import (
     AgentInvocation,
     CodingAgent,
     InvocationRequest,
+    PatientAgent,
+    PatientRequest,
+    PatientResponse,
     TraceEvent,
     TraceEventType,
 )
@@ -31,10 +34,47 @@ __all__ = [
     "AgentInvocation",
     "CodingAgent",
     "InvocationRequest",
+    "PatientAgent",
+    "PatientRequest",
+    "PatientResponse",
     "TraceEvent",
     "TraceEventType",
     "get_agent",
+    "get_patient_agent",
+    "register_patient_agent",
 ]
+
+# ── Patient agent registry ────────────────────────────────────────────────────
+
+_PATIENT_REGISTRY: dict[str, type[PatientAgent]] = {}
+
+
+def register_patient_agent(cls: type[PatientAgent]) -> type[PatientAgent]:
+    """Class decorator that registers a PatientAgent in the factory."""
+    _PATIENT_REGISTRY[cls.name] = cls
+    return cls
+
+
+def get_patient_agent(role: str) -> PatientAgent:
+    """Return a PatientAgent instance by role name.
+
+    Roles: session_manager, intake, plan_generation, guided_video, checkin
+
+    All patient agents are lazy-imported on first call.
+    """
+    if not _PATIENT_REGISTRY:
+        from .session_manager_agent import SessionManagerAgent  # noqa: F401
+        from .intake_agent import IntakeAgent  # noqa: F401
+        from .plan_generation_agent import PlanGenerationAgent  # noqa: F401
+        from .guided_video_agent import GuidedVideoAgent  # noqa: F401
+        from .checkin_agent import CheckInAgent  # noqa: F401
+
+    if role not in _PATIENT_REGISTRY:
+        raise ValueError(
+            f"Unknown patient agent role {role!r}. "
+            f"Expected one of: {', '.join(sorted(_PATIENT_REGISTRY.keys()))}"
+        )
+    return _PATIENT_REGISTRY[role]()
 
 
 def get_agent(provider: str | None = None) -> CodingAgent:
