@@ -7,6 +7,7 @@ generated_by: "Researcher PRIMARY protocol-library/post-acl-week-3.yaml; evaluat
 last_updated: "2026-05-03"
 
 hold_note: >-
+  Patient Andre, 26 (~3 weeks post-op). Intake pain 3/10; mild discomfort near ~110° flexion.
   Evaluator: HOLD entire protocol — wearable HRV ~19 ms decline over 7 days vs prior window exceeds the -8 ms threshold;
   recovery score 65 does not independently hold; sleep / intensity rules show no -20% drop from provided data.
   Researcher: PRIMARY protocol-library/post-acl-week-3.yaml (week 3); exercises — stationary_bike 10 min RPE 4/10,
