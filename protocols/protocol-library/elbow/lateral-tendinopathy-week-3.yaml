@@ -1,0 +1,46 @@
+# Reference: lateral elbow tendinopathy (tennis elbow), week 3 (eccentric loading)
+# Evidence base: Stasinopoulos eccentric wrist extension protocol;
+# Coombes et al. progressive loading framework.
+
+injury_category: elbow
+phase: lateral elbow tendinopathy
+week_range: [3, 3]
+goals:
+  - introduce eccentric loading (key for tendon remodeling)
+  - restore strength to wrist extensors
+  - re-establish pain-free grip + pronation/supination
+  - return to sport / occupational tasks
+
+exercises:
+  - name: elbow_eccentric_wrist_extension
+    sets: 3
+    reps: 15
+    load: 1-2 lb
+    notes: "Lift with opposite hand. SLOW lower (5s) with affected. Eccentric-only."
+
+  - name: elbow_eccentric_wrist_flexion
+    sets: 3
+    reps: 15
+    load: 1-2 lb
+    notes: "Same protocol, palm up. Strengthens the antagonist."
+
+  - name: elbow_pronation_supination_band
+    sets: 3
+    reps: 12
+    load: yellow_band
+    notes: "Elbow tucked. Slow controlled rotation both directions."
+
+  - name: elbow_grip_squeeze
+    sets: 3
+    reps: 15
+    notes: "Continue. Increase ball stiffness if pain-free."
+
+  - name: elbow_radial_nerve_glide
+    sets: 2
+    reps: 10
+    notes: "Only if there are neural symptoms. Stop short of tingling."
+
+clearance_criteria:
+  - eccentric_tolerance: "3x15 with 1-2lb pain-free"
+  - grip_strength: "symmetric to uninvolved side"
+  - return_to_activity: "tolerates sport/work-specific load with no flare next day"

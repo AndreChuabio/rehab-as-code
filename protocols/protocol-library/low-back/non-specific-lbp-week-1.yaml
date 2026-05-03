@@ -1,0 +1,45 @@
+# Reference: non-specific low back pain, week 1 (acute / pain-modulation)
+# Evidence base: NICE LBP guideline NG59; ACP non-pharmacologic LBP guideline.
+
+injury_category: low_back
+phase: non-specific low back pain (acute)
+week_range: [1, 1]
+goals:
+  - reduce pain and movement guarding
+  - re-establish pain-free supine and quadruped ROM
+  - educate on neutral spine awareness
+  - encourage continued activity (avoid bed rest)
+
+exercises:
+  - name: lb_pelvic_tilt
+    sets: 2
+    reps: 15
+    notes: "Supine, knees bent. 5s hold each rep. Foundational neuromuscular cue."
+
+  - name: lb_supine_knee_to_chest
+    sets: 2
+    reps: 1
+    duration_sec: 30
+    notes: "One leg at a time. Gentle - no force."
+
+  - name: lb_child_pose
+    sets: 2
+    reps: 1
+    duration_sec: 30
+    notes: "Lumbar decompression. Breathe into the low back."
+
+  - name: lb_cat_cow
+    sets: 2
+    reps: 10
+    progression_to: lb_bird_dog
+    notes: "Move only as far as comfortable. Smooth tempo."
+
+  - name: lb_mckenzie_press_up
+    sets: 2
+    reps: 10
+    notes: "ONLY if pain centralizes (moves toward spine). STOP if pain peripheralizes."
+
+clearance_criteria:
+  - pain_at_rest: "<= 3/10"
+  - sleep_disruption: "improving"
+  - red_flags: "none (no saddle anesthesia, bowel/bladder change, progressive weakness)"

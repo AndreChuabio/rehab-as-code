@@ -1,0 +1,41 @@
+# Reference: hamstring strain (grade 1), week 3 (eccentric loading)
+# Evidence base: Askling protocol; Nordic hamstring exercise (Petersen et al. 2011).
+
+injury_category: hamstring
+phase: hamstring strain (grade 1)
+week_range: [3, 3]
+goals:
+  - introduce progressive eccentric loading
+  - restore strength symmetry
+  - re-establish lengthening capacity (key for re-injury prevention)
+  - return to jogging on track within 1-2 weeks
+
+exercises:
+  - name: ham_supine_curl_ball
+    sets: 3
+    reps: 10
+    progression_to: ham_bridge_heel_slide
+    notes: "Stability ball heel curl. Slow eccentric."
+
+  - name: ham_bridge_heel_slide
+    sets: 3
+    reps: 10
+    progression_to: ham_single_leg_rdl
+    notes: "Bridge held. Slide one heel out, return. Hips stay level."
+
+  - name: ham_prone_hip_extension
+    sets: 3
+    reps: 12
+    notes: "Glute squeeze first. Avoid low-back arch."
+
+  - name: ham_single_leg_rdl
+    sets: 3
+    reps: 8
+    load: bodyweight
+    progression_to: ham_nordic_eccentric_assisted
+    notes: "Soft knee. Hinge at hip. Stop where back rounds."
+
+clearance_criteria:
+  - active_SLR: "symmetric to uninvolved side"
+  - eccentric_strength: "tolerates 3x8 single-leg RDL pain-free"
+  - jog_test: "100m straight-line jog at 70% pace, no pain"

@@ -6,6 +6,11 @@
   "properties": {
     "patient": {"type": "string"},
     "phase":   {"type": "string"},
+    "injury_category": {
+      "type": "string",
+      "enum": ["knee", "ankle", "shoulder", "low_back", "hamstring", "elbow"],
+      "description": "Patient's injury category. Determines which protocol-library/{injury}/ subfolder the agent reads from."
+    },
     "week":    {"type": "integer", "minimum": 0},
     "generated_by":  {"type": "string"},
     "last_updated":  {"type": "string"},

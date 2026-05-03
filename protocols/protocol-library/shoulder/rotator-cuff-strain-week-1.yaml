@@ -1,0 +1,39 @@
+# Reference: rotator cuff strain (low-grade), week 1 (acute / pain control)
+# Evidence base: Kuhn et al. MOON shoulder group; standard non-operative
+# rotator cuff rehab progressions.
+
+injury_category: shoulder
+phase: rotator cuff strain (low-grade)
+week_range: [1, 1]
+goals:
+  - control pain (target rest pain <= 2/10)
+  - maintain passive ROM
+  - prevent guarding / capsular tightening
+  - introduce sub-maximal isometric activation
+
+exercises:
+  - name: shoulder_pendulum
+    sets: 1
+    reps: 20
+    load: bodyweight
+    notes: "Both directions (CW + CCW). Arm relaxed - body sway provides motion."
+
+  - name: shoulder_isometric_er
+    sets: 3
+    reps: 1
+    duration_sec: 10
+    load: submaximal
+    progression_to: shoulder_scapular_retraction
+    notes: "Elbow tucked. Press into wall - no motion. ~50% effort, no pain."
+
+  - name: shoulder_isometric_ir
+    sets: 3
+    reps: 1
+    duration_sec: 10
+    load: submaximal
+    notes: "Same setup as ER but pressing inward."
+
+clearance_criteria:
+  - pain_at_rest: "<= 2/10"
+  - passive_ROM: "no progressive loss"
+  - sleep_disturbance: "improving day-to-day"

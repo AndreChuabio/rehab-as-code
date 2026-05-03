@@ -1,6 +1,7 @@
 # Reference: post-ACL reconstruction, week 3
 # Evidence base: standard ACL-R rehab milestones (van Melick et al., 2016).
 
+injury_category: knee
 phase: post-ACL reconstruction
 week_range: [3, 3]
 goals:

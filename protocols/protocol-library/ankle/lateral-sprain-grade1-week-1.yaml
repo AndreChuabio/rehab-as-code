@@ -1,0 +1,35 @@
+# Reference: lateral ankle sprain (grade 1), week 1 (acute / PRICE phase)
+# Evidence base: Bleakley et al. functional rehabilitation guidelines (2010);
+# Cochrane review on early mobilization vs immobilization for acute sprains.
+
+injury_category: ankle
+phase: lateral ankle sprain (grade 1)
+week_range: [1, 1]
+goals:
+  - control swelling and protect the ATFL
+  - restore pain-free dorsiflexion to neutral
+  - re-establish active inversion / eversion ROM
+  - pain-free weight bearing as tolerated
+
+exercises:
+  - name: ankle_alphabet
+    sets: 3
+    reps: 26    # full A-Z = 26 letters
+    load: bodyweight
+    notes: "Active ROM only. Move from the ankle, not the leg. Stop on sharp pain."
+
+  - name: ankle_towel_calf_stretch
+    sets: 3
+    reps: 1
+    duration_sec: 30
+    notes: "Gentle - no bouncing. Should feel a stretch, not pain."
+
+  - name: lb_glute_bridge_lb
+    sets: 3
+    reps: 12
+    notes: "Maintain general posterior chain engagement during offloaded period."
+
+clearance_criteria:
+  - swelling: "controlled (no progression day-to-day)"
+  - pain_at_rest: "<= 2/10"
+  - dorsiflexion: "to neutral, pain-free"

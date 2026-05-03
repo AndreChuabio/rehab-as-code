@@ -1,0 +1,45 @@
+# Reference: lateral ankle sprain (grade 1), week 3 (early loading / proprioception)
+# Evidence base: Bleakley et al. (2010); standard return-to-sport progressions.
+
+injury_category: ankle
+phase: lateral ankle sprain (grade 1)
+week_range: [3, 3]
+goals:
+  - restore strength to peroneal / dorsiflexor groups
+  - re-establish single-leg balance baseline
+  - introduce light dynamic loading
+  - pain-free walking at normal cadence
+
+exercises:
+  - name: ankle_dorsiflexion_band
+    sets: 3
+    reps: 15
+    load: yellow_band
+    progression_to: ankle_calf_raises_double_leg
+    notes: "Slow eccentric. Move only at the ankle."
+
+  - name: ankle_eversion_band
+    sets: 3
+    reps: 15
+    load: yellow_band
+    notes: "Crucial for peroneal re-education post lateral sprain."
+
+  - name: ankle_calf_raises_double_leg
+    sets: 3
+    reps: 15
+    load: bodyweight
+    progression_to: ankle_calf_raises_single_leg
+    notes: "Pause 1s at top. Slow lower."
+
+  - name: ankle_single_leg_balance
+    sets: 3
+    reps: 1
+    duration_sec: 30
+    progression_to: ankle_lateral_hops
+    notes: "Eyes open first. Progress to eyes closed when 30s clean."
+
+clearance_criteria:
+  - single_leg_balance: ">= 30s eyes open without touchdown"
+  - calf_raise_strength: ">= 15 single-leg reps"
+  - swelling: none
+  - pain_at_rest: "0/10"

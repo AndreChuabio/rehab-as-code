@@ -1,6 +1,7 @@
 # Regression target for single_leg_squat.
 # Used when symptom log reports knee discomfort during single-leg loading.
 
+injury_category: knee
 regresses_from: single_leg_squat
 swap_to: assisted_split_squat
 
@@ -15,4 +16,4 @@ assisted_split_squat:
     quad-dominant pattern. Use when patient reports tweaky / unstable
     sensation on full single-leg loading.
 
-cite_in_pr: protocol-library/regressions/single_leg_squat.yaml
+cite_in_pr: protocol-library/knee/regressions/single_leg_squat.yaml

@@ -72,8 +72,10 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "list_phase_exercises",
             "description": (
-                "Return all exercises matching a rehab phase. Use when the patient asks "
-                "for an overview of what's appropriate for their week."
+                "Return all exercises matching a rehab phase, optionally filtered by "
+                "injury category. Use when the patient asks for an overview of what's "
+                "appropriate for their week, or asks specifically about exercises for an "
+                "injury (e.g. 'show me ankle mobility', 'shoulder week 3 work')."
             ),
             "parameters": {
                 "type": "object",
@@ -81,6 +83,11 @@ TOOLS: list[dict[str, Any]] = [
                     "phase": {
                         "type": "string",
                         "enum": ["acute", "subacute", "strength"],
+                    },
+                    "injury_type": {
+                        "type": "string",
+                        "enum": ["knee", "ankle", "shoulder", "low_back", "hamstring", "elbow"],
+                        "description": "Optional. Restrict results to a single injury category. Omit for all injuries.",
                     },
                 },
                 "required": ["phase"],
@@ -227,7 +234,8 @@ async def _dispatch_tool(
 
     if name == "list_phase_exercises":
         phase = arguments.get("phase", "")
-        matches = exercise_kb.find_by_phase(phase)
+        injury_type = arguments.get("injury_type")
+        matches = exercise_kb.find_by_phase(phase, injury_type=injury_type)
         cards = [exercise_kb.to_card(ex) for ex in matches]
         return (
             {"ok": True, "count": len(cards), "exercises": cards},
