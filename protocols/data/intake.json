@@ -1,0 +1,9 @@
+{
+  "recorded_at": "2026-05-03T16:19:42.394671+00:00",
+  "patient": "Andre",
+  "age_years": 26,
+  "injury": "ACL reconstruction",
+  "weeks_post_op_estimate": 3,
+  "pain_level_0_to_10": 3,
+  "symptoms_notes": "Mild pain at 110 degrees knee flexion."
+}
