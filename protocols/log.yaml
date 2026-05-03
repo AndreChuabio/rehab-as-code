@@ -15,6 +15,23 @@ checkins:
         - declining HRV
         - 3 consecutive low-HRV days
         - week-4 clearance blocked until HRV stable/improving per post-acl-week-4.yaml clearance_criteria
+
+  - date: "2026-05-03"
+    recorded_at: "2026-05-03T15:55:17.979943+00:00"
+    note: "Session rating 8/10. Completed heel slides, quad sets, stationary bike; quad set stronger; difficult none."
+    wearable:
+      sleep_score: 71
+      hrv_ms: 42
+      recovery_score: 65
+    evaluator:
+      classification: hold
+      reason: HRV 42 ms vs 7d avg 56 ms with declining trend and 3 consecutive low-HRV days; per .cursorrules a drop of -8 ms or more vs the prior 7d average requires holding the whole protocol, and sustained low/suppressed HRV is still in effect.
+      symptom_interpretation: Session 8/10; heel slides, quad sets, and bike completed; quad set feels stronger; no difficult items and no reported pain — subjectively favors maintenance, not load increase.
+      recovery_risk: Recovery score 65 and sleep score 71 stay above hold cutoffs (<60 recovery, <70 sleep x3 days not met); primary risk is continued autonomic/load stress implied by prolonged low HRV.
+      flags_for_followup:
+        - declining HRV with 3 consecutive low-HRV days — do not progress exercises until HRV stabilizes or improves vs prior 7d window
+        - reconcile strong subjective tolerance (8/10, no pain) with wearable mandated hold when drafting weekly or adjustment PRs
+        - resting HR and recovery/sleep trending should be rechecked next snapshot before any intensity or volume escalation
   - date: "2026-05-03"
     recorded_at: "2026-05-03T12:00:00+00:00"
     note: weekly check-in; week 3 hold per protocol — HRV trajectory reviewed
