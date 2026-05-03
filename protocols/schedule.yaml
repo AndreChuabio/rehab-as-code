@@ -3,15 +3,16 @@
 
 week: 3
 patient: Andre
-generated_by: "care-plan-coordinator (intake: Andre); researcher PRIMARY protocol-library/post-acl-week-3.yaml; evaluator HOLD — HRV ~19 ms / 7 d decline exceeds -8 ms threshold"
-last_updated: "2026-05-02"
+generated_by: "Researcher PRIMARY protocol-library/post-acl-week-3.yaml; evaluator HOLD — HRV ~19 ms / 7 d decline exceeds -8 ms threshold (recovery 65, sleep no -20% intensity trigger)."
+last_updated: "2026-05-03"
 
 hold_note: >-
-  Evaluator HOLD: wearable HRV rule — ~19 ms decline over 7 days vs prior window exceeds the -8 ms hold threshold;
-  hold entire protocol (no advancement to week 4 until clearance + HRV improves; no progression from researcher
-  library beyond post-acl-week-3 baseline). Maintain exercises per protocol-library/post-acl-week-3.yaml only.
-  Intake: Andre (26), ACL ~3 wk post-op, pain 3/10; mild pain at ~110° flexion supports keeping heel_slides
-  ROM_target_deg 100 (library milestone; do not decrease ROM without pain at target ROM). Mon/Wed/Fri order below.
+  Evaluator: HOLD entire protocol — wearable HRV ~19 ms decline over 7 days vs prior window exceeds the -8 ms threshold;
+  recovery score 65 does not independently hold; sleep / intensity rules show no -20% drop from provided data.
+  Researcher: PRIMARY protocol-library/post-acl-week-3.yaml (week 3); exercises — stationary_bike 10 min RPE 4/10,
+  terminal_knee_extension 3x12 yellow band ROM 0, quad_sets 3x15 bodyweight ROM 90, heel_slides 3x10 ROM 100;
+  mild pain at ~110° flexion on intake keeps heel_slides at library milestone 100° (not beyond target). No dedicated
+  heel_slides regression entry in library (only regressions/single_leg_squat.yaml). Mon/Wed/Fri order below.
 
 session_order:
   - stationary_bike
