@@ -15,3 +15,19 @@ checkins:
         - declining HRV
         - 3 consecutive low-HRV days
         - week-4 clearance blocked until HRV stable/improving per post-acl-week-4.yaml clearance_criteria
+  - date: "2026-05-03"
+    recorded_at: "2026-05-03T12:00:00+00:00"
+    note: weekly check-in; week 3 hold per protocol — HRV trajectory reviewed
+    wearable:
+      sleep_score: 68
+      hrv_ms: 38
+      recovery_score: 62
+    evaluator:
+      classification: hold
+      reason: HRV continuing to decline vs prior week (61→42→38 ms over window); hold classification retained per evaluator rules
+      symptom_interpretation: no new red-flag symptoms documented this check-in
+      recovery_risk: recovery_score below 7d avg; aligns with declining HRV
+      flags_for_followup:
+        - declining HRV
+        - 3 consecutive low-HRV days
+        - week-4 clearance blocked until HRV stable/improving per post-acl-week-4.yaml clearance_criteria
