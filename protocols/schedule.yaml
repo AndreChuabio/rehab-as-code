@@ -3,15 +3,17 @@
 
 week: 3
 patient: Andre
-generated_by: "care-plan-coordinator (intake: Andre); researcher PRIMARY protocol-library/post-acl-week-3.yaml; evaluator HOLD — HRV ~19 ms / 7 d decline exceeds -8 ms threshold"
-last_updated: "2026-05-02"
+generated_by: "care-plan-coordinator; researcher PRIMARY protocol-library/post-acl-week-3.yaml; evaluator HOLD — HRV ~19 ms / 7d decline exceeds -8 ms threshold; sleep modifier — avg sleep score last 3 days <70 → session intensity -20% (bike RPE per protocol)."
+last_updated: "2026-05-03"
 
 hold_note: >-
   Evaluator HOLD: wearable HRV rule — ~19 ms decline over 7 days vs prior window exceeds the -8 ms hold threshold;
   hold entire protocol (no advancement to week 4 until clearance + HRV improves; no progression from researcher
-  library beyond post-acl-week-3 baseline). Maintain exercises per protocol-library/post-acl-week-3.yaml only.
-  Intake: Andre (26), ACL ~3 wk post-op, pain 3/10; mild pain at ~110° flexion supports keeping heel_slides
-  ROM_target_deg 100 (library milestone; do not decrease ROM without pain at target ROM). Mon/Wed/Fri order below.
+  library beyond post-acl-week-3 baseline). Sleep modifier: average sleep score last 3 days below 70 — reduce session
+  intensity 20% (stationary bike RPE lowered per protocol.yaml). Maintain exercises per
+  protocol-library/post-acl-week-3.yaml only. Intake: Andre (26), ACL ~3 wk post-op, pain 3/10; mild pain at ~110° flexion
+  supports keeping heel_slides ROM_target_deg 100 (library milestone; do not decrease ROM without pain at target ROM).
+  Mon/Wed/Fri order below.
 
 session_order:
   - stationary_bike

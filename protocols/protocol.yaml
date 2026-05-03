@@ -4,8 +4,8 @@
 patient: Andre
 phase: post-ACL reconstruction
 week: 3
-generated_by: "care-plan-coordinator (intake: Andre, 26, ACL reconstruction ~3 wk, pain 3/10); researcher PRIMARY protocol-library/post-acl-week-3.yaml (week_range [3,3]); evaluator HOLD — wearable HRV rule: ~19 ms decline over 7 d vs prior window exceeds -8 ms threshold; hold entire protocol (no week-4 progression)."
-last_updated: "2026-05-02"
+generated_by: "care-plan-coordinator; researcher PRIMARY protocol-library/post-acl-week-3.yaml (exercises/params only; no week-4 — clearance requires stable/improving HRV, not met); evaluator HOLD — HRV ~19 ms decline over 7d vs prior exceeds -8 ms threshold (entire protocol); sleep modifier — avg sleep score last 3 days <70 → session intensity -20% (stationary bike RPE 4→3 of 10)."
+last_updated: "2026-05-03"
 
 session_targets:
   frequency_per_week: 3
@@ -15,7 +15,7 @@ session_targets:
 exercises:
   - name: stationary_bike
     duration_min: 10
-    intensity: "RPE 4 of 10"
+    intensity: "RPE 3 of 10"
     progression_criteria: "tolerates 12 min"
     regression_criteria: "patellofemoral pain mid-session"
     references:
