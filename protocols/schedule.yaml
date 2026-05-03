@@ -1,18 +1,17 @@
-# Three sessions/week (Mon/Wed/Fri): bike warmup → extension bias → quad sets → flexion/heel slides.
-# HOLD: whole plan stays week-3 library baseline (no advancement to week-4 content).
+# Week 3 Mon/Wed/Fri: bike warm-up → terminal extension → quad sets → heel slides. HOLD (same as protocol.yaml).
+# Evaluator HOLD — HRV hrv_delta_7d=19 exceeds -8 ms threshold; recovery/sleep/symptoms as in protocol generated_by.
 
 week: 3
 patient: Andre
-generated_by: "Researcher PRIMARY protocol-library/post-acl-week-3.yaml; evaluator HOLD — HRV ~19 ms / 7 d decline exceeds -8 ms threshold (recovery 65, sleep no -20% intensity trigger)."
+generated_by: "Researcher PRIMARY protocol-library/post-acl-week-3.yaml; Evaluator HOLD — HRV ~19 ms / 7 d decline exceeds -8 ms threshold; recovery 65 (no <60 hold); sleep_score 71 today, 7 d avg 75.3 (no 3+ day avg <70 hold); symptoms empty; week-4 library progression deferred."
 last_updated: "2026-05-03"
 
 hold_note: >-
-  Evaluator: HOLD entire protocol — wearable HRV ~19 ms decline over 7 days vs prior window exceeds the -8 ms threshold;
-  recovery score 65 does not independently hold; sleep / intensity rules show no -20% drop from provided data.
-  Researcher: PRIMARY protocol-library/post-acl-week-3.yaml (week 3); exercises — stationary_bike 10 min RPE 4/10,
-  terminal_knee_extension 3x12 yellow band ROM 0, quad_sets 3x15 bodyweight ROM 90, heel_slides 3x10 ROM 100;
-  mild pain at ~110° flexion on intake keeps heel_slides at library milestone 100° (not beyond target). No dedicated
-  heel_slides regression entry in library (only regressions/single_leg_squat.yaml). Mon/Wed/Fri order below.
+  Evaluator: HOLD entire protocol — HRV decline meets -8 ms threshold (snapshot hrv_delta_7d=19, 7 d vs prior per .cursorrules).
+  Recovery 65 (no <60 hold). Sleep: no 3+ day average <70 from supplied aggregates (sleep_score 71 today, 7 d avg 75.3). Symptoms empty.
+  Researcher: PRIMARY post-acl-week-3.yaml for held content; week-4 candidates deferred (post-acl-week-4.yaml: mini_squats, single_leg_balance,
+  terminal_knee_extension green band, heel_raises, bike 15 min RPE 5); no regressions folder swaps for current exercises.
+  Session structure Mon/Wed/Fri; order — stationary_bike, terminal_knee_extension, quad_sets, heel_slides.
 
 session_order:
   - stationary_bike

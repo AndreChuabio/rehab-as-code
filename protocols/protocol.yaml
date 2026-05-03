@@ -1,10 +1,11 @@
-# Current rehab protocol for Andre (week 3 baseline; evaluator HRV hold).
+# HOLD week 3 — HRV ~19 ms / 7 d decline exceeds -8 ms threshold (snapshot hrv_delta_7d=19).
+# Recovery 65 (no <60 hold); sleep 71 today / 7 d avg 75.3 (no 3+ day avg <70); symptoms empty; week 4 deferred.
 # Cursor cloud agents update this via PR per .cursorrules.
 
 patient: Andre
 phase: post-ACL reconstruction
 week: 3
-generated_by: "Researcher PRIMARY protocol-library/post-acl-week-3.yaml (week_range [3,3]); evaluator HOLD — HRV ~19 ms decline over 7 d vs prior exceeds -8 ms threshold (whole protocol held); recovery 65 and sleep data do not trigger additional holds (no -20% intensity rule from provided data)."
+generated_by: "Researcher PRIMARY protocol-library/post-acl-week-3.yaml; Evaluator HOLD — HRV ~19 ms / 7 d decline exceeds -8 ms threshold; recovery 65 (no <60 hold); sleep_score 71 today, 7 d avg 75.3 (no 3+ day avg <70 hold); symptoms empty; week-4 library progression deferred."
 last_updated: "2026-05-03"
 
 session_targets:
