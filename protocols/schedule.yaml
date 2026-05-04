@@ -1,19 +1,19 @@
 # Three sessions/week (Mon/Wed/Fri): bike warmup → extension bias → quad sets → flexion/heel slides.
-# HOLD: whole plan stays week-3 library baseline (no advancement to week-4 content).
+# HOLD: week 3 only; ~20% lower session dosing (recovery/sleep-driven); no week-4 reordering.
 
 week: 3
 patient: Andre
-generated_by: "Researcher PRIMARY protocol-library/post-acl-week-3.yaml; evaluator HOLD — HRV ~19 ms / 7 d decline exceeds -8 ms threshold (recovery 65, sleep no -20% intensity trigger)."
-last_updated: "2026-05-03"
+generated_by: "Researcher PRIMARY protocol-library/post-acl-week-3.yaml; evaluator HOLD (recovery 7d avg < 60; no advancement to week-4 content) plus −20% session intensity per 7-day sleep-average rule; acute snapshot summarized in protocol.generated_by."
+last_updated: "2026-05-04"
 
 hold_note: >-
   Patient Andre, 26 (~3 weeks post-op). Intake pain 3/10; mild discomfort near ~110° flexion.
-  Evaluator: HOLD entire protocol — wearable HRV ~19 ms decline over 7 days vs prior window exceeds the -8 ms threshold;
-  recovery score 65 does not independently hold; sleep / intensity rules show no -20% drop from provided data.
-  Researcher: PRIMARY protocol-library/post-acl-week-3.yaml (week 3); exercises — stationary_bike 10 min RPE 4/10,
-  terminal_knee_extension 3x12 yellow band ROM 0, quad_sets 3x15 bodyweight ROM 90, heel_slides 3x10 ROM 100;
-  mild pain at ~110° flexion on intake keeps heel_slides at library milestone 100° (not beyond target). No dedicated
-  heel_slides regression entry in library (only regressions/single_leg_squat.yaml). Mon/Wed/Fri order below.
+  Evaluator: HOLD entire protocol — recovery_7day_avg stays below progression threshold (~35 vs 60),
+  so do not advance week or swap in week-4 library; apply approximately −20% session intensity due to sleep_score_7day_avg rule.
+  HRV_delta_7d at 0 for this snapshot: no extra single-exercise +5 ms progression pathway; acute sleep/recovery/HRV favorable vs prior narrative.
+  Researcher: PRIMARY protocol-library/post-acl-week-3.yaml (week 3); current dosing —
+  stationary_bike ~8 min RPE ~3/10, terminal_knee_extension 3x10 yellow band ROM 0, quad_sets 3x12 bodyweight ROM 90, heel_slides 3x8 ROM 100
+  (heel_slides stay at ROM_target 100° unless symptoms justify change; avoid lowering ROM without symptomatic rationale). Mon/Wed/Fri order unchanged below.
 
 session_order:
   - stationary_bike
