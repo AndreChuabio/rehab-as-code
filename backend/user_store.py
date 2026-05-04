@@ -65,6 +65,41 @@ def _flat_save_slack_index(index: dict[str, str]) -> None:
     _SLACK_INDEX.write_text(json.dumps(index, indent=2))
 
 
+def _flat_ensure_user(token: str, slack_user_id: str | None) -> str:
+    """Create or refresh a flat-file user record under an explicit token."""
+    if not token:
+        raise ValueError("ensure_user requires a non-empty token")
+    USERS_DIR.mkdir(exist_ok=True)
+    existing = _flat_load_user(token)
+    if existing:
+        existing["last_active"] = _now()
+        if slack_user_id and not existing.get("slack_user_id"):
+            existing["slack_user_id"] = slack_user_id
+            index = _flat_load_slack_index()
+            index[slack_user_id] = token
+            _flat_save_slack_index(index)
+        _flat_save_user(existing)
+        return token
+    record: dict = {
+        "token": token,
+        "created_at": _now(),
+        "last_active": _now(),
+        "last_sync": None,
+        "slack_user_id": slack_user_id,
+        "patient_name": None,
+        "health": None,
+        "intake": None,
+        "protocol_state": None,
+        "session_history": [],
+    }
+    _flat_path(token).write_text(json.dumps(record, indent=2))
+    if slack_user_id:
+        index = _flat_load_slack_index()
+        index[slack_user_id] = token
+        _flat_save_slack_index(index)
+    return token
+
+
 def _flat_create_user(slack_user_id: str | None) -> str:
     USERS_DIR.mkdir(exist_ok=True)
     token = str(uuid.uuid4())
@@ -262,6 +297,23 @@ def _sql_create_user(slack_user_id: str | None) -> str:
             "INSERT INTO users (token, slack_user_id, created_at, last_active) "
             "VALUES (?, ?, ?, ?)",
             (token, slack_user_id, _now(), _now()),
+        )
+    return token
+
+
+def _sql_ensure_user(token: str, slack_user_id: str | None) -> str:
+    """Register a known token (e.g., a Supabase auth.uid()) if missing."""
+    if not token:
+        raise ValueError("ensure_user requires a non-empty token")
+    with _sql_conn() as c:
+        c.execute(
+            "INSERT OR IGNORE INTO users (token, slack_user_id, created_at, last_active) "
+            "VALUES (?, ?, ?, ?)",
+            (token, slack_user_id, _now(), _now()),
+        )
+        c.execute(
+            "UPDATE users SET last_active = ? WHERE token = ?",
+            (_now(), token),
         )
     return token
 
@@ -565,6 +617,24 @@ def _pg_create_user(slack_user_id: str | None) -> str:
     return token
 
 
+def _pg_ensure_user(token: str, slack_user_id: str | None) -> str:
+    """Register a known token (e.g., a Supabase auth.uid()) if missing.
+
+    Differs from _pg_create_user: caller supplies the token rather than the
+    DB generating one. Idempotent — re-calling returns the same token.
+    """
+    if not token:
+        raise ValueError("ensure_user requires a non-empty token")
+    with _pg_conn() as c, c.cursor() as cur:
+        cur.execute(
+            "INSERT INTO users (token, slack_user_id, created_at, last_active) "
+            "VALUES (%s, %s, %s, %s) "
+            "ON CONFLICT (token) DO UPDATE SET last_active = EXCLUDED.last_active",
+            (token, slack_user_id, _now(), _now()),
+        )
+    return token
+
+
 def _pg_lookup_by_slack_id(slack_user_id: str) -> str | None:
     with _pg_conn() as c, c.cursor() as cur:
         cur.execute(
@@ -782,6 +852,17 @@ def _pick(flat, sql, pg, *args):
 
 def create_user(slack_user_id: str | None = None) -> str:
     return _pick(_flat_create_user, _sql_create_user, _pg_create_user, slack_user_id)
+
+
+def ensure_user(token: str, slack_user_id: str | None = None) -> str:
+    """Idempotently register a known token (e.g., Supabase auth.uid()).
+
+    Use this when the caller already has a stable identifier (a JWT subject).
+    Use create_user() instead when generating a fresh anonymous token.
+    """
+    return _pick(
+        _flat_ensure_user, _sql_ensure_user, _pg_ensure_user, token, slack_user_id,
+    )
 
 
 def lookup_by_slack_id(slack_user_id: str) -> str | None:
