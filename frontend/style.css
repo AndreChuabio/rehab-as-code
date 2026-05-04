@@ -1436,13 +1436,31 @@ body {
 .pose-split {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
   align-items: stretch;
+  /* Claim real vertical space — `object-fit: contain` letterboxes when the
+     parent is short, which made both videos look squished into thin bands. */
+  min-height: 480px;
+  height: calc(100vh - 220px);
+  max-height: 75vh;
 }
 @media (max-width: 900px) {
-  .pose-split { grid-template-columns: 1fr; }
+  .pose-split {
+    grid-template-columns: 1fr;
+    height: auto;
+    max-height: none;
+  }
 }
+
+/* When form-check is on, hide chat chrome that's competing for space
+   (gallery thumbs strip, Maya header chip, suggestion chips). The chat
+   input at the bottom stays — it's cheap enough to keep. */
+body.pose-active .gallery-thumbs,
+body.pose-active .chat-suggestions,
+body.pose-active .chat-header { display: none !important; }
+body.pose-active .agent-panel { display: none; }
+body.pose-active .main { max-width: none; padding: 16px 24px; }
 .pose-split-ref {
   position: relative;
   background: #000;
