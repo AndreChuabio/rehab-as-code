@@ -1390,6 +1390,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
     window.PoseFormCheck.stop();
     btn.dataset.state = "off";
     btn.textContent = "Form Check";
+    document.body.classList.remove("pose-active");
     // Restore demo video by re-running switchGalleryItem on the active idx
     const activeIdx = Array.from(wrap.querySelectorAll(".gallery-thumb-btn"))
       .findIndex((b) => b.classList.contains("active"));
@@ -1404,9 +1405,11 @@ async function togglePoseFormCheck(wrap, item, btn) {
   } catch (e) {
     btn.disabled = false;
     btn.textContent = "Form Check";
+    document.body.classList.remove("pose-active");
     showToast(`Pose model failed to load: ${e.message}`, "error");
     return;
   }
+  document.body.classList.add("pose-active");
 
   // Side-by-side: keep the Sora reference video looping next to the live
   // webcam + skeleton overlay. Patient mirrors the demo while the model
@@ -1505,6 +1508,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
   } catch (e) {
     btn.disabled = false;
     btn.textContent = "Form Check";
+    document.body.classList.remove("pose-active");
     showToast(`Camera error: ${e.message}`, "error");
     // Restore demo video on failure
     const activeIdx = Array.from(wrap.querySelectorAll(".gallery-thumb-btn"))
