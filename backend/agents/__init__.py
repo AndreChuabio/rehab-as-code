@@ -58,16 +58,19 @@ def register_patient_agent(cls: type[PatientAgent]) -> type[PatientAgent]:
 def get_patient_agent(role: str) -> PatientAgent:
     """Return a PatientAgent instance by role name.
 
-    Roles: session_manager, intake, plan_generation, guided_video, checkin
+    Roles: intake, plan_generation.
 
-    All patient agents are lazy-imported on first call.
+    Lazy-imported on first call. Three roles from PR #34 (session_manager,
+    guided_video, checkin) were removed when their responsibilities were
+    absorbed by other systems:
+      * session_manager → Supabase JWT auth (backend/auth.py)
+      * guided_video    → in-browser MediaPipe form-check + /pose/session
+      * checkin         → /pose/session writes set_completion rows;
+                          coach_chat.fire_checkin_trigger covers narrative
     """
     if not _PATIENT_REGISTRY:
-        from .session_manager_agent import SessionManagerAgent  # noqa: F401
         from .intake_agent import IntakeAgent  # noqa: F401
         from .plan_generation_agent import PlanGenerationAgent  # noqa: F401
-        from .guided_video_agent import GuidedVideoAgent  # noqa: F401
-        from .checkin_agent import CheckInAgent  # noqa: F401
 
     if role not in _PATIENT_REGISTRY:
         raise ValueError(

@@ -20,11 +20,24 @@ let approvedPlanExercises = []; // exercises the user added in step 2
 // ---------------------------------------------------------------------------
 
 const STEP_ROUTES = {
-  intake:   () => triggerIntake(),
+  intake:   () => navigateToIntake(),
   plan:     () => triggerGeneratePlan(),
   exercise: () => triggerExercise(),
   checkin:  () => triggerCheckin(),
 };
+
+// Route #intake to the structured modal for authed users; fall back to the
+// legacy demo-mode chat flow when there's no JWT (so the UI is still walkable
+// in demo mode without sign-in).
+function navigateToIntake() {
+  const authed = !!window.RehabAuth?.getJwt?.();
+  if (authed) {
+    showIntakeModal();
+    setActiveStepBtn("intake");
+  } else {
+    triggerIntake();
+  }
+}
 
 function navigateTo(step) {
   if (window.location.hash !== `#${step}`) {
@@ -52,7 +65,35 @@ document.addEventListener("DOMContentLoaded", () => {
   applyStepLocks();
   routeFromHash(); // honour the URL on load; defaults to #intake
   bootstrapAuth();
+  wireIntakeModal();
+  wirePlanGenModal();
 });
+
+function wireIntakeModal() {
+  const form = document.getElementById("intakeForm");
+  const input = document.getElementById("intakeInput");
+  if (!form || !input) return;
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    const text = (input.value || "").trim();
+    if (!text) return;
+    appendIntakeBubble("user", text);
+    submitIntakeTurn(text);
+  });
+}
+
+function wirePlanGenModal() {
+  const cont = document.getElementById("planGenContinue");
+  if (!cont) return;
+  cont.addEventListener("click", async () => {
+    closePlanGenModal();
+    // Ask the server again — protocol_state now has last_pr_url, so state
+    // should flip to "ready" and the rest of the UI unlocks.
+    await refreshPatientState();
+    setActiveStepBtn("exercise");
+    if (window.location.hash !== "#exercise") history.pushState(null, "", "#exercise");
+  });
+}
 
 // ── Supabase auth bootstrap (soft-gate) ────────────────────────────────────
 //
@@ -116,8 +157,14 @@ async function bootstrapAuth() {
       localStorage.removeItem(AUTH_SKIP_KEY);
       showOverlay(false);
       showPill(window.RehabAuth.getUser());
+      // Server-driven state machine: ask the backend whether this patient
+      // needs intake / plan-gen / nothing, and route to the right modal.
+      refreshPatientState().catch((e) => console.warn("state refresh failed", e));
     } else {
       showPill(null);
+      closeIntakeModal();
+      closePlanGenModal();
+      patientState = null;
       // Re-show the overlay if it isn't a deliberate skip and user has no
       // session — but never on the magic-link redirect, which fires onChange
       // with a fresh session right after.
@@ -160,6 +207,294 @@ async function bootstrapAuth() {
       try { await window.RehabAuth.signOut(); } catch (_) {}
     });
   }
+}
+
+// ---------------------------------------------------------------------------
+// Server-driven patient state machine.
+//
+// Replaces the legacy localStorage rehab_intake_complete flag for authed users.
+// Truth lives in the intake_records / protocol_state tables; the frontend just
+// asks /patient/me/intake-status and routes to the right modal.
+//
+//   state="needs_intake" → open #intakeModal, run /patient/interact loop
+//   state="needs_plan"   → open #planGenModal, POST force=plan_generation
+//   state="ready"        → close all modals, surface main UI
+//
+// Demo mode (no JWT) keeps the old triggerIntake() chat flow as a fallback so
+// the UI is still walkable without sign-in.
+// ---------------------------------------------------------------------------
+
+let patientState = null; // { state, has_intake, has_protocol, last_pr_url, ... }
+let intakeHistory = [];  // [{role, content}] for the intake modal conversation
+let planGenStreamES = null; // EventSource for the live plan-gen trace
+
+async function refreshPatientState({ openModalIfNeeded = true } = {}) {
+  // Only meaningful when authed; demo mode falls back to local flags.
+  if (!window.RehabAuth?.getJwt?.()) {
+    patientState = null;
+    return null;
+  }
+  try {
+    const res = await authedFetch(`${API_BASE}/patient/me/intake-status`);
+    if (!res.ok) {
+      console.warn("intake-status fetch failed:", res.status);
+      patientState = null;
+      return null;
+    }
+    patientState = await res.json();
+  } catch (e) {
+    console.warn("intake-status error:", e);
+    patientState = null;
+    return null;
+  }
+
+  if (!openModalIfNeeded) return patientState;
+
+  if (patientState.state === "needs_intake") {
+    showIntakeModal();
+  } else if (patientState.state === "needs_plan") {
+    showPlanGenModal({ kickoff: true });
+  } else {
+    closeIntakeModal();
+    closePlanGenModal();
+    // Mirror local flag so the rest of the legacy-demo gating logic
+    // (sidebar locks, /protocol load) keeps working without rewrites.
+    intakeComplete = true;
+    localStorage.setItem("rehab_intake_complete", "1");
+    if (patientState.has_protocol) {
+      localStorage.setItem("rehab_plan_approved", "1");
+    }
+    applyStepLocks();
+    loadProtocol();
+  }
+  return patientState;
+}
+
+function showIntakeModal() {
+  const modal = document.getElementById("intakeModal");
+  const log = document.getElementById("intakeLog");
+  const fill = document.getElementById("intakeProgressFill");
+  if (!modal) return;
+  modal.hidden = false;
+  if (log && log.childElementCount === 0) {
+    intakeHistory = [];
+    appendIntakeBubble(
+      "coach",
+      "Hi — I'll ask a few short questions to build your rehab plan.",
+    );
+    // Kick off the agent with an empty user turn so it asks the first question.
+    submitIntakeTurn("");
+  }
+  if (fill) fill.style.width = "0%";
+  document.getElementById("intakeInput")?.focus();
+}
+
+function closeIntakeModal() {
+  const modal = document.getElementById("intakeModal");
+  if (modal) modal.hidden = true;
+  const log = document.getElementById("intakeLog");
+  if (log) log.innerHTML = "";
+  intakeHistory = [];
+}
+
+function appendIntakeBubble(role, text) {
+  const log = document.getElementById("intakeLog");
+  if (!log) return;
+  const div = document.createElement("div");
+  div.className = `intake-bubble intake-bubble-${role === "coach" ? "coach" : "user"}`;
+  div.textContent = text;
+  log.appendChild(div);
+  log.scrollTop = log.scrollHeight;
+}
+
+function setIntakeStatus(text, kind = "info") {
+  const status = document.getElementById("intakeStatus");
+  if (!status) return;
+  if (!text) { status.hidden = true; return; }
+  status.hidden = false;
+  status.textContent = text;
+  status.className = `intake-status auth-status-${kind === "error" ? "err" : "ok"}`;
+}
+
+async function submitIntakeTurn(userText) {
+  const submit = document.getElementById("intakeSubmit");
+  const input = document.getElementById("intakeInput");
+  if (submit) submit.disabled = true;
+  if (input) input.disabled = true;
+  setIntakeStatus("Coach Maya is thinking…", "info");
+
+  try {
+    const body = {
+      message: userText || "Let's start the intake.",
+      history: intakeHistory.slice(),
+      metadata: {},
+    };
+    const res = await authedFetch(`${API_BASE}/patient/interact`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new Error(`HTTP ${res.status}${detail ? ` — ${detail}` : ""}`);
+    }
+    const payload = await res.json();
+    setIntakeStatus("");
+
+    if (userText) {
+      intakeHistory.push({ role: "user", content: userText });
+    }
+    if (payload.message) {
+      intakeHistory.push({ role: "assistant", content: payload.message });
+      appendIntakeBubble("coach", payload.message);
+    }
+
+    // Crude progress indicator: bump fill by 1/8 each round.
+    const fill = document.getElementById("intakeProgressFill");
+    if (fill) {
+      const turns = intakeHistory.filter((m) => m.role === "user").length;
+      fill.style.width = `${Math.min(100, (turns / 7) * 100)}%`;
+    }
+
+    if (payload.intake_complete) {
+      // IntakeAgent saved + already kicked plan_generation. Close intake,
+      // open plan-gen modal, surface the PR card if we already have one.
+      closeIntakeModal();
+      const inv = payload.data?.invocation_id || null;
+      const pr = payload.data?.pr_url || null;
+      showPlanGenModal({ invocation_id: inv, pr_url: pr });
+    }
+  } catch (err) {
+    console.error("intake turn failed:", err);
+    setIntakeStatus(`Couldn't reach coach: ${err.message || err}`, "error");
+  } finally {
+    if (submit) submit.disabled = false;
+    if (input) {
+      input.disabled = false;
+      input.value = "";
+      input.focus();
+    }
+  }
+}
+
+async function showPlanGenModal({ invocation_id = null, pr_url = null, kickoff = false } = {}) {
+  const modal = document.getElementById("planGenModal");
+  const trace = document.getElementById("planGenTrace");
+  const prCard = document.getElementById("planGenPrCard");
+  const cont = document.getElementById("planGenContinue");
+  if (!modal) return;
+  modal.hidden = false;
+  if (trace) trace.innerHTML = "";
+  if (prCard) { prCard.hidden = true; prCard.innerHTML = ""; }
+  if (cont) cont.hidden = true;
+
+  appendPlanGenLine("[start]", "Calling plan generator…");
+
+  // If we don't already have an invocation, force one now.
+  if (!invocation_id && (kickoff || !pr_url)) {
+    try {
+      const body = {
+        message: "Generate my rehab plan.",
+        history: [],
+        metadata: { force: "plan_generation" },
+      };
+      const res = await authedFetch(`${API_BASE}/patient/interact`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const payload = await res.json();
+      invocation_id = payload.data?.invocation_id || null;
+      pr_url = payload.data?.pr_url || pr_url;
+      if (payload.message) appendPlanGenLine("[plan]", payload.message);
+    } catch (err) {
+      appendPlanGenLine("[fail]", `Plan generation failed: ${err.message || err}`, true);
+    }
+  }
+
+  if (invocation_id) {
+    streamPlanGenTrace(invocation_id, () => {
+      if (pr_url) renderPlanGenPr(pr_url);
+      if (cont) cont.hidden = false;
+    });
+  } else if (pr_url) {
+    // Cached_replay returns pr_url directly with no streamable invocation.
+    renderPlanGenPr(pr_url);
+    if (cont) cont.hidden = false;
+  } else {
+    if (cont) cont.hidden = false;
+  }
+}
+
+function appendPlanGenLine(glyph, text, isFail = false) {
+  const trace = document.getElementById("planGenTrace");
+  if (!trace) return;
+  const line = document.createElement("span");
+  line.className = `trace-line${isFail ? " trace-fail" : ""}`;
+  line.innerHTML = `<span class="trace-glyph">${escapeHtml(glyph)}</span>${escapeHtml(text)}`;
+  trace.appendChild(line);
+  trace.scrollTop = trace.scrollHeight;
+}
+
+function renderPlanGenPr(prUrl) {
+  const prCard = document.getElementById("planGenPrCard");
+  if (!prCard) return;
+  prCard.hidden = false;
+  prCard.innerHTML = `<span>PR opened →</span> <a href="${prUrl}" target="_blank" rel="noopener">${prUrl}</a>`;
+}
+
+function streamPlanGenTrace(invocationId, onDone) {
+  if (planGenStreamES) {
+    try { planGenStreamES.close(); } catch (_) {}
+    planGenStreamES = null;
+  }
+  const url = `${API_BASE}/agent/stream/${encodeURIComponent(invocationId)}`;
+  try {
+    planGenStreamES = new EventSource(url);
+  } catch (e) {
+    appendPlanGenLine("[fail]", `Couldn't open trace stream: ${e.message}`, true);
+    if (onDone) onDone();
+    return;
+  }
+  planGenStreamES.onmessage = (ev) => {
+    try {
+      const data = JSON.parse(ev.data);
+      const glyph = TRACE_GLYPH[data.type] || `[${data.type}]`;
+      const text = data.message || data.detail || JSON.stringify(data.payload || {});
+      appendPlanGenLine(glyph, text, data.type === "agent_failed");
+      if (data.type === "pr_opened" && data.payload?.url) {
+        renderPlanGenPr(data.payload.url);
+      }
+    } catch (_) {
+      appendPlanGenLine("[trace]", ev.data);
+    }
+  };
+  planGenStreamES.addEventListener("done", () => {
+    try { planGenStreamES.close(); } catch (_) {}
+    planGenStreamES = null;
+    if (onDone) onDone();
+  });
+  planGenStreamES.onerror = () => {
+    try { planGenStreamES.close(); } catch (_) {}
+    planGenStreamES = null;
+    if (onDone) onDone();
+  };
+}
+
+function closePlanGenModal() {
+  const modal = document.getElementById("planGenModal");
+  if (modal) modal.hidden = true;
+  if (planGenStreamES) {
+    try { planGenStreamES.close(); } catch (_) {}
+    planGenStreamES = null;
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, (c) => (
+    { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]
+  ));
 }
 
 function applyStepLocks() {

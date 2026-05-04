@@ -200,6 +200,55 @@
 
   </div>
 
+  <!-- Structured intake modal. Driven by /patient/interact + IntakeAgent.
+       Opens when /patient/me/intake-status returns state="needs_intake".
+       Replaces the legacy demo-mode triggerIntake() chat flow when authed. -->
+  <div class="intake-modal" id="intakeModal" hidden>
+    <div class="intake-card">
+      <h2>Tell me about your injury</h2>
+      <p class="intake-blurb">
+        7 quick questions. Coach Maya uses your answers to draft a personalized
+        rehab protocol.
+      </p>
+      <div class="intake-progress" id="intakeProgress">
+        <div class="intake-progress-fill" id="intakeProgressFill"></div>
+      </div>
+      <div class="intake-log" id="intakeLog"></div>
+      <form class="intake-form" id="intakeForm">
+        <input
+          type="text"
+          id="intakeInput"
+          placeholder="Your answer…"
+          autocomplete="off"
+          required
+        />
+        <button type="submit" id="intakeSubmit">Send</button>
+      </form>
+      <div class="intake-status" id="intakeStatus" hidden></div>
+    </div>
+  </div>
+
+  <!-- Plan-generation modal. Opens immediately after intake completes (or when
+       /patient/me/intake-status returns state="needs_plan"). Streams the AG2
+       multi-agent trace from /agent/stream/{invocation_id} live, then surfaces
+       the PR card. -->
+  <div class="plan-gen-modal" id="planGenModal" hidden>
+    <div class="plan-gen-card">
+      <h2>Drafting your protocol</h2>
+      <p class="plan-gen-blurb" id="planGenBlurb">
+        Coach Maya is calling the planner agent and the protocol-edit pipeline.
+        Reasoning trace below — you'll see file edits, a branch, and a PR.
+      </p>
+      <div class="plan-gen-trace" id="planGenTrace"></div>
+      <div class="plan-gen-pr" id="planGenPrCard" hidden></div>
+      <div class="plan-gen-actions">
+        <button type="button" class="plan-gen-continue" id="planGenContinue" hidden>
+          Continue to my plan
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Sign-in overlay. Soft gate: app loads behind it, but /chat and
        form-check are inert until a JWT is present. -->
   <div class="auth-overlay" id="authOverlay" hidden>

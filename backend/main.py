@@ -47,6 +47,7 @@ from context_builder import build_system_prompt
 from tavus_client import create_conversation
 from agents import AgentInvocation, InvocationRequest, get_agent
 from protocol_loader import fetch_protocol, write_context_files, PROTOCOL_REPO
+import user_store
 from user_store import (
     create_token,
     ensure_user,
@@ -983,6 +984,7 @@ async def chat(req: ChatRequest, user_id: str = Depends(current_user_id)):
                 health=health,
                 protocol=protocol_payload,
                 trigger_executor=_chat_trigger_executor,
+                user_token=user_id,
             ):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as exc:
@@ -998,72 +1000,142 @@ async def chat(req: ChatRequest, user_id: str = Depends(current_user_id)):
 
 
 class PatientInteractionRequest(BaseModel):
-    slack_user_id: str | None = None
-    token: str | None = None        # omit on first contact; session manager creates it
+    """Body for /patient/interact.
+
+    Auth identifies the patient via Supabase JWT (Depends(current_user_id)),
+    so no token field is needed. `history` is the in-modal conversation
+    transcript replayed back to the agent on every turn (the modal is
+    stateful only on the client; the server stays request/response).
+    """
     message: str
+    history: list[dict] = []  # [{role: "user"|"assistant", content: str}]
     metadata: dict = {}
 
 
 @app.post("/patient/interact")
-async def patient_interact(req: PatientInteractionRequest):
-    """Entry point for all patient agent interactions.
+async def patient_interact(
+    req: PatientInteractionRequest,
+    user_id: str = Depends(current_user_id),
+):
+    """Single entry point for the structured intake + plan-gen flow.
 
-    Routes through SessionManagerAgent → domain agent.
-    Returns the domain agent's PatientResponse as JSON.
+    Two states, server-resolved from intake_records (no client trust):
+      1. No intake row yet      → run IntakeAgent, return next question.
+                                   When IntakeAgent saves and signals
+                                   plan_generation, immediately kick PlanGenAgent.
+      2. metadata.force == "plan_generation" → re-run plan generation
+                                                 (admin escape hatch / retries).
+      3. Otherwise (intake exists, no force) → 409, client should use /chat.
     """
     from agents import get_patient_agent, PatientRequest
 
-    sm = get_patient_agent("session_manager")
-    patient_req = PatientRequest(
-        user_token=req.token or "",
-        message=req.message,
-        slack_user_id=req.slack_user_id,
-        metadata=req.metadata,
-    )
-    sm_response = await sm.handle(patient_req)
+    ensure_user(user_id)
 
-    if not sm_response.next_agent:
+    intake = user_store.get_intake(user_id)
+    force = (req.metadata or {}).get("force")
+
+    if intake is None:
+        intake_agent = get_patient_agent("intake")
+        patient_req = PatientRequest(
+            user_token=user_id,
+            message=req.message,
+            slack_user_id=None,
+            metadata={**(req.metadata or {}), "conversation_history": list(req.history or [])},
+        )
+        resp = await intake_agent.handle(patient_req)
+
+        # IntakeAgent finished and called trigger_plan_generation → fire plan gen now.
+        if resp.next_agent == "plan_generation":
+            plan_resp = await _kick_plan_generation(user_id, "Generate my rehab plan.")
+            return {
+                "agent": "plan_generation",
+                "message": plan_resp["message"],
+                "next_agent": None,
+                "data": plan_resp["data"],
+                "artifacts": plan_resp["artifacts"],
+                "intake_complete": True,
+            }
+
         return {
-            "agent": sm_response.agent_name,
-            "message": sm_response.message,
-            "next_agent": None,
-            "data": sm_response.data,
-            "artifacts": sm_response.artifacts,
+            "agent": resp.agent_name,
+            "message": resp.message,
+            "next_agent": resp.next_agent,
+            "data": resp.data,
+            "artifacts": resp.artifacts,
+            "intake_complete": False,
         }
 
-    domain_agent = get_patient_agent(sm_response.next_agent)
-    patient_req.user_token = sm_response.data.get("user_token", patient_req.user_token)
-    patient_req.metadata.update(sm_response.data)
+    if force == "plan_generation":
+        plan_resp = await _kick_plan_generation(user_id, req.message or "Generate my rehab plan.")
+        return {
+            "agent": "plan_generation",
+            "message": plan_resp["message"],
+            "next_agent": None,
+            "data": plan_resp["data"],
+            "artifacts": plan_resp["artifacts"],
+            "intake_complete": True,
+        }
 
-    domain_response = await domain_agent.handle(patient_req)
+    raise HTTPException(
+        status_code=409,
+        detail="intake already complete; use /chat for ongoing coaching.",
+    )
+
+
+async def _kick_plan_generation(user_id: str, message: str) -> dict:
+    """Run PlanGenerationAgent and return a serializable summary dict."""
+    from agents import get_patient_agent, PatientRequest
+    plan_agent = get_patient_agent("plan_generation")
+    patient_req = PatientRequest(
+        user_token=user_id,
+        message=message,
+        slack_user_id=None,
+        metadata={},
+    )
+    resp = await plan_agent.handle(patient_req)
     return {
-        "agent": domain_response.agent_name,
-        "message": domain_response.message,
-        "next_agent": domain_response.next_agent,
-        "data": domain_response.data,
-        "artifacts": domain_response.artifacts,
-        "user_token": patient_req.user_token,
+        "agent": resp.agent_name,
+        "message": resp.message,
+        "data": resp.data,
+        "artifacts": resp.artifacts,
     }
 
 
-@app.get("/patient/{token}/status")
-def patient_status(token: str):
-    """Return a summary of the patient's current state."""
-    import user_store as us
-    user = us.load_user(token)
-    if not user:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=404, detail="unknown token")
+@app.get("/patient/me/intake-status")
+def patient_intake_status(user_id: str = Depends(current_user_id)):
+    """Server-derived patient state for the frontend state machine.
+
+    Frontend calls this on auth-ready and after every modal close. Drives whether
+    the intake modal opens, the plan-gen modal opens, or the main UI loads.
+
+    States:
+      - "needs_intake"     no intake_records row
+      - "needs_plan"       intake exists, protocol_state has no last_pr_url
+      - "ready"            intake + protocol_state.last_pr_url both present
+    """
+    ensure_user(user_id)
+    user = user_store.load_user(user_id) or {}
+    intake = user.get("intake")
     ps = user.get("protocol_state") or {}
+    has_intake = intake is not None
+    has_pr = bool(ps.get("last_pr_url"))
+
+    if not has_intake:
+        state = "needs_intake"
+    elif not has_pr:
+        state = "needs_plan"
+    else:
+        state = "ready"
+
     return {
-        "token": token,
+        "state": state,
         "patient_name": user.get("patient_name"),
-        "has_intake": user.get("intake") is not None,
-        "has_protocol": ps != {},
-        "session_count": len(user.get("session_history", [])),
+        "has_intake": has_intake,
+        "has_protocol": has_pr,
         "current_phase": ps.get("current_phase"),
         "current_week": ps.get("current_week"),
         "last_pr_url": ps.get("last_pr_url"),
+        "session_count": len(user.get("session_history", [])),
     }
 
 

@@ -1,15 +1,16 @@
 """
 IntakeAgent — collects structured patient intake data.
 
-6 data points collected through natural conversation:
+7 data points collected through natural conversation:
   name, age, injury_type, surgery_date, pain_level, symptoms, goals
 
-Also supports:
-  - Image analysis: patient submits a post-op/injury photo (vision via Claude)
-  - Tavus video session: optional video coaching during intake
+Driven by the structured intake modal (frontend/index.html #intakeModal). The
+agent runs server-side and is invoked turn-by-turn from /patient/interact;
+the modal renders the conversation. After save_intake_record + trigger_plan_generation
+the modal closes and the plan-gen modal opens to stream the AG2 PR run.
 
-Routes to plan_generation when intake is saved.
-Uses claude-sonnet-4-6 for image analysis capability.
+Vision support and Tavus session creation tools remain registered for future use
+but are no longer surfaced in the system prompt; the modal does not collect a photo.
 """
 from __future__ import annotations
 
@@ -29,23 +30,20 @@ import user_store
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a rehabilitation intake specialist.
-Collect the following fields through warm, natural conversation — ask one question at a time:
+Collect the following fields through warm, natural conversation — ask one question at a time.
+Keep replies short (1-2 sentences) so they fit the chat-style intake modal.
 
 Required:
   1. name: patient's first name
   2. age: age in years (integer)
-  3. injury_type: e.g., "ACL reconstruction", "rotator cuff repair", "knee meniscus"
+  3. injury_type: e.g., "ACL reconstruction", "rotator cuff repair", "lateral ankle sprain"
   4. surgery_date: approximate surgery or injury date (ask for "how long ago" if exact date unknown)
   5. pain_level: current pain level 0-10
   6. symptoms: list of current symptoms (pain location, stiffness, limited ROM, etc.)
   7. goals: what they want to achieve with rehab (return to sport, daily function, etc.)
 
-Optional:
-  - If the patient mentions having a photo of their surgical site or injury, ask if they'd like to share it.
-  - If image_url is provided in context, analyze it with analyze_image.
-
-When all required fields are collected, confirm with a brief summary, then call save_intake_record.
-After saving, call trigger_plan_generation.
+When all required fields are collected, confirm with a one-sentence summary, then call
+save_intake_record with the structured fields. Immediately after, call trigger_plan_generation.
 """
 
 INTAKE_TOOLS = [

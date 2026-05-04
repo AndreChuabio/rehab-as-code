@@ -185,6 +185,14 @@ def _flat_get_intake(token: str) -> dict | None:
     return user.get("intake") if user else None
 
 
+def _flat_delete_intake(token: str) -> None:
+    user = _flat_load_user(token)
+    if user is None or "intake" not in user:
+        return
+    user.pop("intake", None)
+    _flat_save_user(user)
+
+
 def _flat_save_protocol_state(token: str, state: dict) -> None:
     user = _flat_load_user(token)
     if user is None:
@@ -469,6 +477,12 @@ def _sql_get_intake(token: str) -> dict | None:
             "SELECT payload FROM intake_records WHERE token = ?", (token,)
         ).fetchone()
     return json.loads(row["payload"]) if row else None
+
+
+def _sql_delete_intake(token: str) -> None:
+    with _sql_conn() as c:
+        c.execute("DELETE FROM intake_records WHERE token = ?", (token,))
+        _sql_touch(c, token)
 
 
 def _sql_save_protocol_state(token: str, state: dict) -> None:
@@ -801,6 +815,12 @@ def _pg_get_intake(token: str) -> dict | None:
     return row["payload"] if row else None
 
 
+def _pg_delete_intake(token: str) -> None:
+    with _pg_conn() as c, c.cursor() as cur:
+        cur.execute("DELETE FROM intake_records WHERE token = %s", (token,))
+        _pg_touch(cur, token)
+
+
 def _pg_save_protocol_state(token: str, state: dict) -> None:
     from psycopg.types.json import Json
 
@@ -957,6 +977,17 @@ def save_intake(token: str, intake: dict) -> None:
 
 def get_intake(token: str) -> dict | None:
     return _pick(_flat_get_intake, _sql_get_intake, _pg_get_intake, token)
+
+
+def delete_intake(token: str) -> None:
+    """Erase the intake record so the patient is treated as fresh on next /patient/interact.
+
+    Admin escape-hatch invoked by coach_chat.fire_intake_trigger when the
+    patient explicitly requests a re-intake.
+    """
+    return _pick(
+        _flat_delete_intake, _sql_delete_intake, _pg_delete_intake, token,
+    )
 
 
 def save_protocol_state(token: str, state: dict) -> None:
