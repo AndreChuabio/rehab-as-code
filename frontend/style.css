@@ -1432,6 +1432,94 @@ body {
 }
 .pose-fullscreen-btn:hover { background: rgba(80, 220, 180, 0.3); }
 
+/* Side-by-side: Sora reference video + live webcam pose overlay. */
+.pose-split {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  width: 100%;
+  align-items: stretch;
+}
+@media (max-width: 900px) {
+  .pose-split { grid-template-columns: 1fr; }
+}
+.pose-split-ref {
+  position: relative;
+  background: #000;
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pose-split-ref video {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+}
+.pose-split-ref-label {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  font-size: 11px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.85);
+  background: rgba(0,0,0,0.55);
+  padding: 3px 8px;
+  border-radius: 3px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.pose-split-live { min-width: 0; }
+
+.pose-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 0 1 auto;
+  margin-right: auto;
+  padding-right: 12px;
+}
+.pose-title-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+.pose-title-dose {
+  font-size: 11px;
+  color: rgba(255,255,255,0.6);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 240px;
+}
+
+.pose-voice-btn {
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  background: rgba(80, 220, 180, 0.18);
+  color: rgb(140, 240, 200);
+  border: 1px solid rgba(80, 220, 180, 0.5);
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background .15s ease;
+  white-space: nowrap;
+}
+.pose-voice-btn[data-on="0"] {
+  background: rgba(120, 120, 120, 0.18);
+  color: rgba(255,255,255,0.6);
+  border-color: rgba(180, 180, 180, 0.4);
+}
+.pose-voice-btn:hover { background: rgba(80, 220, 180, 0.3); }
+.pose-voice-btn[data-on="0"]:hover { background: rgba(120, 120, 120, 0.3); }
+
+
 .metric-pill.reps-pill {
   background: rgba(140, 240, 200, 0.2);
   color: #fff;

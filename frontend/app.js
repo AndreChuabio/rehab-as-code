@@ -1104,6 +1104,10 @@ function maybeAttachFormCheckBtn(wrap, item) {
     console.warn("PoseFormCheck not loaded — pose.js failed to initialize");
     return;
   }
+  // Only show the button on exercises that have pose criteria defined.
+  // Without an EXERCISES entry the rep tracker no-ops silently and the
+  // patient gets a confusing "0 reps" experience.
+  if (!window.PoseFormCheck.EXERCISES?.[item.ex.id]) return;
   const videoWrap = wrap.querySelector("#galleryVideoWrap");
   if (!videoWrap || videoWrap.parentElement.querySelector(".pose-form-check-btn")) return;
   const btn = document.createElement("button");
@@ -1113,6 +1117,100 @@ function maybeAttachFormCheckBtn(wrap, item) {
   btn.textContent = "Form Check (webcam)";
   btn.onclick = () => togglePoseFormCheck(wrap, item, btn);
   videoWrap.parentElement.insertBefore(btn, videoWrap);
+}
+
+// ── Voice cues (Web Speech API) ─────────────────────────────────────────────
+//
+// Browser-native, free, instant. Voice toggle defaults OFF on first session
+// so we don't surprise the user; first toggle warms up speechSynthesis to
+// satisfy mobile-Safari's autoplay gate.
+
+function poseVoiceEnabled() {
+  return localStorage.getItem("poseVoice") === "1";
+}
+
+function setPoseVoiceEnabled(on) {
+  localStorage.setItem("poseVoice", on ? "1" : "0");
+}
+
+let _poseVoiceObj = null;
+
+function pickVoice() {
+  if (_poseVoiceObj) return _poseVoiceObj;
+  const voices = window.speechSynthesis?.getVoices?.() || [];
+  if (!voices.length) return null;
+  _poseVoiceObj =
+    voices.find((v) =>
+      v.lang.startsWith("en") &&
+      /samantha|victoria|google us english|female/i.test(v.name)
+    ) || voices.find((v) => v.lang.startsWith("en")) || voices[0];
+  return _poseVoiceObj;
+}
+
+function speakCue(text) {
+  if (!poseVoiceEnabled()) return;
+  if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) return;
+  const u = new SpeechSynthesisUtterance(String(text));
+  u.rate   = 1.05;
+  u.pitch  = 1.0;
+  u.volume = 0.9;
+  const v = pickVoice();
+  if (v) u.voice = v;
+  window.speechSynthesis.speak(u);
+}
+
+// ── Pose set telemetry (POST /pose/session) ─────────────────────────────────
+
+function poseAuthHeaders() {
+  // Mirrors the /chat behaviour: include the Supabase JWT if one is in
+  // localStorage (set by the future magic-link login). Until that lands,
+  // the POST will 401 in production — we degrade gracefully (toast + skip).
+  const jwt = localStorage.getItem("supabaseJwt");
+  return jwt ? { Authorization: `Bearer ${jwt}` } : {};
+}
+
+async function postPoseSession(exercise, repsHistory, warnings, repSummary) {
+  const startedAt = new Date(
+    Date.now() - Math.max(60_000, repsHistory.length * 4_000)
+  ).toISOString();
+  // Aggregate warnings by id with a count.
+  const counts = {};
+  for (const w of warnings || []) {
+    if (!w?.id) continue;
+    counts[w.id] = counts[w.id] || { id: w.id, msg: w.msg, count: 0 };
+    counts[w.id].count += 1;
+  }
+  const body = {
+    exercise_id: exercise.id,
+    exercise_name: exercise.name,
+    started_at: startedAt,
+    ended_at: new Date().toISOString(),
+    target_dose: exercise.default_dose || null,
+    reps: repsHistory.map((r) => ({
+      rep: r.repNumber,
+      depth_min: r.depthMin,
+      status: r.status,
+      msg: r.msg,
+    })),
+    warnings: Object.values(counts),
+    client: "web/pose-v1",
+  };
+  try {
+    const res = await fetch(`${API_BASE}/pose/session`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...poseAuthHeaders() },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 401) {
+      showToast("Set not logged — sign in to save your progress", "info");
+      return;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    showToast("Set logged — Maya can see it now", "info");
+  } catch (e) {
+    console.warn("postPoseSession failed:", e);
+    showToast(`Set log failed: ${e.message}`, "error");
+  }
 }
 
 function renderPoseMetrics(container, payload, exercise) {
@@ -1201,44 +1299,97 @@ async function togglePoseFormCheck(wrap, item, btn) {
     return;
   }
 
+  // Side-by-side: keep the Sora reference video looping next to the live
+  // webcam + skeleton overlay. Patient mirrors the demo while the model
+  // tracks them.
+  const refSrc = item.ex.generated_video_url || item.ex.video_url || "";
+  const voiceOn = poseVoiceEnabled();
   videoWrap.innerHTML = `
-    <div class="pose-root" id="poseRoot">
-      <div class="pose-toolbar">
-        <div class="pose-metrics" id="poseMetrics">
-          <span class="metric-pill idle">starting camera...</span>
+    <div class="pose-split">
+      <div class="pose-split-ref">
+        <video src="${escapeHtml(refSrc)}" playsinline muted autoplay loop></video>
+        <div class="pose-split-ref-label">Reference</div>
+      </div>
+      <div class="pose-root pose-split-live" id="poseRoot">
+        <div class="pose-toolbar">
+          <div class="pose-title" title="${escapeHtml(item.ex.name)}">
+            <span class="pose-title-name">${escapeHtml(item.ex.name)}</span>
+            <span class="pose-title-dose">${escapeHtml(item.ex.default_dose || "")}</span>
+          </div>
+          <div class="pose-metrics" id="poseMetrics">
+            <span class="metric-pill idle">starting camera...</span>
+          </div>
+          <button class="pose-voice-btn" id="poseVoiceBtn" data-on="${voiceOn ? "1" : "0"}" title="Voice cues">
+            ${voiceOn ? "🔊 Voice" : "🔇 Voice"}
+          </button>
+          <button class="pose-fullscreen-btn" id="poseFullscreenBtn" title="Toggle fullscreen">⛶</button>
         </div>
-        <button class="pose-fullscreen-btn" id="poseFullscreenBtn" title="Toggle fullscreen">⛶ Fullscreen</button>
+        <div class="pose-warnings" id="poseWarnings" hidden></div>
+        <div class="pose-stage" id="poseStage">
+          <video id="poseVideo" playsinline muted autoplay></video>
+          <canvas id="poseCanvas" class="pose-overlay-canvas"></canvas>
+        </div>
+        <div class="pose-session-card" id="poseSession" hidden></div>
       </div>
-      <div class="pose-warnings" id="poseWarnings" hidden></div>
-      <div class="pose-stage" id="poseStage">
-        <video id="poseVideo" playsinline muted autoplay></video>
-        <canvas id="poseCanvas" class="pose-overlay-canvas"></canvas>
-      </div>
-      <div class="pose-session-card" id="poseSession" hidden></div>
     </div>
   `;
-  const root      = videoWrap.querySelector("#poseRoot");
-  const fsBtn     = videoWrap.querySelector("#poseFullscreenBtn");
+  const root        = videoWrap.querySelector("#poseRoot");
+  const fsBtn       = videoWrap.querySelector("#poseFullscreenBtn");
+  const voiceBtn    = videoWrap.querySelector("#poseVoiceBtn");
   const metricsEl   = videoWrap.querySelector("#poseMetrics");
   const warningsEl  = videoWrap.querySelector("#poseWarnings");
   const sessionEl   = videoWrap.querySelector("#poseSession");
   const repsHistory = [];
+  const warningsAcc = [];
+  let posted = false;
   fsBtn.onclick = () => {
     if (document.fullscreenElement) document.exitFullscreen();
     else root.requestFullscreen?.();
+  };
+  voiceBtn.onclick = () => {
+    const next = !poseVoiceEnabled();
+    setPoseVoiceEnabled(next);
+    voiceBtn.dataset.on = next ? "1" : "0";
+    voiceBtn.textContent = next ? "🔊 Voice" : "🔇 Voice";
+    if (next) {
+      // Warm up speechSynthesis on the user gesture (Safari autoplay gate).
+      try { speakCue("voice ready"); } catch (_) {}
+    } else {
+      try { window.speechSynthesis?.cancel?.(); } catch (_) {}
+    }
   };
   const videoEl  = videoWrap.querySelector("#poseVideo");
   const canvasEl = videoWrap.querySelector("#poseCanvas");
 
   try {
-    await window.PoseFormCheck.start(videoEl, canvasEl, item.ex.id, (payload) => {
-      if (payload.repEvents && payload.repEvents.length) {
-        for (const ev of payload.repEvents) repsHistory.push(ev);
-        renderPoseSession(sessionEl, repsHistory, payload.repSummary);
-      }
-      renderPoseMetrics(metricsEl, payload, item.ex);
-      renderPoseWarnings(warningsEl, payload);
-    });
+    await window.PoseFormCheck.start(
+      videoEl,
+      canvasEl,
+      item.ex.id,
+      (payload) => {
+        if (payload.repEvents && payload.repEvents.length) {
+          for (const ev of payload.repEvents) repsHistory.push(ev);
+          renderPoseSession(sessionEl, repsHistory, payload.repSummary);
+        }
+        if (payload.warnings && payload.warnings.length) {
+          for (const w of payload.warnings) warningsAcc.push(w);
+        }
+        renderPoseMetrics(metricsEl, payload, item.ex);
+        renderPoseWarnings(warningsEl, payload);
+        // setComplete fires once when the patient hits the prescribed reps.
+        // POST the rolled-up set to the backend so Maya sees it on her
+        // next reply.
+        if (payload.setComplete && !posted) {
+          posted = true;
+          postPoseSession(item.ex, repsHistory, warningsAcc, payload.repSummary);
+        }
+      },
+      {
+        exerciseName: item.ex.name,
+        targetDose: item.ex.default_dose,
+        voice: speakCue,
+      },
+    );
     btn.disabled = false;
     btn.dataset.state = "on";
     btn.textContent = "Stop";
