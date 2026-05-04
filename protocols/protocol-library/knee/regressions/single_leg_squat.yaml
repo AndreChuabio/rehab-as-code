@@ -1,0 +1,19 @@
+# Regression target for single_leg_squat.
+# Used when symptom log reports knee discomfort during single-leg loading.
+
+injury_category: knee
+regresses_from: single_leg_squat
+swap_to: assisted_split_squat
+
+assisted_split_squat:
+  sets: 3
+  reps: 10
+  load: bodyweight
+  notes: "Hand on wall or rail for support. Front knee tracks over second toe."
+  ROM_target_deg: 60   # shallower than full single-leg
+  reasoning: |
+    Reduces unilateral load and shear at the knee while maintaining
+    quad-dominant pattern. Use when patient reports tweaky / unstable
+    sensation on full single-leg loading.
+
+cite_in_pr: protocol-library/knee/regressions/single_leg_squat.yaml

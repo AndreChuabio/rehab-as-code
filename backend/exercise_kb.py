@@ -47,9 +47,18 @@ def find_by_id(exercise_id: str) -> dict[str, Any] | None:
     return _BY_ID.get(exercise_id)
 
 
-def find_by_phase(phase: str) -> list[dict[str, Any]]:
+def find_by_phase(phase: str, injury_type: str | None = None) -> list[dict[str, Any]]:
+    """Filter exercises by phase, optionally further filtered by injury_type.
+
+    injury_type is matched against each entry's injury_types list. None (default)
+    returns matches across all injury categories — preserves prior behavior.
+    """
     phase = phase.lower().strip()
-    return [ex for ex in _EXERCISES if phase in [p.lower() for p in ex.get("phase", [])]]
+    results = [ex for ex in _EXERCISES if phase in [p.lower() for p in ex.get("phase", [])]]
+    if injury_type:
+        injury_type = injury_type.lower().strip()
+        results = [ex for ex in results if injury_type in [i.lower() for i in ex.get("injury_types", [])]]
+    return results
 
 
 def keyword_search(query: str) -> list[dict[str, Any]]:

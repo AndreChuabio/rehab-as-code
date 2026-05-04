@@ -1,0 +1,41 @@
+# Reference: rotator cuff strain (low-grade), week 3 (active loading)
+# Evidence base: Kuhn MOON cohort; standard scapular-focused progression.
+
+injury_category: shoulder
+phase: rotator cuff strain (low-grade)
+week_range: [3, 3]
+goals:
+  - restore active forward elevation to 150 deg
+  - re-establish scapular control
+  - introduce light dynamic strengthening
+  - eliminate compensatory shrugging during reach
+
+exercises:
+  - name: shoulder_sleeper_stretch
+    sets: 3
+    reps: 1
+    duration_sec: 30
+    notes: "Side-lying on affected shoulder. Stretch should be tension, not pain."
+
+  - name: shoulder_scapular_retraction
+    sets: 3
+    reps: 12
+    progression_to: shoulder_prone_t
+    notes: "3-second hold each rep. No shrugging."
+
+  - name: shoulder_wall_slides
+    sets: 3
+    reps: 10
+    progression_to: shoulder_prone_y
+    notes: "Forearms maintain wall contact. Stop where contact breaks."
+
+  - name: shoulder_prone_y
+    sets: 3
+    reps: 10
+    load: bodyweight
+    notes: "Lower trap focus. Thumbs up. 3-second slow lower."
+
+clearance_criteria:
+  - active_forward_elevation: ">= 150 deg pain-free"
+  - external_rotation_strength: "symmetric to uninvolved side"
+  - night_pain: none

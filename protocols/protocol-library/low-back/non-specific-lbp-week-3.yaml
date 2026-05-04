@@ -1,0 +1,39 @@
+# Reference: non-specific low back pain, week 3 (active stabilization)
+# Evidence base: McGill spine stability program; NICE LBP guideline NG59.
+
+injury_category: low_back
+phase: non-specific low back pain (subacute)
+week_range: [3, 3]
+goals:
+  - build trunk endurance (anti-rotation, anti-extension)
+  - integrate hip / glute drivers
+  - normalize hinge pattern
+  - return to all ADLs pain-free
+
+exercises:
+  - name: lb_glute_bridge_lb
+    sets: 3
+    reps: 12
+    progression_to: lb_bird_dog
+    notes: "Ribs stay down. 2s pause at top. Glutes drive - not low back."
+
+  - name: lb_dead_bug
+    sets: 3
+    reps: 10
+    progression_to: lb_bird_dog
+    notes: "Low back pressed flat to floor throughout. Reduce range if it arches."
+
+  - name: lb_bird_dog
+    sets: 3
+    reps: 10
+    notes: "3-second hold. No hip rotation. Keep pelvis level."
+
+  - name: lb_cat_cow
+    sets: 2
+    reps: 10
+    notes: "Continue as warm-up / mobility maintenance."
+
+clearance_criteria:
+  - pain_with_ADLs: "0/10"
+  - bird_dog: "10 reps each side, controlled, no compensations"
+  - return_to_work: "full duty if applicable"

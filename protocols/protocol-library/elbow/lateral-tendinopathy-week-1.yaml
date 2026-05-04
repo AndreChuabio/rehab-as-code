@@ -1,0 +1,42 @@
+# Reference: lateral elbow tendinopathy (tennis elbow), week 1 (pain modulation)
+# Evidence base: Coombes et al. (2015) loading + isometric for tendinopathy;
+# Stasinopoulos eccentric protocol.
+
+injury_category: elbow
+phase: lateral elbow tendinopathy
+week_range: [1, 1]
+goals:
+  - reduce pain at rest and with light grip
+  - introduce isometric loading (analgesic effect)
+  - maintain mobility of wrist / forearm
+  - identify and modify aggravating activities
+
+exercises:
+  - name: elbow_wrist_flexor_stretch
+    sets: 3
+    reps: 1
+    duration_sec: 30
+    notes: "Gentle. Felt in forearm flexors. Should not increase elbow pain."
+
+  - name: elbow_wrist_extensor_stretch
+    sets: 3
+    reps: 1
+    duration_sec: 30
+    notes: "Felt over top of forearm. Bias for tennis elbow recovery."
+
+  - name: elbow_isometric_extension
+    sets: 3
+    reps: 1
+    duration_sec: 10
+    progression_to: elbow_eccentric_wrist_extension
+    notes: "Submaximal hold against opposite hand. ~50% effort. Analgesic dose."
+
+  - name: elbow_grip_squeeze
+    sets: 3
+    reps: 15
+    notes: "Soft ball, 5s holds. Modify if pain >3/10."
+
+clearance_criteria:
+  - pain_at_rest: "<= 2/10"
+  - grip_strength: "improving day-to-day"
+  - aggravating_activities: "identified and modified"

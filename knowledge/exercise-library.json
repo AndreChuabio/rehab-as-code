@@ -1,11 +1,12 @@
 {
-  "schema_version": "1.0.0",
-  "description": "Curated post-ACL rehab exercise library. Each entry maps a protocol exercise id to a YouTube video and 3 verbal cues. Used by coach_chat.py for grounded recommendations and by the chat UI for embedded video cards.",
+  "schema_version": "2.0.0",
+  "description": "Curated multi-injury physio rehab exercise library. Covers knee (post-ACL), ankle (lateral sprain), shoulder (rotator cuff), low back (non-specific LBP), hamstring (grade 1 strain), elbow (lateral tendinopathy). Each entry maps an exercise id to verbal cues, dosing, progression chain, and an optional YouTube video. Used by coach_chat.py for grounded recommendations and by the chat UI for embedded video cards. injury_types field gates filtering when chat is scoped to a patient's injury category.",
   "exercises": [
     {
       "id": "quad_sets",
       "name": "Quad Sets",
       "phase": ["acute", "subacute"],
+      "injury_types": ["knee"],
       "youtube_id": "RZkbu3WVeoI",
       "thumbnail_url": "https://img.youtube.com/vi/RZkbu3WVeoI/hqdefault.jpg",
       "cues": [
@@ -21,6 +22,7 @@
       "id": "heel_slides",
       "name": "Heel Slides",
       "phase": ["acute", "subacute"],
+      "injury_types": ["knee"],
       "youtube_id": "B1Iiq_XfNUI",
       "thumbnail_url": "https://img.youtube.com/vi/B1Iiq_XfNUI/hqdefault.jpg",
       "cues": [
@@ -36,6 +38,7 @@
       "id": "terminal_knee_extension",
       "name": "Terminal Knee Extension (band)",
       "phase": ["subacute"],
+      "injury_types": ["knee"],
       "youtube_id": "C-cn_NfOpTU",
       "thumbnail_url": "https://img.youtube.com/vi/C-cn_NfOpTU/hqdefault.jpg",
       "cues": [
@@ -51,6 +54,7 @@
       "id": "stationary_bike",
       "name": "Stationary Bike (ROM-focus)",
       "phase": ["subacute", "strength"],
+      "injury_types": ["knee"],
       "youtube_id": "AB3hp4cP6XU",
       "thumbnail_url": "https://img.youtube.com/vi/AB3hp4cP6XU/hqdefault.jpg",
       "cues": [
@@ -66,6 +70,7 @@
       "id": "glute_bridge",
       "name": "Glute Bridge",
       "phase": ["acute", "subacute"],
+      "injury_types": ["knee"],
       "youtube_id": "8bbE64NuDTU",
       "thumbnail_url": "https://img.youtube.com/vi/8bbE64NuDTU/hqdefault.jpg",
       "cues": [
@@ -81,6 +86,7 @@
       "id": "wall_sit",
       "name": "Wall Sit",
       "phase": ["subacute", "strength"],
+      "injury_types": ["knee"],
       "youtube_id": "y-wV4Venusw",
       "thumbnail_url": "https://img.youtube.com/vi/y-wV4Venusw/hqdefault.jpg",
       "cues": [
@@ -96,6 +102,7 @@
       "id": "mini_squat",
       "name": "Mini Squat (0-45 deg)",
       "phase": ["strength"],
+      "injury_types": ["knee"],
       "youtube_id": "aclHkVaku9U",
       "thumbnail_url": "https://img.youtube.com/vi/aclHkVaku9U/hqdefault.jpg",
       "cues": [
@@ -111,6 +118,7 @@
       "id": "single_leg_squat",
       "name": "Single-Leg Squat",
       "phase": ["strength"],
+      "injury_types": ["knee"],
       "youtube_id": "vPmxC44yOOY",
       "thumbnail_url": "https://img.youtube.com/vi/vPmxC44yOOY/hqdefault.jpg",
       "cues": [
@@ -121,6 +129,651 @@
       "regression_of": null,
       "progression_to": ["box_jump"],
       "default_dose": "3 x 8 per side"
+    },
+
+    {
+      "id": "ankle_alphabet",
+      "name": "Ankle Alphabet",
+      "phase": ["acute", "subacute"],
+      "injury_types": ["ankle"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Trace each letter slowly through full available range",
+        "Move from the ankle joint, not the leg",
+        "Stop if sharp pain - dull stretch only"
+      ],
+      "regression_of": null,
+      "progression_to": ["ankle_dorsiflexion_band"],
+      "default_dose": "3 sets A-Z, 2x daily"
+    },
+    {
+      "id": "ankle_towel_calf_stretch",
+      "name": "Towel-Assisted Calf Stretch",
+      "phase": ["acute", "subacute"],
+      "injury_types": ["ankle"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Loop towel around the ball of the foot",
+        "Pull foot toward you until calf stretch",
+        "Hold steady - no bouncing"
+      ],
+      "regression_of": null,
+      "progression_to": ["ankle_dorsiflexion_band"],
+      "default_dose": "3 x 30s holds"
+    },
+    {
+      "id": "ankle_dorsiflexion_band",
+      "name": "Band-Resisted Dorsiflexion",
+      "phase": ["subacute"],
+      "injury_types": ["ankle"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Anchor band on a stable point in front of foot",
+        "Pull foot up toward shin against the band",
+        "Slow return - control the eccentric"
+      ],
+      "regression_of": null,
+      "progression_to": ["ankle_calf_raises_double_leg"],
+      "default_dose": "3 x 15, yellow band"
+    },
+    {
+      "id": "ankle_eversion_band",
+      "name": "Band-Resisted Eversion",
+      "phase": ["subacute"],
+      "injury_types": ["ankle"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Band loops around outside of foot, anchored medially",
+        "Roll foot outward against the band",
+        "Move only at the ankle, not the hip"
+      ],
+      "regression_of": null,
+      "progression_to": ["ankle_calf_raises_double_leg"],
+      "default_dose": "3 x 15, yellow band"
+    },
+    {
+      "id": "ankle_calf_raises_double_leg",
+      "name": "Double-Leg Calf Raises",
+      "phase": ["subacute", "strength"],
+      "injury_types": ["ankle"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Rise onto balls of both feet",
+        "Pause 1 second at top",
+        "Lower slowly - 3 seconds down"
+      ],
+      "regression_of": null,
+      "progression_to": ["ankle_calf_raises_single_leg"],
+      "default_dose": "3 x 15"
+    },
+    {
+      "id": "ankle_calf_raises_single_leg",
+      "name": "Single-Leg Calf Raise",
+      "phase": ["strength"],
+      "injury_types": ["ankle"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Hold a wall lightly for balance only, not support",
+        "Full range - all the way up, all the way down",
+        "Stop at first form breakdown"
+      ],
+      "regression_of": "ankle_calf_raises_double_leg",
+      "progression_to": ["ankle_lateral_hops"],
+      "default_dose": "3 x 10 each side"
+    },
+    {
+      "id": "ankle_single_leg_balance",
+      "name": "Single-Leg Balance",
+      "phase": ["subacute", "strength"],
+      "injury_types": ["ankle"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Soft knee - do not lock it",
+        "Eyes open first, progress to eyes closed",
+        "Stop the clock if you put the other foot down"
+      ],
+      "regression_of": null,
+      "progression_to": ["ankle_lateral_hops"],
+      "default_dose": "3 x 30s each side"
+    },
+    {
+      "id": "ankle_lateral_hops",
+      "name": "Lateral Line Hops",
+      "phase": ["strength"],
+      "injury_types": ["ankle"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Small hops - 6 inches over a line on the floor",
+        "Soft landing through midfoot",
+        "Stop if any sharp pain or instability"
+      ],
+      "regression_of": "ankle_single_leg_balance",
+      "progression_to": [],
+      "default_dose": "3 x 10 hops"
+    },
+
+    {
+      "id": "shoulder_pendulum",
+      "name": "Pendulum Swings",
+      "phase": ["acute"],
+      "injury_types": ["shoulder"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Lean forward, let the arm hang relaxed",
+        "Use body sway - arm is passive",
+        "Small circles, both directions"
+      ],
+      "regression_of": null,
+      "progression_to": ["shoulder_isometric_er"],
+      "default_dose": "1 x 20 each direction"
+    },
+    {
+      "id": "shoulder_isometric_er",
+      "name": "Isometric External Rotation",
+      "phase": ["acute", "subacute"],
+      "injury_types": ["shoulder"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Elbow tucked at side, bent 90 degrees",
+        "Press outward into wall or hand without moving",
+        "Hold steady - 10 seconds, no breath holding"
+      ],
+      "regression_of": null,
+      "progression_to": ["shoulder_scapular_retraction"],
+      "default_dose": "3 x 10s holds"
+    },
+    {
+      "id": "shoulder_isometric_ir",
+      "name": "Isometric Internal Rotation",
+      "phase": ["acute", "subacute"],
+      "injury_types": ["shoulder"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Elbow tucked at side, bent 90 degrees",
+        "Press inward into wall or hand without moving",
+        "Hold steady - 10 seconds"
+      ],
+      "regression_of": null,
+      "progression_to": ["shoulder_scapular_retraction"],
+      "default_dose": "3 x 10s holds"
+    },
+    {
+      "id": "shoulder_sleeper_stretch",
+      "name": "Sleeper Stretch",
+      "phase": ["subacute"],
+      "injury_types": ["shoulder"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Side-lying on affected shoulder, elbow bent 90 degrees",
+        "Use opposite hand to gently press forearm down",
+        "Stop at first end-range tension - no pain"
+      ],
+      "regression_of": null,
+      "progression_to": ["shoulder_wall_slides"],
+      "default_dose": "3 x 30s holds"
+    },
+    {
+      "id": "shoulder_scapular_retraction",
+      "name": "Scapular Retraction",
+      "phase": ["subacute", "strength"],
+      "injury_types": ["shoulder"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Squeeze shoulder blades down and back",
+        "Hold the squeeze 3 seconds",
+        "No shrugging - keep shoulders down"
+      ],
+      "regression_of": null,
+      "progression_to": ["shoulder_prone_t"],
+      "default_dose": "3 x 12"
+    },
+    {
+      "id": "shoulder_wall_slides",
+      "name": "Wall Slides",
+      "phase": ["subacute", "strength"],
+      "injury_types": ["shoulder"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Back flat to wall, forearms touching wall",
+        "Slide arms up keeping forearms in contact",
+        "Stop where contact breaks - work that range"
+      ],
+      "regression_of": null,
+      "progression_to": ["shoulder_prone_y"],
+      "default_dose": "3 x 10"
+    },
+    {
+      "id": "shoulder_prone_y",
+      "name": "Prone Y Raise",
+      "phase": ["strength"],
+      "injury_types": ["shoulder"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Prone on bench, arms in Y overhead, thumbs up",
+        "Lift arms 2 inches off floor, squeezing lower traps",
+        "Slow lower - 3 seconds down"
+      ],
+      "regression_of": "shoulder_wall_slides",
+      "progression_to": [],
+      "default_dose": "3 x 10"
+    },
+    {
+      "id": "shoulder_prone_t",
+      "name": "Prone T Raise",
+      "phase": ["strength"],
+      "injury_types": ["shoulder"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Prone on bench, arms straight out to sides like a T",
+        "Lift arms by squeezing shoulder blades together",
+        "Thumbs up throughout"
+      ],
+      "regression_of": "shoulder_scapular_retraction",
+      "progression_to": [],
+      "default_dose": "3 x 10"
+    },
+
+    {
+      "id": "lb_pelvic_tilt",
+      "name": "Pelvic Tilt",
+      "phase": ["acute"],
+      "injury_types": ["low_back"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Supine, knees bent, feet flat",
+        "Flatten low back into the floor",
+        "Hold 5 seconds, then release"
+      ],
+      "regression_of": null,
+      "progression_to": ["lb_cat_cow"],
+      "default_dose": "2 x 15"
+    },
+    {
+      "id": "lb_cat_cow",
+      "name": "Cat-Cow",
+      "phase": ["acute", "subacute"],
+      "injury_types": ["low_back"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Quadruped - hands under shoulders, knees under hips",
+        "Round the spine up, then arch down",
+        "Move only as far as comfortable"
+      ],
+      "regression_of": null,
+      "progression_to": ["lb_bird_dog"],
+      "default_dose": "2 x 10"
+    },
+    {
+      "id": "lb_supine_knee_to_chest",
+      "name": "Single Knee to Chest",
+      "phase": ["acute"],
+      "injury_types": ["low_back"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Supine, hands clasped under one knee",
+        "Pull knee gently toward chest",
+        "Other leg stays bent, foot on floor"
+      ],
+      "regression_of": null,
+      "progression_to": [],
+      "default_dose": "2 x 30s each"
+    },
+    {
+      "id": "lb_child_pose",
+      "name": "Child's Pose",
+      "phase": ["acute"],
+      "injury_types": ["low_back"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Sit hips back to heels, arms reach forward",
+        "Forehead to floor if comfortable",
+        "Breathe into the low back"
+      ],
+      "regression_of": null,
+      "progression_to": [],
+      "default_dose": "2 x 30s"
+    },
+    {
+      "id": "lb_mckenzie_press_up",
+      "name": "McKenzie Press-Up",
+      "phase": ["acute", "subacute"],
+      "injury_types": ["low_back"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Prone, hands under shoulders",
+        "Press upper body up, hips stay on the floor",
+        "Stop if pain travels down the leg"
+      ],
+      "regression_of": null,
+      "progression_to": [],
+      "default_dose": "2 x 10"
+    },
+    {
+      "id": "lb_glute_bridge_lb",
+      "name": "Glute Bridge (low-back focus)",
+      "phase": ["acute", "subacute"],
+      "injury_types": ["low_back"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Supine, knees bent, feet flat",
+        "Squeeze glutes, lift hips - ribs stay down",
+        "Pause 2 seconds at the top"
+      ],
+      "regression_of": null,
+      "progression_to": ["lb_bird_dog"],
+      "default_dose": "3 x 12"
+    },
+    {
+      "id": "lb_dead_bug",
+      "name": "Dead Bug",
+      "phase": ["subacute", "strength"],
+      "injury_types": ["low_back"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Supine, low back pressed flat into floor",
+        "Lower opposite arm and leg slowly",
+        "If low back arches, reduce range"
+      ],
+      "regression_of": null,
+      "progression_to": ["lb_bird_dog"],
+      "default_dose": "3 x 10 each side"
+    },
+    {
+      "id": "lb_bird_dog",
+      "name": "Bird Dog",
+      "phase": ["subacute", "strength"],
+      "injury_types": ["low_back"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Quadruped, neutral spine - flat back",
+        "Extend opposite arm and leg, hold 3 seconds",
+        "No hip rotation - keep pelvis level"
+      ],
+      "regression_of": "lb_dead_bug",
+      "progression_to": [],
+      "default_dose": "3 x 10 each side"
+    },
+
+    {
+      "id": "ham_seated_active_extension",
+      "name": "Seated Active Knee Extension",
+      "phase": ["acute"],
+      "injury_types": ["hamstring"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Seated, hands on thighs",
+        "Slowly straighten knee until first stretch",
+        "No bouncing - smooth and controlled"
+      ],
+      "regression_of": null,
+      "progression_to": ["ham_supine_curl_ball"],
+      "default_dose": "3 x 10"
+    },
+    {
+      "id": "ham_supine_active_stretch",
+      "name": "Supine Active Hamstring Stretch",
+      "phase": ["acute"],
+      "injury_types": ["hamstring"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Supine, one leg up at 90 degrees, hands behind thigh",
+        "Actively straighten knee until stretch",
+        "Pulse gently - no force"
+      ],
+      "regression_of": null,
+      "progression_to": ["ham_supine_curl_ball"],
+      "default_dose": "3 x 10"
+    },
+    {
+      "id": "ham_supine_curl_ball",
+      "name": "Supine Heel Curl on Ball",
+      "phase": ["acute", "subacute"],
+      "injury_types": ["hamstring"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Supine, heels on stability ball",
+        "Lift hips, then curl ball toward you with heels",
+        "Slow return - control the eccentric"
+      ],
+      "regression_of": null,
+      "progression_to": ["ham_bridge_heel_slide"],
+      "default_dose": "3 x 10"
+    },
+    {
+      "id": "ham_bridge_heel_slide",
+      "name": "Bridge with Heel Slide",
+      "phase": ["subacute"],
+      "injury_types": ["hamstring"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Bridge position, hips up",
+        "Slide one heel out and back along the floor",
+        "Keep hips level - no drop"
+      ],
+      "regression_of": null,
+      "progression_to": ["ham_single_leg_rdl"],
+      "default_dose": "3 x 10 each leg"
+    },
+    {
+      "id": "ham_prone_hip_extension",
+      "name": "Prone Hip Extension",
+      "phase": ["subacute"],
+      "injury_types": ["hamstring"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Prone, hands stacked under forehead",
+        "Lift one straight leg 6 inches",
+        "Glute squeeze first - not low-back arch"
+      ],
+      "regression_of": null,
+      "progression_to": ["ham_single_leg_rdl"],
+      "default_dose": "3 x 12 each leg"
+    },
+    {
+      "id": "ham_single_leg_rdl",
+      "name": "Single-Leg Romanian Deadlift",
+      "phase": ["subacute", "strength"],
+      "injury_types": ["hamstring"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Stand on one leg, soft knee",
+        "Hinge at hip - other leg extends behind for balance",
+        "Stop where back rounds - work that range"
+      ],
+      "regression_of": null,
+      "progression_to": ["ham_nordic_eccentric_assisted"],
+      "default_dose": "3 x 8 each side"
+    },
+    {
+      "id": "ham_walking_lunge",
+      "name": "Walking Lunge",
+      "phase": ["strength"],
+      "injury_types": ["hamstring"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Step forward, lower back knee toward floor",
+        "Front knee tracks over second toe",
+        "Drive through front heel to next step"
+      ],
+      "regression_of": null,
+      "progression_to": [],
+      "default_dose": "3 x 10 each leg"
+    },
+    {
+      "id": "ham_nordic_eccentric_assisted",
+      "name": "Nordic Hamstring Curl (assisted)",
+      "phase": ["strength"],
+      "injury_types": ["hamstring"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Kneel with feet anchored under a heavy object",
+        "Slowly lower torso toward floor - hips straight",
+        "Catch with hands, push back up to start"
+      ],
+      "regression_of": "ham_single_leg_rdl",
+      "progression_to": [],
+      "default_dose": "3 x 6, slow eccentric"
+    },
+
+    {
+      "id": "elbow_wrist_flexor_stretch",
+      "name": "Wrist Flexor Stretch",
+      "phase": ["acute"],
+      "injury_types": ["elbow"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Arm extended in front, palm up",
+        "Use other hand to gently pull fingers down and back",
+        "Stretch felt in the forearm flexors - hold steady"
+      ],
+      "regression_of": null,
+      "progression_to": [],
+      "default_dose": "3 x 30s holds"
+    },
+    {
+      "id": "elbow_wrist_extensor_stretch",
+      "name": "Wrist Extensor Stretch",
+      "phase": ["acute"],
+      "injury_types": ["elbow"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Arm extended in front, palm down",
+        "Use other hand to gently pull hand down toward floor",
+        "Stretch felt over the top of forearm"
+      ],
+      "regression_of": null,
+      "progression_to": [],
+      "default_dose": "3 x 30s holds"
+    },
+    {
+      "id": "elbow_grip_squeeze",
+      "name": "Grip Ball Squeeze",
+      "phase": ["acute", "subacute"],
+      "injury_types": ["elbow"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Hold a soft stress ball in the palm",
+        "Squeeze firmly for 5 seconds",
+        "Full release between reps"
+      ],
+      "regression_of": null,
+      "progression_to": [],
+      "default_dose": "3 x 15, 5s holds"
+    },
+    {
+      "id": "elbow_isometric_extension",
+      "name": "Isometric Wrist Extension",
+      "phase": ["acute"],
+      "injury_types": ["elbow"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Forearm on table, palm down, hand off the edge",
+        "Press top of hand up against opposite hand without moving",
+        "Hold steady - no shaking"
+      ],
+      "regression_of": null,
+      "progression_to": ["elbow_eccentric_wrist_extension"],
+      "default_dose": "3 x 10s holds"
+    },
+    {
+      "id": "elbow_radial_nerve_glide",
+      "name": "Radial Nerve Glide",
+      "phase": ["subacute"],
+      "injury_types": ["elbow"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Arm extended at side, palm forward",
+        "Drop wrist down, then tilt head away",
+        "Move slowly - stop short of any tingling"
+      ],
+      "regression_of": null,
+      "progression_to": [],
+      "default_dose": "2 x 10"
+    },
+    {
+      "id": "elbow_pronation_supination_band",
+      "name": "Band Pronation / Supination",
+      "phase": ["subacute"],
+      "injury_types": ["elbow"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Elbow tucked at side, 90-degree bend",
+        "Hold band, rotate forearm palm-down then palm-up",
+        "Slow and controlled both directions"
+      ],
+      "regression_of": null,
+      "progression_to": [],
+      "default_dose": "3 x 12"
+    },
+    {
+      "id": "elbow_eccentric_wrist_extension",
+      "name": "Eccentric Wrist Extension",
+      "phase": ["subacute", "strength"],
+      "injury_types": ["elbow"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Forearm on table, light dumbbell in hand, palm down",
+        "Use other hand to lift weight, then SLOWLY lower with the affected arm",
+        "Eccentric only - 5 seconds down per rep"
+      ],
+      "regression_of": "elbow_isometric_extension",
+      "progression_to": [],
+      "default_dose": "3 x 15, 1-2 lb"
+    },
+    {
+      "id": "elbow_eccentric_wrist_flexion",
+      "name": "Eccentric Wrist Flexion",
+      "phase": ["subacute", "strength"],
+      "injury_types": ["elbow"],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Forearm on table, light dumbbell in hand, palm up",
+        "Use other hand to lift weight, then SLOWLY lower with affected arm",
+        "5 seconds down per rep"
+      ],
+      "regression_of": null,
+      "progression_to": [],
+      "default_dose": "3 x 15, 1-2 lb"
     }
   ]
 }

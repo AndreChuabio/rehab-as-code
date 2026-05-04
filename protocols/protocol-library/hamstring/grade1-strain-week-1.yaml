@@ -1,0 +1,32 @@
+# Reference: hamstring strain (grade 1), week 1 (acute / pain control)
+# Evidence base: Askling protocol; British Athletics return-to-sport guideline.
+
+injury_category: hamstring
+phase: hamstring strain (grade 1)
+week_range: [1, 1]
+goals:
+  - reduce pain and protect the muscle-tendon unit
+  - maintain pain-free hip and knee ROM
+  - introduce sub-maximal isometric activation
+  - prevent posterior chain shutdown
+
+exercises:
+  - name: ham_seated_active_extension
+    sets: 3
+    reps: 10
+    notes: "Seated, smooth tempo. Stop at first stretch sensation - no force."
+
+  - name: ham_supine_active_stretch
+    sets: 3
+    reps: 10
+    notes: "Active hamstring stretch. Pulse gently."
+
+  - name: lb_glute_bridge_lb
+    sets: 3
+    reps: 12
+    notes: "Glute drive. Avoid over-using hamstrings."
+
+clearance_criteria:
+  - pain_at_rest: "<= 2/10"
+  - active_SLR: "to 60 deg pain-free"
+  - palpation_tenderness: "decreasing"

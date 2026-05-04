@@ -1,0 +1,39 @@
+# Reference: post-ACL reconstruction, week 3
+# Evidence base: standard ACL-R rehab milestones (van Melick et al., 2016).
+
+injury_category: knee
+phase: post-ACL reconstruction
+week_range: [3, 3]
+goals:
+  - restore full passive extension
+  - reach 100 deg active flexion
+  - quad activation without lag
+  - gait training without crutches
+
+exercises:
+  - name: quad_sets
+    sets: 3
+    reps: 15
+    load: bodyweight
+    ROM_target_deg: 90
+    progression_to: terminal_knee_extension_with_band
+    notes: "10-second isometric hold each rep. Cue: drive heel into table."
+
+  - name: heel_slides
+    sets: 3
+    reps: 10
+    ROM_target_deg: 100
+    progression_to: prone_hangs
+    notes: "Active flexion only. Stop at first sign of effusion."
+
+  - name: terminal_knee_extension
+    sets: 3
+    reps: 12
+    load: yellow_band
+    ROM_target_deg: 0
+    notes: "Last 30 deg of extension. No quad lag tolerated."
+
+  - name: stationary_bike
+    duration_min: 10
+    intensity: "RPE 4 of 10"
+    notes: "ROM-restoration focus. Add resistance only if no pain."

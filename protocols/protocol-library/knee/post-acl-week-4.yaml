@@ -1,0 +1,51 @@
+# Reference: post-ACL reconstruction, week 4
+# Evidence base: standard ACL-R rehab milestones (van Melick et al., 2016).
+
+injury_category: knee
+phase: post-ACL reconstruction
+week_range: [4, 4]
+goals:
+  - introduce closed-chain loading
+  - begin neuromuscular control work
+  - 110 deg flexion target
+  - normalize gait at walking speed
+
+exercises:
+  - name: mini_squats
+    sets: 3
+    reps: 12
+    load: bodyweight
+    ROM_target_deg: 60
+    progression_to: bodyweight_squats
+    notes: "Wall-supported. No knee valgus. Heels stay grounded."
+
+  - name: single_leg_balance
+    sets: 3
+    reps: 30   # seconds
+    load: bodyweight
+    progression_to: single_leg_balance_eyes_closed
+    notes: "Stable surface first. Aim for 30s without touchdown."
+
+  - name: terminal_knee_extension
+    sets: 3
+    reps: 15
+    load: green_band
+    ROM_target_deg: 0
+    notes: "Increase band resistance from yellow."
+
+  - name: heel_raises
+    sets: 3
+    reps: 15
+    load: bodyweight
+    notes: "Bilateral first. Progress to single-leg if tolerated."
+
+  - name: stationary_bike
+    duration_min: 15
+    intensity: "RPE 5 of 10"
+    notes: "Add light resistance. ROM should be smooth throughout."
+
+clearance_criteria:
+  - active_flexion_deg: ">= 110"
+  - extension_lag_deg: "0"
+  - effusion: none
+  - HRV_trend: "stable or improving over 7 days"
