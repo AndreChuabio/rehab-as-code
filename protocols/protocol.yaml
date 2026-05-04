@@ -5,7 +5,7 @@
 patient: Andre
 phase: post-ACL reconstruction
 week: 3
-generated_by: "Researcher PRIMARY protocol-library/post-acl-week-3.yaml (week 3 baseline; not advanced to week-4 library); Evaluator HOLD — recovery_7day_avg 35 below 60 (no progression clearance); −20% session intensity applied per sleep_score_7day_avg rule (below 70 with sufficient days); acute snapshot: sleep 93, recovery 70, HRV 56 trending up (no additional HRV-hold progression from snapshot alone)."
+generated_by: "Coordinator 2026-05-04: Researcher PRIMARY protocol-library/post-acl-week-3.yaml (week 3 baseline; knee/post-acl-week-4.yaml reserved until hold clears); Evaluator HOLD — recovery_7day_avg 35 below 60 (no progression clearance); −20% session intensity per sleep_score_7day_avg rule (<70); acute snapshot sleep 93, recovery 70, HRV 56 improving (delta 7d = 0, no +5 ms single-exercise clearance)."
 last_updated: "2026-05-04"
 
 session_targets:

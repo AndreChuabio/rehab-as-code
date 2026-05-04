@@ -3,7 +3,7 @@
 
 week: 3
 patient: Andre
-generated_by: "Researcher PRIMARY protocol-library/post-acl-week-3.yaml; evaluator HOLD (recovery 7d avg < 60; no advancement to week-4 content) plus −20% session intensity per 7-day sleep-average rule; acute snapshot summarized in protocol.generated_by."
+generated_by: "Coordinator 2026-05-04: Researcher PRIMARY protocol-library/post-acl-week-3.yaml; evaluator HOLD (recovery 7d avg < 60; no week-4 library swap) plus −20% session intensity per 7-day sleep-average rule; see protocol.generated_by for acute wearable summary."
 last_updated: "2026-05-04"
 
 hold_note: >-
