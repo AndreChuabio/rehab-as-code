@@ -5,7 +5,9 @@ and current protocol, opens a PR with reasoning and library citations, and a
 clinician approves it from the chat. Coach Maya (a GPT-4o chat persona, with
 Tavus video as an optional surface) walks the patient through the result.
 
-Built at Slop Con NYC 2026-05-02.
+Built at Slop Con NYC 2026-05-02. Now in production: deployed on Vercel,
+backed by Supabase Postgres + Supabase Auth (HS256 JWT) for the chat surface.
+Live at https://rehab-as-code-five.vercel.app.
 
 ## How it works
 
@@ -61,6 +63,14 @@ language and routes via `fire_*_trigger` tools).
 
 ## Stack
 
+- **Hosting**: Vercel serverless (`api/index.py` re-exports `backend/main.py`)
+- **Database**: Supabase Postgres in production; SQLite locally; flat-file
+  legacy. Selected via `STORAGE_BACKEND` env var. Schema lives in
+  `supabase/migrations/` and auto-applies on push to main via Supabase's
+  GitHub integration
+- **Auth**: Supabase Auth on the chat surface — HS256 JWT verified in
+  `backend/auth.py`, `auth.uid()` becomes the patient identifier server-side.
+  Slack/iOS shortcut flows still use the legacy UUID-bearer model
 - **Backend**: FastAPI (Python 3.11+), serves both API and frontend
 - **Cloud agent**: Node helper wrapping `@cursor/sdk` (TypeScript-only SDK)
   spawned as a subprocess from Python
@@ -125,7 +135,9 @@ rehab-as-code/
     coach_chat.py                  OpenAI chat with fire_*_trigger tools
     health_mock.py                 wearable data + Apple Health ingest
     open_wearables_client.py       optional read-only Open Wearables source
-    user_store.py                  per-user token + health storage
+    user_store.py                  per-user records (3-way pluggable:
+                                   flatfile / sqlite / postgres)
+    auth.py                        Supabase JWT verification (HS256)
     shortcut_template.py           iOS Shortcut binary plist generator
     calendar_fetch.py              Google Calendar
     context_builder.py             Tavus persona context
@@ -148,8 +160,14 @@ rehab-as-code/
     index.html                     dashboard
     app.js                         SSE consumer + tool calls + Approve/Reset
     style.css                      dark theme
-  Procfile                         Railway deploy
-  requirements.txt
+  api/
+    index.py                       Vercel entrypoint (re-exports backend/main.py)
+  supabase/
+    migrations/                    SQL files auto-applied on push to main
+                                   via Supabase GitHub integration
+  vercel.json                      Vercel build/route config
+  requirements.txt                 Vercel installs from THIS file (root)
+  backend/requirements.txt         local dev installs from this one — keep in sync
   .env.example                     all required env vars
 ```
 
@@ -170,12 +188,36 @@ cp .env.example .env
 #   OPENAI_API_KEY=sk-...
 # Required for context:
 #   ANTHROPIC_API_KEY=sk-ant-...
+# Required for /chat auth (or POST /chat returns 401):
+#   SUPABASE_JWT_SECRET=...      # Supabase → Settings → API → JWT Secret
+# Storage backend (default sqlite for local; postgres in production):
+#   STORAGE_BACKEND=sqlite
 
 # 3. Boot
 python -m uvicorn main:app --reload --app-dir backend --port 8000
 # UI: http://127.0.0.1:8000
 # Swagger: http://127.0.0.1:8000/docs
 ```
+
+## Deploy (Vercel + Supabase)
+
+Production: https://rehab-as-code-five.vercel.app
+
+- **Vercel** builds from `vercel.json` + `api/index.py` and installs from
+  the **root** `requirements.txt`. If you add a Python dep, update both
+  `requirements.txt` files in the same PR or the lambda will crash with
+  `ModuleNotFoundError`.
+- **Supabase Postgres** is wired via the GitHub integration with
+  "Deploy to production" ON — every push to main applies new SQL files
+  in `supabase/migrations/<YYYYMMDDHHMMSS>_name.sql`. Never edit a shipped
+  migration; ship a new one instead.
+- **Required Vercel env vars**: `STORAGE_BACKEND=postgres`, `DATABASE_URL`
+  (transaction pooler URL on port 6543), `SUPABASE_JWT_SECRET`, plus the
+  same OpenAI/Anthropic/Cursor keys as local.
+- **DATABASE_URL gotcha**: the direct `db.<ref>.supabase.co` URL is
+  IPv6-only on new Supabase projects and unreachable from Vercel.
+  Use the **session pooler** (port 5432) for local dev and the
+  **transaction pooler** (port 6543) for Vercel.
 
 ## Endpoints
 
@@ -189,7 +231,7 @@ python -m uvicorn main:app --reload --app-dir backend --port 8000
 | POST | `/triggers/{intake,weekly-cron,checkin,symptom}` | Funnel into `_invoke_with_fallback` |
 | POST | `/pr/apply` | Mark draft ready then `gh pr merge --squash` (the Approve gesture) |
 | POST | `/demo/reset` | Rewrite `protocol.yaml` to `pending_intake` via GitHub contents API |
-| POST | `/chat` | OpenAI chat; tools include `fire_intake_trigger` etc. |
+| POST | `/chat` | OpenAI chat; tools include `fire_intake_trigger` etc. **Requires `Authorization: Bearer <supabase_jwt>` header** |
 | POST | `/start-session` | Create Tavus CVI session with Coach Maya persona |
 | POST | `/health-sync` | Ingest Apple Watch metrics from iOS Shortcut |
 | POST | `/connect/apple-health` | Generate per-user token + onboard URL (QR flow) |
