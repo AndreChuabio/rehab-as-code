@@ -200,6 +200,18 @@
 
   </div>
 
+  <script>
+    // Pose form-check feature flag. Visit /?pose=1 once to opt in,
+    // /?pose=0 to opt out. Persisted to localStorage.
+    (function () {
+      try {
+        var p = new URLSearchParams(window.location.search).get("pose");
+        if (p === "1") localStorage.setItem("poseFormCheck", "1");
+        if (p === "0") localStorage.removeItem("poseFormCheck");
+      } catch (e) {}
+    })();
+  </script>
+  <script src="/static/pose.js"></script>
   <script src="/static/app.js"></script>
 </body>
 </html>

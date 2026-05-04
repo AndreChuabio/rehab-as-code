@@ -1089,6 +1089,168 @@ function switchGalleryItem(idx) {
   wrap.querySelector("#galleryBadge").innerHTML   = badge;
   const cuesEl = wrap.querySelector("#galleryCues");
   cuesEl.innerHTML = (item.ex.cues || []).map(c => `<li>${escapeHtml(c)}</li>`).join("");
+
+  // Form Check (feature-flagged): swap demo video for webcam + pose overlay
+  maybeAttachFormCheckBtn(wrap, item);
+}
+
+// ---------------------------------------------------------------------------
+// Pose form check (feature spike — flag-gated, throwaway)
+// Toggle with /?pose=1 (persists to localStorage). See frontend/pose.js.
+// ---------------------------------------------------------------------------
+
+function maybeAttachFormCheckBtn(wrap, item) {
+  if (!window.PoseFormCheck) {
+    console.warn("PoseFormCheck not loaded — pose.js failed to initialize");
+    return;
+  }
+  const videoWrap = wrap.querySelector("#galleryVideoWrap");
+  if (!videoWrap || videoWrap.parentElement.querySelector(".pose-form-check-btn")) return;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "pose-form-check-btn";
+  btn.dataset.state = "off";
+  btn.textContent = "Form Check (webcam)";
+  btn.onclick = () => togglePoseFormCheck(wrap, item, btn);
+  videoWrap.parentElement.insertBefore(btn, videoWrap);
+}
+
+function renderPoseMetrics(container, payload, exercise) {
+  if (!container) return;
+  const metrics = payload.metrics || [];
+  const repPill = payload.repSummary && payload.repSummary.repCount > 0
+    ? `<span class="metric-pill good reps-pill">
+        <span class="metric-pill-label">reps</span>
+        <span class="metric-pill-value">${payload.repSummary.repCount}</span>
+      </span>
+      ${payload.repSummary.bestDepth != null ? `<span class="metric-pill good">
+        <span class="metric-pill-label">best</span>
+        <span class="metric-pill-value">${payload.repSummary.bestDepth}°</span>
+      </span>` : ""}`
+    : "";
+  if (!metrics.length && !repPill) {
+    container.innerHTML = `<span class="metric-pill idle">no body in frame</span>`;
+    return;
+  }
+  const pills = metrics.map((m) => {
+    const valStr  = m.value != null ? `${m.value}${m.unit || ""}` : "--";
+    const tgtStr  = m.target != null ? ` / ${m.target}${m.unit || ""}` : "";
+    const pctStr  = m.percent != null ? ` (${m.percent}%)` : "";
+    return `<span class="metric-pill ${m.status}">
+      <span class="metric-pill-label">${escapeHtml(m.label || m.id)}</span>
+      <span class="metric-pill-value">${escapeHtml(valStr)}${escapeHtml(tgtStr)}${escapeHtml(pctStr)}</span>
+    </span>`;
+  }).join("");
+  container.innerHTML = repPill + pills;
+}
+
+function renderPoseWarnings(container, payload) {
+  if (!container) return;
+  const warns = payload.warnings || [];
+  if (!warns.length) { container.hidden = true; container.innerHTML = ""; return; }
+  container.hidden = false;
+  container.innerHTML = warns.map((w) =>
+    `<span class="alignment-warning ${w.status}">⚠ ${escapeHtml(w.msg)}</span>`
+  ).join("");
+}
+
+function renderPoseSession(container, repsHistory, repSummary) {
+  if (!container) return;
+  if (!repsHistory.length) { container.hidden = true; container.innerHTML = ""; return; }
+  const recent = repsHistory.slice(-6);
+  const glyph = (s) => s === "bad" ? "✗" : s === "warn" ? "⚠" : "✓";
+  const total = repSummary?.repCount ?? repsHistory.length;
+  const rows = recent.map((r) => `
+    <div class="pose-rep-row ${r.status}">
+      <span class="pose-rep-num">Rep ${r.repNumber}</span>
+      <span class="pose-rep-status">${glyph(r.status)}</span>
+      <span class="pose-rep-depth">${r.depthMin}°</span>
+      <span class="pose-rep-msg">${escapeHtml(r.msg || "")}</span>
+    </div>
+  `).join("");
+  container.hidden = false;
+  container.innerHTML = `
+    <div class="pose-rep-header">SET — ${total} REP${total === 1 ? "" : "S"}</div>
+    ${rows}
+  `;
+}
+
+async function togglePoseFormCheck(wrap, item, btn) {
+  const videoWrap = wrap.querySelector("#galleryVideoWrap");
+  if (!videoWrap) return;
+
+  if (btn.dataset.state === "on") {
+    window.PoseFormCheck.stop();
+    btn.dataset.state = "off";
+    btn.textContent = "Form Check";
+    // Restore demo video by re-running switchGalleryItem on the active idx
+    const activeIdx = Array.from(wrap.querySelectorAll(".gallery-thumb-btn"))
+      .findIndex((b) => b.classList.contains("active"));
+    switchGalleryItem(activeIdx >= 0 ? activeIdx : 0);
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "Loading model...";
+  try {
+    await window.PoseFormCheck.init();
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = "Form Check";
+    showToast(`Pose model failed to load: ${e.message}`, "error");
+    return;
+  }
+
+  videoWrap.innerHTML = `
+    <div class="pose-root" id="poseRoot">
+      <div class="pose-toolbar">
+        <div class="pose-metrics" id="poseMetrics">
+          <span class="metric-pill idle">starting camera...</span>
+        </div>
+        <button class="pose-fullscreen-btn" id="poseFullscreenBtn" title="Toggle fullscreen">⛶ Fullscreen</button>
+      </div>
+      <div class="pose-warnings" id="poseWarnings" hidden></div>
+      <div class="pose-stage" id="poseStage">
+        <video id="poseVideo" playsinline muted autoplay></video>
+        <canvas id="poseCanvas" class="pose-overlay-canvas"></canvas>
+      </div>
+      <div class="pose-session-card" id="poseSession" hidden></div>
+    </div>
+  `;
+  const root      = videoWrap.querySelector("#poseRoot");
+  const fsBtn     = videoWrap.querySelector("#poseFullscreenBtn");
+  const metricsEl   = videoWrap.querySelector("#poseMetrics");
+  const warningsEl  = videoWrap.querySelector("#poseWarnings");
+  const sessionEl   = videoWrap.querySelector("#poseSession");
+  const repsHistory = [];
+  fsBtn.onclick = () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else root.requestFullscreen?.();
+  };
+  const videoEl  = videoWrap.querySelector("#poseVideo");
+  const canvasEl = videoWrap.querySelector("#poseCanvas");
+
+  try {
+    await window.PoseFormCheck.start(videoEl, canvasEl, item.ex.id, (payload) => {
+      if (payload.repEvents && payload.repEvents.length) {
+        for (const ev of payload.repEvents) repsHistory.push(ev);
+        renderPoseSession(sessionEl, repsHistory, payload.repSummary);
+      }
+      renderPoseMetrics(metricsEl, payload, item.ex);
+      renderPoseWarnings(warningsEl, payload);
+    });
+    btn.disabled = false;
+    btn.dataset.state = "on";
+    btn.textContent = "Stop";
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = "Form Check";
+    showToast(`Camera error: ${e.message}`, "error");
+    // Restore demo video on failure
+    const activeIdx = Array.from(wrap.querySelectorAll(".gallery-thumb-btn"))
+      .findIndex((b) => b.classList.contains("active"));
+    switchGalleryItem(activeIdx >= 0 ? activeIdx : 0);
+  }
 }
 
 // ---------------------------------------------------------------------------
