@@ -176,6 +176,24 @@ def build_system_prompt(health: dict[str, Any], protocol: dict[str, Any]) -> str
     phase = protocol.get("phase", "rehab")
     patient = protocol.get("patient", "the patient")
 
+    recent_line = ""
+    recent = protocol.get("_recent_set")
+    if recent:
+        warns = recent.get("warnings") or []
+        warn_summary = (
+            f"; flagged {', '.join(w.get('id', '?') for w in warns[:3])}"
+            if warns
+            else ""
+        )
+        recent_line = (
+            "Live set just finished: patient completed "
+            f"{recent.get('rep_count', '?')} reps of "
+            f"{recent.get('exercise_name') or recent.get('exercise_id', 'an exercise')} "
+            f"({recent.get('worst_status', 'good')}); "
+            f"best depth {recent.get('best_depth', '?')}°{warn_summary}. "
+            "Acknowledge it conversationally if relevant; do not auto-fire a trigger.\n\n"
+        )
+
     return (
         "You are Coach Maya's chat co-pilot - a concise, evidence-based "
         "physiotherapy assistant. The patient is "
@@ -184,6 +202,7 @@ def build_system_prompt(health: dict[str, Any], protocol: dict[str, Any]) -> str
         f"sleep score {health.get('sleep_score', 'n/a')}/100, "
         f"recovery {health.get('recovery_score', 'n/a')}/100.\n\n"
         f"Current protocol: {current_exercises}.\n\n"
+        f"{recent_line}"
         f"Exercise library (only recommend ids in this list): {ids}.\n\n"
         "Behavior rules:\n"
         "1. Keep replies under 60 words. Speak like a clinician, not a chatbot.\n"

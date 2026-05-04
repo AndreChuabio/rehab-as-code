@@ -47,7 +47,15 @@ from context_builder import build_system_prompt
 from tavus_client import create_conversation
 from agents import AgentInvocation, InvocationRequest, get_agent
 from protocol_loader import fetch_protocol, write_context_files, PROTOCOL_REPO
-from user_store import create_token, ensure_user, token_exists, load_user, save_health
+from user_store import (
+    create_token,
+    ensure_user,
+    token_exists,
+    load_user,
+    save_health,
+    save_checkin,
+    get_last_set_completion,
+)
 from shortcut_template import generate_shortcut
 from auth import current_user_id
 import coach_chat
@@ -604,6 +612,91 @@ async def trigger_symptom(body: SymptomRequest):
     }
 
 
+# ── Pose form-check session telemetry ────────────────────────────────────────
+
+
+class PoseRepRecord(BaseModel):
+    rep: int
+    depth_min: float | None = None
+    status: str | None = None
+    msg: str | None = None
+
+
+class PoseWarningSummary(BaseModel):
+    id: str
+    msg: str | None = None
+    count: int | None = None
+
+
+class PoseSessionRequest(BaseModel):
+    exercise_id: str
+    exercise_name: str | None = None
+    started_at: str
+    ended_at: str
+    target_dose: str | None = None
+    reps: list[PoseRepRecord] = []
+    warnings: list[PoseWarningSummary] = []
+    client: str | None = "web/pose-v1"
+
+
+def _summarize_pose_set(reps: list[PoseRepRecord]) -> tuple[int, float | None, str]:
+    """Server-side roll-up of a rep array. Don't trust client totals."""
+    rep_count = len(reps)
+    depths = [r.depth_min for r in reps if r.depth_min is not None]
+    best_depth = min(depths) if depths else None
+    rank = {"good": 0, "warn": 1, "fail": 2}
+    worst_status = "good"
+    for r in reps:
+        if rank.get(r.status or "good", 0) > rank.get(worst_status, 0):
+            worst_status = r.status or worst_status
+    return rep_count, best_depth, worst_status
+
+
+@app.post("/pose/session")
+async def pose_session(
+    req: PoseSessionRequest,
+    user_id: str = Depends(current_user_id),
+):
+    """Log a completed pose-form-check set for the authenticated patient.
+
+    Stored in the existing `checkins` table with `payload->>'kind' =
+    'set_completion'` so /chat can lift the most recent one into Maya's
+    system prompt. One row per set (not per rep).
+    """
+    ensure_user(user_id)
+    rep_count, best_depth, worst_status = _summarize_pose_set(req.reps)
+    payload = {
+        "kind": "set_completion",
+        "exercise_id": req.exercise_id,
+        "exercise_name": req.exercise_name,
+        "started_at": req.started_at,
+        "ended_at": req.ended_at,
+        "target_dose": req.target_dose,
+        "reps": [r.model_dump() for r in req.reps],
+        "rep_count": rep_count,
+        "best_depth": best_depth,
+        "worst_status": worst_status,
+        "warnings": [w.model_dump() for w in req.warnings],
+        "client": req.client,
+    }
+    save_checkin(user_id, payload)
+    return {
+        "session_id": payload.get("session_id"),
+        "rep_count": rep_count,
+        "best_depth": best_depth,
+        "worst_status": worst_status,
+    }
+
+
+@app.get("/pose/last-set")
+async def pose_last_set(
+    exercise_id: str | None = Query(None),
+    user_id: str = Depends(current_user_id),
+):
+    """Most recent set_completion for the user, optionally filtered by exercise."""
+    return {"set": get_last_set_completion(user_id, exercise_id)}
+
+
 @app.get("/agent/stream/{invocation_id}")
 async def agent_stream(invocation_id: str):
     """SSE stream of TraceEvents for an invocation."""
@@ -875,6 +968,9 @@ async def chat(req: ChatRequest, user_id: str = Depends(current_user_id)):
     ensure_user(user_id)
     health = get_health_data()
     protocol_payload = fetch_protocol() or {}
+    recent_set = get_last_set_completion(user_id)
+    if recent_set:
+        protocol_payload["_recent_set"] = recent_set
     messages = [
         {"role": turn.role, "content": turn.content} for turn in req.history
     ]

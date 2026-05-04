@@ -659,6 +659,33 @@ let ctx         = null;
 let onPayloadCb = null;
 let activeExId  = "";
 
+// Voice / rep-target state. Reset on every start().
+let voiceCb            = null;
+let targetReps         = null;
+let halfwayAnnounced   = false;
+let setCompleteFired   = false;
+let lastVoiceTs        = 0;
+const VOICE_THROTTLE_MS = 600;
+const NUM_WORDS = [
+  "zero","one","two","three","four","five","six","seven","eight","nine","ten",
+  "eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen",
+  "eighteen","nineteen","twenty",
+];
+
+function maybeSpeak(text, ts) {
+  if (!voiceCb || !text) return;
+  if (ts - lastVoiceTs < VOICE_THROTTLE_MS) return;
+  lastVoiceTs = ts;
+  try { voiceCb(text); } catch (e) { /* ignore */ }
+}
+
+function parseTargetReps(doseStr) {
+  if (!doseStr) return null;
+  // matches "3 x 10", "3x10", "3×10", "3 sets x 10 reps", etc.
+  const m = String(doseStr).match(/(\d+)\s*[x×]\s*(\d+)/i);
+  return m ? parseInt(m[2], 10) : null;
+}
+
 async function init() {
   if (landmarker) return;
   visionMod = await import(/* @vite-ignore */ VISION_CDN);
@@ -694,6 +721,38 @@ function loop() {
         if (ev) repEvents.push(ev);
       }
 
+      // Voice cues + set-complete detection. We use the headline tracker
+      // (the side with the most reps) so two-leg exercises don't double-fire.
+      const summaryNow = trackerSummary();
+      let setCompleteThisFrame = false;
+      if (repEvents.length && summaryNow) {
+        const headlineCount = summaryNow.repCount;
+        const last = repEvents[repEvents.length - 1];
+        // Per-rep cue: bad/warn → speak the form msg; otherwise speak the count.
+        if (last.status === "warn" || last.status === "bad") {
+          maybeSpeak(last.msg || "form check", ts);
+        } else {
+          const word = NUM_WORDS[headlineCount] || String(headlineCount);
+          maybeSpeak(word, ts);
+        }
+        // Halfway one-shot.
+        if (
+          targetReps && targetReps >= 4 &&
+          !halfwayAnnounced &&
+          headlineCount === Math.floor(targetReps / 2)
+        ) {
+          halfwayAnnounced = true;
+          // Tiny delay so "halfway" lands after the count cue.
+          setTimeout(() => { try { voiceCb && voiceCb("halfway"); } catch (_) {} }, 700);
+        }
+        // Set complete one-shot.
+        if (targetReps && !setCompleteFired && headlineCount >= targetReps) {
+          setCompleteFired = true;
+          setCompleteThisFrame = true;
+          setTimeout(() => { try { voiceCb && voiceCb("set complete"); } catch (_) {} }, 700);
+        }
+      }
+
       drawSkeleton(lms, metrics);
       drawTargetGhost(lms, metrics, ex);
 
@@ -717,7 +776,15 @@ function loop() {
         }
 
         const summary = trackerSummary();
-        onPayloadCb({ primary, metrics, warnings, repEvents, repSummary: summary });
+        onPayloadCb({
+          primary,
+          metrics,
+          warnings,
+          repEvents,
+          repSummary: summary,
+          setComplete: setCompleteThisFrame,
+          targetReps,
+        });
       }
     } else if (ctx) {
       ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
@@ -726,13 +793,19 @@ function loop() {
   rafHandle = requestAnimationFrame(loop);
 }
 
-async function start(_videoEl, _canvasEl, exerciseId, onPayload) {
+async function start(_videoEl, _canvasEl, exerciseId, onPayload, opts = {}) {
   if (running) return;
   videoEl     = _videoEl;
   canvasEl    = _canvasEl;
   ctx         = canvasEl.getContext("2d");
   onPayloadCb = onPayload;
   activeExId  = exerciseId;
+
+  voiceCb           = typeof opts.voice === "function" ? opts.voice : null;
+  targetReps        = parseTargetReps(opts.targetDose);
+  halfwayAnnounced  = false;
+  setCompleteFired  = false;
+  lastVoiceTs       = 0;
 
   resetSmoothing();
   trackers       = [];
@@ -763,6 +836,8 @@ function stop() {
   if (videoEl) videoEl.srcObject = null;
   if (ctx && canvasEl) ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
   onPayloadCb = null;
+  voiceCb     = null;
+  targetReps  = null;
 }
 
 window.PoseFormCheck = { init, start, stop, EXERCISES };
