@@ -20,6 +20,33 @@
   let currentSession = null;
   const listeners = [];
 
+  // Capture any auth-bearing URL fragment SYNCHRONOUSLY, before app.js's
+  // hash routing has a chance to clobber it. Magic-link redirects land on
+  // the app with `#access_token=...&refresh_token=...&type=magiclink`, but
+  // app.js's routeFromHash() runs in DOMContentLoaded and rewrites the
+  // hash to `#intake` before our async init() can read it. Stash + clear.
+  let stashedTokens = null;
+  (function captureAuthFragment() {
+    try {
+      const h = window.location.hash || "";
+      if (!/access_token=|error_description=/.test(h)) return;
+      const p = new URLSearchParams(h.replace(/^#/, ""));
+      const access_token  = p.get("access_token");
+      const refresh_token = p.get("refresh_token");
+      const error_desc    = p.get("error_description");
+      if (access_token && refresh_token) {
+        stashedTokens = { access_token, refresh_token };
+      } else if (error_desc) {
+        console.warn("Auth redirect error:", error_desc);
+      }
+      // Always clear the auth fragment so app routing can't read it as a step.
+      history.replaceState(null, "",
+        window.location.pathname + window.location.search);
+    } catch (e) {
+      console.warn("captureAuthFragment failed:", e);
+    }
+  })();
+
   async function fetchConfig() {
     const res = await fetch("/config");
     if (!res.ok) throw new Error(`/config returned ${res.status}`);
@@ -48,9 +75,25 @@
       auth: {
         persistSession: true,
         autoRefreshToken: true,
-        detectSessionInUrl: true,  // pick up magic-link tokens on redirect
+        // We handle URL-fragment session manually below (see stashedTokens)
+        // because app.js's hash routing clobbers the fragment before
+        // detectSessionInUrl could fire.
+        detectSessionInUrl: false,
       },
     });
+    // If we stashed magic-link tokens at script-load time, hydrate the
+    // session from them now. Falls through to getSession() if none.
+    if (stashedTokens) {
+      const { data, error } = await client.auth.setSession(stashedTokens);
+      if (error) {
+        console.warn("setSession from URL fragment failed:", error);
+      } else if (data?.session) {
+        setSession(data.session);
+        client.auth.onAuthStateChange((_event, session) => setSession(session || null));
+        return client;
+      }
+      stashedTokens = null;
+    }
     // Pick up an existing session (returning visit) before notifying listeners.
     const { data } = await client.auth.getSession();
     setSession(data?.session || null);
