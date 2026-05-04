@@ -213,6 +213,21 @@ def _flat_get_session_history(token: str, limit: int = 10) -> list[dict]:
     return history[-limit:]
 
 
+def _flat_get_last_set_completion(
+    token: str, exercise_id: str | None = None
+) -> dict | None:
+    user = _flat_load_user(token)
+    if not user:
+        return None
+    for entry in reversed(user.get("session_history", [])):
+        if entry.get("kind") != "set_completion":
+            continue
+        if exercise_id and entry.get("exercise_id") != exercise_id:
+            continue
+        return entry
+    return None
+
+
 # ── SQLite backend (new default) ──────────────────────────────────────────────
 
 _SQL_INIT_LOCK = Lock()
@@ -507,6 +522,28 @@ def _sql_get_session_history(token: str, limit: int = 10) -> list[dict]:
         ).fetchall()
     # callers expect oldest-first up to the latest `limit` items
     return [json.loads(r["payload"]) for r in reversed(rows)]
+
+
+def _sql_get_last_set_completion(
+    token: str, exercise_id: str | None = None
+) -> dict | None:
+    with _sql_conn() as c:
+        if exercise_id:
+            row = c.execute(
+                "SELECT payload FROM checkins WHERE token = ? "
+                "AND json_extract(payload, '$.kind') = 'set_completion' "
+                "AND json_extract(payload, '$.exercise_id') = ? "
+                "ORDER BY recorded_at DESC LIMIT 1",
+                (token, exercise_id),
+            ).fetchone()
+        else:
+            row = c.execute(
+                "SELECT payload FROM checkins WHERE token = ? "
+                "AND json_extract(payload, '$.kind') = 'set_completion' "
+                "ORDER BY recorded_at DESC LIMIT 1",
+                (token,),
+            ).fetchone()
+    return json.loads(row["payload"]) if row else None
 
 
 # ── Postgres backend (Supabase / Vercel Postgres / Neon / Railway) ────────────
@@ -833,6 +870,29 @@ def _pg_get_session_history(token: str, limit: int = 10) -> list[dict]:
     return [r["payload"] for r in reversed(rows)]
 
 
+def _pg_get_last_set_completion(
+    token: str, exercise_id: str | None = None
+) -> dict | None:
+    with _pg_conn() as c, c.cursor() as cur:
+        if exercise_id:
+            cur.execute(
+                "SELECT payload FROM checkins WHERE token = %s "
+                "AND payload->>'kind' = 'set_completion' "
+                "AND payload->>'exercise_id' = %s "
+                "ORDER BY recorded_at DESC LIMIT 1",
+                (token, exercise_id),
+            )
+        else:
+            cur.execute(
+                "SELECT payload FROM checkins WHERE token = %s "
+                "AND payload->>'kind' = 'set_completion' "
+                "ORDER BY recorded_at DESC LIMIT 1",
+                (token,),
+            )
+        row = cur.fetchone()
+    return row["payload"] if row else None
+
+
 # ── Public API (dispatch on backend) ──────────────────────────────────────────
 
 
@@ -916,4 +976,20 @@ def get_session_history(token: str, limit: int = 10) -> list[dict]:
     return _pick(
         _flat_get_session_history, _sql_get_session_history, _pg_get_session_history,
         token, limit,
+    )
+
+
+def get_last_set_completion(
+    token: str, exercise_id: str | None = None
+) -> dict | None:
+    """Return the most recent live-set checkin payload for the user, or None.
+
+    Used by /chat to surface "patient just finished a set of X" into Maya's
+    system prompt, and by /pose/last-set for direct UI fetches.
+    """
+    return _pick(
+        _flat_get_last_set_completion,
+        _sql_get_last_set_completion,
+        _pg_get_last_set_completion,
+        token, exercise_id,
     )
