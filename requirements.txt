@@ -1,6 +1,11 @@
+# Vercel reads THIS file (next to api/index.py), not backend/requirements.txt.
+# Keep both in sync — local dev installs from backend/, Vercel installs from here.
+ag2[anthropic]
 fastapi
 uvicorn[standard]
 anthropic
+openai>=2.30
+psycopg[binary]>=3.2
 httpx
 python-dotenv
 requests
@@ -11,5 +16,4 @@ google-auth-oauthlib
 google-auth-httplib2
 mcp
 pyyaml
-openai>=1.50.0
 qrcode
