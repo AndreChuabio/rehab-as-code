@@ -30,13 +30,32 @@ def _reset(backend: str, tmpdir: Path):
     user_store.USERS_DIR = tmpdir / "users"
     user_store.DB_PATH = tmpdir / "users.db"
     user_store._SLACK_INDEX = user_store.USERS_DIR / "_slack_index.json"
-    # SQLite cached the path before we patched it; reset the init flag.
+    # caches need clearing so init runs against the new paths
     user_store._SQL_INITIALIZED = False
+    user_store._PG_INITIALIZED = False
     return user_store
+
+
+def _pg_truncate():
+    """Wipe Postgres tables so the smoke test starts clean. Caller must have
+    DATABASE_URL set."""
+    import psycopg
+
+    with psycopg.connect(os.environ["DATABASE_URL"], autocommit=True) as conn:
+        with conn.cursor() as cur:
+            for table in ("checkins", "protocol_state", "intake_records",
+                          "health_records", "users"):
+                cur.execute(f"TRUNCATE TABLE {table} CASCADE")
 
 
 def _exercise_backend(backend: str) -> None:
     print(f"\n=== backend: {backend} ===")
+    if backend == "postgres":
+        if not os.environ.get("DATABASE_URL"):
+            print("  SKIPPED: DATABASE_URL not set (set it to a Supabase or local PG URL to run)")
+            return
+        # Postgres backend uses the live DB; wipe before running.
+        _pg_truncate()
     tmp = Path(tempfile.mkdtemp(prefix=f"user_store_{backend}_"))
     try:
         us = _reset(backend, tmp)
@@ -79,9 +98,9 @@ def _exercise_backend(backend: str) -> None:
         assert intake is not None and intake["name"] == "Alex"
         u = us.load_user(token)
         assert u["patient_name"] == "Alex", "intake should backfill patient_name"
-        if backend == "sqlite":
+        if backend in ("sqlite", "postgres"):
             assert u.get("injury_category") == "knee", \
-                f"sqlite should infer knee from 'ACL reconstruction', got {u.get('injury_category')!r}"
+                f"{backend} should infer knee from 'ACL reconstruction', got {u.get('injury_category')!r}"
         print("  save_intake/get_intake OK")
 
         # 5. save_protocol_state + load_user round-trip
@@ -141,6 +160,7 @@ def _exercise_backend(backend: str) -> None:
 def main():
     _exercise_backend("flatfile")
     _exercise_backend("sqlite")
+    _exercise_backend("postgres")
     print("\nALL OK")
 
 
