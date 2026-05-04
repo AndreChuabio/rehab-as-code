@@ -1,12 +1,13 @@
 # Andre, 26 — post-ACL reconstruction ~3 weeks post-op; intake pain 3/10, mild at ~110° flexion.
-# Week 3 library baseline; evaluator HRV whole-protocol hold (no progression/regression).
+# Week 3 library baseline; evaluator HOLD (sparse wearables + recovery_7day_avg < 60).
 # Cursor cloud agents update this via PR per .cursorrules.
 
 patient: Andre
 phase: post-ACL reconstruction
+injury_category: knee
 week: 3
-generated_by: "Researcher PRIMARY protocol-library/post-acl-week-3.yaml (week_range [3,3]); evaluator HOLD — HRV ~19 ms decline over 7 d vs prior exceeds -8 ms threshold (whole protocol held); recovery 65 and sleep data do not trigger additional holds (no -20% intensity rule from provided data)."
-last_updated: "2026-05-03"
+generated_by: "Researcher PRIMARY protocol-library/knee/post-acl-week-3.yaml (week_range [3,3]); evaluator HOLD — wearable history sparse (<3 days in last 7, default hold per .cursorrules); recovery_7day_avg 35 < 60 (hold); HRV delta 0 (no +5 ms progression clearance); mild pain ~110° flexion — keep heel_slides at library ROM 100."
+last_updated: "2026-05-04"
 
 session_targets:
   frequency_per_week: 3
@@ -20,7 +21,7 @@ exercises:
     progression_criteria: "tolerates 12 min"
     regression_criteria: "patellofemoral pain mid-session"
     references:
-      - protocol-library/post-acl-week-3.yaml
+      - protocol-library/knee/post-acl-week-3.yaml
 
   - name: terminal_knee_extension
     sets: 3
@@ -30,7 +31,7 @@ exercises:
     progression_criteria: "matches contralateral extension"
     regression_criteria: "extension lag > 5 deg"
     references:
-      - protocol-library/post-acl-week-3.yaml
+      - protocol-library/knee/post-acl-week-3.yaml
 
   - name: quad_sets
     sets: 3
@@ -40,13 +41,13 @@ exercises:
     progression_criteria: "pain-free, no swelling next morning"
     regression_criteria: "any swelling within 24h"
     references:
-      - protocol-library/post-acl-week-3.yaml
+      - protocol-library/knee/post-acl-week-3.yaml
 
   - name: heel_slides
     sets: 3
     reps: 10
     ROM_target_deg: 100
-    progression_criteria: "pain-free sustained 100° active flexion (library milestone); defer higher ROM until hold clears/clinician ok"
+    progression_criteria: "pain-free sustained 100° active flexion (library milestone); defer higher ROM until hold clears / clinician ok"
     regression_criteria: "ROM regression > 5 deg week-over-week"
     references:
-      - protocol-library/post-acl-week-3.yaml
+      - protocol-library/knee/post-acl-week-3.yaml
