@@ -457,6 +457,312 @@ def _sql_get_session_history(token: str, limit: int = 10) -> list[dict]:
     return [json.loads(r["payload"]) for r in reversed(rows)]
 
 
+# ── Postgres backend (Supabase / Vercel Postgres / Neon / Railway) ────────────
+#
+# Connection via DATABASE_URL env var. On Supabase, prefer the *pooler* URL
+# (port 6543, transaction mode) for serverless deploys — it multiplexes
+# short-lived Vercel function connections cleanly. The direct URL (5432) is
+# fine for local dev and for the schema-init script.
+#
+# Schema differences from SQLite:
+#   * JSONB payload columns (queryable, indexable, native to PG)
+#   * ON CONFLICT clauses replace SQLite's INSERT OR REPLACE / OR IGNORE
+#   * %s parameter placeholders instead of ?
+# Public-API dict shape (load_user output) is identical.
+
+_PG_INIT_LOCK = Lock()
+_PG_INITIALIZED = False
+
+_PG_SCHEMA = """
+CREATE TABLE IF NOT EXISTS users (
+    token TEXT PRIMARY KEY,
+    slack_user_id TEXT UNIQUE,
+    patient_name TEXT,
+    created_at TEXT NOT NULL,
+    last_active TEXT NOT NULL,
+    last_sync TEXT,
+    injury_category TEXT
+);
+
+CREATE TABLE IF NOT EXISTS health_records (
+    token TEXT NOT NULL REFERENCES users(token) ON DELETE CASCADE,
+    recorded_at TEXT NOT NULL,
+    payload JSONB NOT NULL,
+    PRIMARY KEY (token, recorded_at)
+);
+
+CREATE TABLE IF NOT EXISTS intake_records (
+    token TEXT PRIMARY KEY REFERENCES users(token) ON DELETE CASCADE,
+    recorded_at TEXT NOT NULL,
+    payload JSONB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS protocol_state (
+    token TEXT PRIMARY KEY REFERENCES users(token) ON DELETE CASCADE,
+    last_updated TEXT NOT NULL,
+    current_phase TEXT,
+    current_week INTEGER,
+    last_pr_url TEXT,
+    payload JSONB NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS checkins (
+    session_id TEXT PRIMARY KEY,
+    token TEXT NOT NULL REFERENCES users(token) ON DELETE CASCADE,
+    recorded_at TEXT NOT NULL,
+    pain_level INTEGER,
+    payload JSONB NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_checkins_token_time ON checkins(token, recorded_at);
+CREATE INDEX IF NOT EXISTS idx_users_slack ON users(slack_user_id);
+"""
+
+
+def _pg_dsn() -> str:
+    dsn = os.getenv("DATABASE_URL", "").strip()
+    if not dsn:
+        raise RuntimeError(
+            "STORAGE_BACKEND=postgres requires DATABASE_URL. "
+            "Get the connection string from Supabase: Project Settings → Database "
+            "→ Connection string → Transaction pooler (port 6543) for serverless."
+        )
+    return dsn
+
+
+def _pg_conn():
+    """Open a connection. Caller is responsible for `with` / close."""
+    import psycopg
+    from psycopg.rows import dict_row
+
+    _pg_init()
+    return psycopg.connect(_pg_dsn(), row_factory=dict_row, autocommit=True)
+
+
+def _pg_init() -> None:
+    global _PG_INITIALIZED
+    if _PG_INITIALIZED:
+        return
+    with _PG_INIT_LOCK:
+        if _PG_INITIALIZED:
+            return
+        import psycopg
+
+        with psycopg.connect(_pg_dsn(), autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(_PG_SCHEMA)
+        _PG_INITIALIZED = True
+
+
+def _pg_create_user(slack_user_id: str | None) -> str:
+    token = str(uuid.uuid4())
+    with _pg_conn() as c, c.cursor() as cur:
+        cur.execute(
+            "INSERT INTO users (token, slack_user_id, created_at, last_active) "
+            "VALUES (%s, %s, %s, %s)",
+            (token, slack_user_id, _now(), _now()),
+        )
+    return token
+
+
+def _pg_lookup_by_slack_id(slack_user_id: str) -> str | None:
+    with _pg_conn() as c, c.cursor() as cur:
+        cur.execute(
+            "SELECT token FROM users WHERE slack_user_id = %s", (slack_user_id,)
+        )
+        row = cur.fetchone()
+    return row["token"] if row else None
+
+
+def _pg_link_slack_id(token: str, slack_user_id: str) -> None:
+    with _pg_conn() as c, c.cursor() as cur:
+        cur.execute(
+            "UPDATE users SET slack_user_id = %s, last_active = %s WHERE token = %s",
+            (slack_user_id, _now(), token),
+        )
+
+
+def _pg_token_exists(token: str) -> bool:
+    with _pg_conn() as c, c.cursor() as cur:
+        cur.execute("SELECT 1 FROM users WHERE token = %s", (token,))
+        return cur.fetchone() is not None
+
+
+def _pg_load_user(token: str) -> dict | None:
+    with _pg_conn() as c, c.cursor() as cur:
+        cur.execute("SELECT * FROM users WHERE token = %s", (token,))
+        urow = cur.fetchone()
+        if not urow:
+            return None
+        user: dict[str, Any] = {
+            "token": urow["token"],
+            "slack_user_id": urow["slack_user_id"],
+            "patient_name": urow["patient_name"],
+            "created_at": urow["created_at"],
+            "last_active": urow["last_active"],
+            "last_sync": urow["last_sync"],
+            "injury_category": urow["injury_category"],
+        }
+
+        cur.execute(
+            "SELECT payload FROM health_records WHERE token = %s "
+            "ORDER BY recorded_at DESC LIMIT 1",
+            (token,),
+        )
+        h = cur.fetchone()
+        user["health"] = h["payload"] if h else None  # JSONB → dict natively
+
+        cur.execute("SELECT payload FROM intake_records WHERE token = %s", (token,))
+        i = cur.fetchone()
+        user["intake"] = i["payload"] if i else None
+
+        cur.execute("SELECT payload FROM protocol_state WHERE token = %s", (token,))
+        p = cur.fetchone()
+        user["protocol_state"] = p["payload"] if p else None
+
+        cur.execute(
+            "SELECT payload FROM checkins WHERE token = %s ORDER BY recorded_at ASC",
+            (token,),
+        )
+        user["session_history"] = [r["payload"] for r in cur.fetchall()]
+    return user
+
+
+def _pg_touch(cur, token: str) -> None:
+    cur.execute(
+        "UPDATE users SET last_active = %s WHERE token = %s", (_now(), token)
+    )
+
+
+def _pg_save_health(token: str, record: dict) -> None:
+    from psycopg.types.json import Json
+
+    with _pg_conn() as c, c.cursor() as cur:
+        cur.execute(
+            "INSERT INTO users (token, created_at, last_active) "
+            "VALUES (%s, %s, %s) ON CONFLICT (token) DO NOTHING",
+            (token, _now(), _now()),
+        )
+        recorded_at = _now()
+        cur.execute(
+            "INSERT INTO health_records (token, recorded_at, payload) "
+            "VALUES (%s, %s, %s) "
+            "ON CONFLICT (token, recorded_at) DO UPDATE SET payload = EXCLUDED.payload",
+            (token, recorded_at, Json(record)),
+        )
+        cur.execute(
+            "UPDATE users SET last_sync = %s, last_active = %s WHERE token = %s",
+            (recorded_at, _now(), token),
+        )
+
+
+def _pg_save_intake(token: str, intake: dict) -> None:
+    from psycopg.types.json import Json
+
+    intake.setdefault("recorded_at", _now())
+    with _pg_conn() as c, c.cursor() as cur:
+        cur.execute("SELECT injury_category FROM users WHERE token = %s", (token,))
+        existing = cur.fetchone()
+        if not existing:
+            return
+        cur.execute(
+            "INSERT INTO intake_records (token, recorded_at, payload) "
+            "VALUES (%s, %s, %s) "
+            "ON CONFLICT (token) DO UPDATE SET "
+            "  recorded_at = EXCLUDED.recorded_at, payload = EXCLUDED.payload",
+            (token, intake["recorded_at"], Json(intake)),
+        )
+        if intake.get("name"):
+            cur.execute(
+                "UPDATE users SET patient_name = %s WHERE token = %s",
+                (intake["name"], token),
+            )
+        if intake.get("injury_type") and not existing["injury_category"]:
+            inferred = _infer_injury_category(intake["injury_type"])
+            if inferred:
+                cur.execute(
+                    "UPDATE users SET injury_category = %s WHERE token = %s",
+                    (inferred, token),
+                )
+        _pg_touch(cur, token)
+
+
+def _pg_get_intake(token: str) -> dict | None:
+    with _pg_conn() as c, c.cursor() as cur:
+        cur.execute("SELECT payload FROM intake_records WHERE token = %s", (token,))
+        row = cur.fetchone()
+    return row["payload"] if row else None
+
+
+def _pg_save_protocol_state(token: str, state: dict) -> None:
+    from psycopg.types.json import Json
+
+    state.setdefault("last_updated", _now())
+    with _pg_conn() as c, c.cursor() as cur:
+        cur.execute("SELECT 1 FROM users WHERE token = %s", (token,))
+        if not cur.fetchone():
+            return
+        cur.execute(
+            "INSERT INTO protocol_state "
+            "(token, last_updated, current_phase, current_week, last_pr_url, payload) "
+            "VALUES (%s, %s, %s, %s, %s, %s) "
+            "ON CONFLICT (token) DO UPDATE SET "
+            "  last_updated = EXCLUDED.last_updated, "
+            "  current_phase = EXCLUDED.current_phase, "
+            "  current_week = EXCLUDED.current_week, "
+            "  last_pr_url = EXCLUDED.last_pr_url, "
+            "  payload = EXCLUDED.payload",
+            (
+                token,
+                state["last_updated"],
+                state.get("current_phase"),
+                state.get("current_week"),
+                state.get("last_pr_url"),
+                Json(state),
+            ),
+        )
+        _pg_touch(cur, token)
+
+
+def _pg_save_checkin(token: str, checkin: dict) -> None:
+    from psycopg.types.json import Json
+
+    checkin.setdefault("recorded_at", _now())
+    checkin.setdefault("session_id", str(uuid.uuid4()))
+    with _pg_conn() as c, c.cursor() as cur:
+        cur.execute("SELECT 1 FROM users WHERE token = %s", (token,))
+        if not cur.fetchone():
+            return
+        cur.execute(
+            "INSERT INTO checkins (session_id, token, recorded_at, pain_level, payload) "
+            "VALUES (%s, %s, %s, %s, %s) "
+            "ON CONFLICT (session_id) DO UPDATE SET "
+            "  token = EXCLUDED.token, "
+            "  recorded_at = EXCLUDED.recorded_at, "
+            "  pain_level = EXCLUDED.pain_level, "
+            "  payload = EXCLUDED.payload",
+            (
+                checkin["session_id"],
+                token,
+                checkin["recorded_at"],
+                checkin.get("pain_level"),
+                Json(checkin),
+            ),
+        )
+        _pg_touch(cur, token)
+
+
+def _pg_get_session_history(token: str, limit: int = 10) -> list[dict]:
+    with _pg_conn() as c, c.cursor() as cur:
+        cur.execute(
+            "SELECT payload FROM checkins WHERE token = %s "
+            "ORDER BY recorded_at DESC LIMIT %s",
+            (token, limit),
+        )
+        rows = cur.fetchall()
+    return [r["payload"] for r in reversed(rows)]
+
+
 # ── Public API (dispatch on backend) ──────────────────────────────────────────
 
 
@@ -465,67 +771,68 @@ def create_token() -> str:
     return create_user()
 
 
+def _pick(flat, sql, pg, *args):
+    name = _backend_name()
+    if name == "flatfile":
+        return flat(*args)
+    if name == "postgres":
+        return pg(*args)
+    return sql(*args)
+
+
 def create_user(slack_user_id: str | None = None) -> str:
-    if _backend_name() == "flatfile":
-        return _flat_create_user(slack_user_id)
-    return _sql_create_user(slack_user_id)
+    return _pick(_flat_create_user, _sql_create_user, _pg_create_user, slack_user_id)
 
 
 def lookup_by_slack_id(slack_user_id: str) -> str | None:
-    if _backend_name() == "flatfile":
-        return _flat_lookup_by_slack_id(slack_user_id)
-    return _sql_lookup_by_slack_id(slack_user_id)
+    return _pick(
+        _flat_lookup_by_slack_id, _sql_lookup_by_slack_id, _pg_lookup_by_slack_id,
+        slack_user_id,
+    )
 
 
 def link_slack_id(token: str, slack_user_id: str) -> None:
-    if _backend_name() == "flatfile":
-        return _flat_link_slack_id(token, slack_user_id)
-    return _sql_link_slack_id(token, slack_user_id)
+    return _pick(
+        _flat_link_slack_id, _sql_link_slack_id, _pg_link_slack_id,
+        token, slack_user_id,
+    )
 
 
 def token_exists(token: str) -> bool:
-    if _backend_name() == "flatfile":
-        return _flat_token_exists(token)
-    return _sql_token_exists(token)
+    return _pick(_flat_token_exists, _sql_token_exists, _pg_token_exists, token)
 
 
 def load_user(token: str) -> dict | None:
-    if _backend_name() == "flatfile":
-        return _flat_load_user(token)
-    return _sql_load_user(token)
+    return _pick(_flat_load_user, _sql_load_user, _pg_load_user, token)
 
 
 def save_health(token: str, record: dict) -> None:
-    if _backend_name() == "flatfile":
-        return _flat_save_health(token, record)
-    return _sql_save_health(token, record)
+    return _pick(_flat_save_health, _sql_save_health, _pg_save_health, token, record)
 
 
 def save_intake(token: str, intake: dict) -> None:
-    if _backend_name() == "flatfile":
-        return _flat_save_intake(token, intake)
-    return _sql_save_intake(token, intake)
+    return _pick(_flat_save_intake, _sql_save_intake, _pg_save_intake, token, intake)
 
 
 def get_intake(token: str) -> dict | None:
-    if _backend_name() == "flatfile":
-        return _flat_get_intake(token)
-    return _sql_get_intake(token)
+    return _pick(_flat_get_intake, _sql_get_intake, _pg_get_intake, token)
 
 
 def save_protocol_state(token: str, state: dict) -> None:
-    if _backend_name() == "flatfile":
-        return _flat_save_protocol_state(token, state)
-    return _sql_save_protocol_state(token, state)
+    return _pick(
+        _flat_save_protocol_state, _sql_save_protocol_state, _pg_save_protocol_state,
+        token, state,
+    )
 
 
 def save_checkin(token: str, checkin: dict) -> None:
-    if _backend_name() == "flatfile":
-        return _flat_save_checkin(token, checkin)
-    return _sql_save_checkin(token, checkin)
+    return _pick(
+        _flat_save_checkin, _sql_save_checkin, _pg_save_checkin, token, checkin,
+    )
 
 
 def get_session_history(token: str, limit: int = 10) -> list[dict]:
-    if _backend_name() == "flatfile":
-        return _flat_get_session_history(token, limit)
-    return _sql_get_session_history(token, limit)
+    return _pick(
+        _flat_get_session_history, _sql_get_session_history, _pg_get_session_history,
+        token, limit,
+    )

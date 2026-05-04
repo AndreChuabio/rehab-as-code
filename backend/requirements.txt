@@ -3,6 +3,7 @@ fastapi
 uvicorn[standard]
 anthropic
 openai>=2.30
+psycopg[binary]>=3.2
 httpx
 python-dotenv
 requests
