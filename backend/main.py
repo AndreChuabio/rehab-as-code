@@ -32,7 +32,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
@@ -47,8 +47,9 @@ from context_builder import build_system_prompt
 from tavus_client import create_conversation
 from agents import AgentInvocation, InvocationRequest, get_agent
 from protocol_loader import fetch_protocol, write_context_files, PROTOCOL_REPO
-from user_store import create_token, token_exists, load_user, save_health
+from user_store import create_token, ensure_user, token_exists, load_user, save_health
 from shortcut_template import generate_shortcut
+from auth import current_user_id
 import coach_chat
 import qrcode
 import qrcode.image.svg
@@ -853,8 +854,13 @@ async def _chat_trigger_executor(flow: str, payload: dict) -> dict:
 
 
 @app.post("/chat")
-async def chat(req: ChatRequest):
-    """Stream a coach chat response. SSE; same framing as /agent/stream/{id}."""
+async def chat(req: ChatRequest, user_id: str = Depends(current_user_id)):
+    """Stream a coach chat response. SSE; same framing as /agent/stream/{id}.
+
+    Requires a Supabase JWT in `Authorization: Bearer <jwt>`. The `sub`
+    claim becomes the patient's stable token in user_store.
+    """
+    ensure_user(user_id)
     health = get_health_data()
     protocol_payload = fetch_protocol() or {}
     messages = [
