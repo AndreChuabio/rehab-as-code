@@ -51,7 +51,116 @@ document.addEventListener("DOMContentLoaded", () => {
   switchStage("chat");
   applyStepLocks();
   routeFromHash(); // honour the URL on load; defaults to #intake
+  bootstrapAuth();
 });
+
+// ── Supabase auth bootstrap (soft-gate) ────────────────────────────────────
+//
+// On load: show the overlay unless the user has a session OR has explicitly
+// skipped sign-in this session. Skipping flips localStorage.authSkipped so
+// they're not nagged on every refresh, but they can sign in via the pill in
+// the header at any time.
+
+const AUTH_SKIP_KEY = "authSkipped";
+
+function authedFetch(path, options = {}) {
+  const jwt = window.RehabAuth?.getJwt?.();
+  const hdrs = new Headers(options.headers || {});
+  if (jwt) hdrs.set("Authorization", `Bearer ${jwt}`);
+  return fetch(path, { ...options, headers: hdrs });
+}
+
+async function bootstrapAuth() {
+  const overlay = document.getElementById("authOverlay");
+  const pill    = document.getElementById("authPill");
+  const pillEm  = document.getElementById("authPillEmail");
+  const signOut = document.getElementById("authPillSignout");
+  const form    = document.getElementById("authForm");
+  const email   = document.getElementById("authEmail");
+  const submit  = document.getElementById("authSubmit");
+  const status  = document.getElementById("authStatus");
+  const skipBtn = document.getElementById("authSkip");
+
+  function showOverlay(show) { if (overlay) overlay.hidden = !show; }
+  function showPill(user) {
+    if (!pill) return;
+    if (user) {
+      pillEm.textContent = user.email || "signed in";
+      pill.hidden = false;
+    } else {
+      pill.hidden = true;
+    }
+  }
+
+  // Render initial state synchronously so the overlay doesn't flash on every
+  // returning visit. RehabAuth.init() will refine this when the SDK loads.
+  const skipped = localStorage.getItem(AUTH_SKIP_KEY) === "1";
+  const cachedJwt = localStorage.getItem("supabaseJwt");
+  if (!cachedJwt && !skipped) showOverlay(true);
+
+  if (!window.RehabAuth) {
+    console.warn("auth.js not loaded; running in unauthenticated mode");
+    return;
+  }
+  try {
+    await window.RehabAuth.init();
+  } catch (e) {
+    console.warn("Supabase init failed:", e);
+    showOverlay(false);  // don't trap the user behind a broken auth
+    showToast(`Sign-in unavailable: ${e.message}`, "error");
+    return;
+  }
+
+  window.RehabAuth.onChange((session) => {
+    if (session) {
+      localStorage.removeItem(AUTH_SKIP_KEY);
+      showOverlay(false);
+      showPill(window.RehabAuth.getUser());
+    } else {
+      showPill(null);
+      // Re-show the overlay if it isn't a deliberate skip and user has no
+      // session — but never on the magic-link redirect, which fires onChange
+      // with a fresh session right after.
+      if (localStorage.getItem(AUTH_SKIP_KEY) !== "1") showOverlay(true);
+    }
+  });
+
+  if (form) {
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const v = (email.value || "").trim();
+      if (!v) return;
+      submit.disabled = true;
+      submit.textContent = "Sending…";
+      status.hidden = true;
+      try {
+        await window.RehabAuth.sendMagicLink(v);
+        status.hidden = false;
+        status.textContent = `Check ${v} for the magic link. Click it on this device.`;
+        status.className = "auth-status auth-status-ok";
+      } catch (err) {
+        status.hidden = false;
+        status.textContent = `Couldn't send link: ${err.message || err}`;
+        status.className = "auth-status auth-status-err";
+      } finally {
+        submit.disabled = false;
+        submit.textContent = "Send magic link";
+      }
+    });
+  }
+  if (skipBtn) {
+    skipBtn.addEventListener("click", () => {
+      localStorage.setItem(AUTH_SKIP_KEY, "1");
+      showOverlay(false);
+      showToast("Demo mode — chat and form-check log won't save", "info");
+    });
+  }
+  if (signOut) {
+    signOut.addEventListener("click", async () => {
+      try { await window.RehabAuth.signOut(); } catch (_) {}
+    });
+  }
+}
 
 function applyStepLocks() {
   const locked = !intakeComplete;
@@ -1312,7 +1421,7 @@ async function sendChat(message, { skipUserBubble = false } = {}) {
   };
 
   try {
-    const res = await fetch(`${API_BASE}/chat`, {
+    const res = await authedFetch(`${API_BASE}/chat`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -1321,6 +1430,10 @@ async function sendChat(message, { skipUserBubble = false } = {}) {
         history: chatHistory.slice(-10),
       }),
     });
+    if (res.status === 401) {
+      appendChatBubble("error", "Sign in to chat with Coach Maya.");
+      return;
+    }
     if (!res.ok || !res.body) throw new Error(`chat failed: ${res.status}`);
 
     const reader = res.body.getReader();

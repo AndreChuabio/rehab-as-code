@@ -97,6 +97,18 @@ def root():
     return {"status": "ok", "app": "Wellness Coach AI"}
 
 
+@app.get("/config")
+def public_config():
+    """Public, browser-readable config. The anon/publishable key is *meant*
+    to live in client code (it's gated by RLS on the database side); the
+    JWT secret is NEVER returned here.
+    """
+    return {
+        "supabase_url": os.getenv("SUPABASE_URL", "").strip(),
+        "supabase_anon_key": os.getenv("SUPABASE_ANON_KEY", "").strip(),
+    }
+
+
 @app.get("/debug-env")
 def debug_env():
     """Quick check that all env vars are loaded (values masked)."""
