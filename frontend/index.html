@@ -200,6 +200,38 @@
 
   </div>
 
+  <!-- Sign-in overlay. Soft gate: app loads behind it, but /chat and
+       form-check are inert until a JWT is present. -->
+  <div class="auth-overlay" id="authOverlay" hidden>
+    <div class="auth-card">
+      <h2>Sign in to RehabAsCode</h2>
+      <p class="auth-blurb">
+        Enter your email — we'll send you a magic link. No password.
+      </p>
+      <form id="authForm">
+        <input
+          type="email"
+          id="authEmail"
+          placeholder="you@example.com"
+          autocomplete="email"
+          required
+        />
+        <button type="submit" id="authSubmit">Send magic link</button>
+      </form>
+      <div class="auth-status" id="authStatus" hidden></div>
+      <button type="button" class="auth-skip" id="authSkip">
+        Continue without signing in (demo mode)
+      </button>
+    </div>
+  </div>
+
+  <!-- Header pill (signed-in identity + sign out), injected by app.js when
+       a session is active. -->
+  <div class="auth-pill" id="authPill" hidden>
+    <span class="auth-pill-email" id="authPillEmail"></span>
+    <button type="button" class="auth-pill-signout" id="authPillSignout">Sign out</button>
+  </div>
+
   <script>
     // Pose form-check feature flag. Visit /?pose=1 once to opt in,
     // /?pose=0 to opt out. Persisted to localStorage.
@@ -211,6 +243,7 @@
       } catch (e) {}
     })();
   </script>
+  <script src="/static/auth.js"></script>
   <script src="/static/pose.js"></script>
   <script src="/static/app.js"></script>
 </body>
