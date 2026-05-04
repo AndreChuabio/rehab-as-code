@@ -1,19 +1,11 @@
-# Three sessions/week (Mon/Wed/Fri): bike warmup → extension bias → quad sets → flexion/heel slides.
-# HOLD: whole plan stays week-3 library baseline (no advancement to week-4 content).
-
+# Mon/Wed/Fri week 3; Andre; wearable clear PROGRESS; graded flexion dosing only.
 week: 3
 patient: Andre
-generated_by: "Researcher PRIMARY protocol-library/post-acl-week-3.yaml; evaluator HOLD — HRV ~19 ms / 7 d decline exceeds -8 ms threshold (recovery 65, sleep no -20% intensity trigger)."
-last_updated: "2026-05-03"
+generated_by: "Researcher PRIMARY protocol-library/knee/post-acl-week-3.yaml; evaluator PROGRESS (wearables clear; graded heel-slide dosing for mild discomfort near flexion)."
+last_updated: "2026-05-04"
 
 hold_note: >-
-  Patient Andre, 26 (~3 weeks post-op). Intake pain 3/10; mild discomfort near ~110° flexion.
-  Evaluator: HOLD entire protocol — wearable HRV ~19 ms decline over 7 days vs prior window exceeds the -8 ms threshold;
-  recovery score 65 does not independently hold; sleep / intensity rules show no -20% drop from provided data.
-  Researcher: PRIMARY protocol-library/post-acl-week-3.yaml (week 3); exercises — stationary_bike 10 min RPE 4/10,
-  terminal_knee_extension 3x12 yellow band ROM 0, quad_sets 3x15 bodyweight ROM 90, heel_slides 3x10 ROM 100;
-  mild pain at ~110° flexion on intake keeps heel_slides at library milestone 100° (not beyond target). No dedicated
-  heel_slides regression entry in library (only regressions/single_leg_squat.yaml). Mon/Wed/Fri order below.
+  Fresh week-3 plan from protocol-library/knee/post-acl-week-3.yaml. Wearables clear (PROGRESS). Graded end-range flexion dosing only beyond the 100° library target until symptoms ease.
 
 session_order:
   - stationary_bike

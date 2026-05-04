@@ -1,12 +1,10 @@
-# Andre, 26 — post-ACL reconstruction ~3 weeks post-op; intake pain 3/10, mild at ~110° flexion.
-# Week 3 library baseline; evaluator HRV whole-protocol hold (no progression/regression).
-# Cursor cloud agents update this via PR per .cursorrules.
-
+# Andre, 26 — ACL reconstruction ~3 wk post-op; pain 3/10; mild discomfort ~110° flexion.
 patient: Andre
+injury_category: knee
 phase: post-ACL reconstruction
 week: 3
-generated_by: "Researcher PRIMARY protocol-library/post-acl-week-3.yaml (week_range [3,3]); evaluator HOLD — HRV ~19 ms decline over 7 d vs prior exceeds -8 ms threshold (whole protocol held); recovery 65 and sleep data do not trigger additional holds (no -20% intensity rule from provided data)."
-last_updated: "2026-05-03"
+generated_by: "Researcher PRIMARY protocol-library/knee/post-acl-week-3.yaml; evaluator PROGRESS — wearable gates clear (no HRV -8 ms hold; recovery 70; sleep 93); symptom mild pain near 110° vs library 100° milestone managed with graded end-range dosing without lowering ROM targets."
+last_updated: "2026-05-04"
 
 session_targets:
   frequency_per_week: 3
@@ -17,36 +15,36 @@ exercises:
   - name: stationary_bike
     duration_min: 10
     intensity: "RPE 4 of 10"
-    progression_criteria: "tolerates 12 min"
-    regression_criteria: "patellofemoral pain mid-session"
+    progression_criteria: "Pain-free tolerated session; ROM-restoration focus; may extend toward 12 min or add resistance only if no knee pain per library note."
+    regression_criteria: "Patellofemoral or anterior knee pain during or after biking; worsen effusion."
     references:
-      - protocol-library/post-acl-week-3.yaml
+      - protocol-library/knee/post-acl-week-3.yaml
 
   - name: terminal_knee_extension
     sets: 3
     reps: 12
     load: yellow_band
     ROM_target_deg: 0
-    progression_criteria: "matches contralateral extension"
-    regression_criteria: "extension lag > 5 deg"
+    progression_criteria: "Last 30 degrees of extension with strong quad activation and no quad lag tolerated per library note."
+    regression_criteria: "Extension lag or inability to maintain terminal extension without substitution."
     references:
-      - protocol-library/post-acl-week-3.yaml
+      - protocol-library/knee/post-acl-week-3.yaml
 
   - name: quad_sets
     sets: 3
     reps: 15
     load: bodyweight
     ROM_target_deg: 90
-    progression_criteria: "pain-free, no swelling next morning"
-    regression_criteria: "any swelling within 24h"
+    progression_criteria: "Pain-free quad sets with 10-second isometric hold each rep, heel-driving cue; readiness to progress toward terminal knee extension progression per library progression_to."
+    regression_criteria: "Increased swelling or pain within 24 h; poor quad recruitment or guarding."
     references:
-      - protocol-library/post-acl-week-3.yaml
+      - protocol-library/knee/post-acl-week-3.yaml
 
   - name: heel_slides
     sets: 3
     reps: 10
     ROM_target_deg: 100
-    progression_criteria: "pain-free sustained 100° active flexion (library milestone); defer higher ROM until hold clears/clinician ok"
-    regression_criteria: "ROM regression > 5 deg week-over-week"
+    progression_criteria: "Pain-free sustained 100° active flexion milestone (library); advance volume or end-range work only via graded dosing while symptoms settle—do not regress ROM_target below 100° without pain at target ROM per rules."
+    regression_criteria: "First signs of effusion or irritability per library \"stop\" rule; regression > 5° week-over-week; pain escalating at/near prescribed 100° target would prompt hold/regress per clinic rules."
     references:
-      - protocol-library/post-acl-week-3.yaml
+      - protocol-library/knee/post-acl-week-3.yaml
