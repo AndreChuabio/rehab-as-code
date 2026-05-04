@@ -2,6 +2,7 @@ ag2[anthropic]
 fastapi
 uvicorn[standard]
 anthropic
+openai>=2.30
 httpx
 python-dotenv
 requests
