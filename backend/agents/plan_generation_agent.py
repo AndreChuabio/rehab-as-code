@@ -113,11 +113,10 @@ class PlanGenerationAgent(PatientAgent):
     async def handle(self, request: PatientRequest) -> PatientResponse:
         api_key = os.getenv("ANTHROPIC_API_KEY")
         if not api_key:
-            return PatientResponse(
-                agent_name=self.name,
-                message="Plan generation unavailable (ANTHROPIC_API_KEY not set).",
-                next_agent=None,
-            )
+            # Fallback path for demo: skip the planner LLM and call the CodingAgent directly
+            # with whatever intake data we have. This keeps the PR-open demo working when
+            # ANTHROPIC_API_KEY is missing in Vercel (CodingAgent may itself be cached_replay).
+            return await self._fallback_direct_pr(request)
 
         client = anthropic.Anthropic(api_key=api_key)
         history: list[dict] = [
@@ -126,6 +125,7 @@ class PlanGenerationAgent(PatientAgent):
 
         pr_url: str | None = None
         pr_branch: str | None = None
+        invocation_id: str | None = None
         final_message = ""
 
         for _ in range(6):
@@ -154,6 +154,7 @@ class PlanGenerationAgent(PatientAgent):
                 if tc.name == "generate_protocol":
                     pr_url = result.get("pr_url")
                     pr_branch = result.get("branch")
+                    invocation_id = result.get("invocation_id")
                 tool_results.append({
                     "type": "tool_result",
                     "tool_use_id": tc.id,
@@ -174,9 +175,77 @@ class PlanGenerationAgent(PatientAgent):
                 if pr_url else "Protocol generation in progress."
             ),
             next_agent=None,
-            data={"pr_url": pr_url, "branch": pr_branch},
+            data={"pr_url": pr_url, "branch": pr_branch, "invocation_id": invocation_id},
             artifacts=artifacts,
         )
+
+    async def _fallback_direct_pr(self, request: PatientRequest) -> PatientResponse:
+        """Skip the planner LLM. Hand whatever intake we have straight to CodingAgent.
+
+        Used when ANTHROPIC_API_KEY is missing. The CodingAgent itself might be
+        cached_replay (which has its own canned trace), so the demo still surfaces
+        a PR card even without any LLM calls in this layer.
+        """
+        token = request.user_token
+        user = user_store.load_user(token) or {}
+        intake = user.get("intake") or {}
+        health = user.get("health") or {}
+
+        spec = {
+            "patient_name": intake.get("name", "Patient"),
+            "phase": "acute",
+            "week": 1,
+            "intake": intake,
+        }
+        spec_json = json.dumps(spec, indent=2)
+        prompt = (
+            f"Initialize protocol.yaml for patient {spec['patient_name']}.\n"
+            f"Phase: {spec['phase']}, Week: {spec['week']}.\n\n"
+            f"Protocol spec:\n{spec_json}\n"
+        )
+
+        try:
+            from protocol_loader import write_context_files
+            context_files = write_context_files(
+                flow="intake", wearables=health, symptom_log=spec_json,
+            )
+        except Exception:
+            context_files = {
+                f"protocols/data/intake-{spec['patient_name'].lower()}.json": spec_json
+            }
+
+        try:
+            invocation = await get_agent().invoke(InvocationRequest(
+                repo=PROTOCOL_REPO,
+                prompt=prompt,
+                context_files=context_files,
+                flow="weekly_plan",
+            ))
+            user_store.save_protocol_state(token, {
+                "last_pr_url": invocation.pr_url,
+                "last_branch": invocation.branch,
+                "current_phase": spec["phase"],
+                "current_week": spec["week"],
+            })
+            return PatientResponse(
+                agent_name=self.name,
+                message=(
+                    f"Protocol generated. PR is open for clinician review: {invocation.pr_url}"
+                    if invocation.pr_url
+                    else "Protocol generation in progress."
+                ),
+                next_agent=None,
+                data={"pr_url": invocation.pr_url, "branch": invocation.branch,
+                      "invocation_id": invocation.invocation_id},
+                artifacts=[{"type": "pr", "url": invocation.pr_url}] if invocation.pr_url else [],
+            )
+        except Exception as exc:
+            logger.exception("Fallback CodingAgent invocation failed")
+            return PatientResponse(
+                agent_name=self.name,
+                message=f"Plan generation failed: {exc}",
+                next_agent=None,
+            )
 
     async def _dispatch_tool(self, name: str, inputs: dict, token: str) -> dict:
         if name == "load_patient_context":
@@ -213,16 +282,16 @@ class PlanGenerationAgent(PatientAgent):
                 "Include a wearable hold rule in session_targets: hold load if HRV drops > 8ms below 7-day avg."
             )
 
-            # Write context files exactly as main.py does
+            # Write context files using the canonical helper in protocol_loader.
             try:
-                import context_builder  # noqa: F401 — may not be available
-                from main import write_context_files
+                from protocol_loader import write_context_files
                 context_files = write_context_files(
                     flow="intake",
                     wearables=health,
                     symptom_log=spec_json,
                 )
-            except Exception:
+            except Exception as exc:
+                logger.warning("write_context_files failed (%s); using minimal stub", exc)
                 context_files = {
                     f"protocols/data/intake-{inputs.get('patient_name','patient').lower()}.json": spec_json
                 }
@@ -245,7 +314,12 @@ class PlanGenerationAgent(PatientAgent):
                     "current_week": inputs.get("week"),
                 })
 
-                return {"ok": True, "pr_url": invocation.pr_url, "branch": invocation.branch}
+                return {
+                    "ok": True,
+                    "pr_url": invocation.pr_url,
+                    "branch": invocation.branch,
+                    "invocation_id": invocation.invocation_id,
+                }
             except Exception as exc:
                 logger.exception("CodingAgent invocation failed")
                 return {"error": str(exc)}

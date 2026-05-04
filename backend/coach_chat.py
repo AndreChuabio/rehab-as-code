@@ -117,16 +117,22 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "fire_intake_trigger",
             "description": (
-                "Fire the orchestrator's intake flow to (re)initialize the protocol. "
-                "Use only when the patient is providing fresh intake data (age, surgery date, "
-                "current pain level)."
+                "Force a full re-intake. ONLY call when the patient explicitly says they want "
+                "to restart their intake from scratch (e.g., 'I want to redo my intake', "
+                "'reset my plan and start over'). This deletes the existing intake record so "
+                "the structured intake modal opens again on the next reload. Do NOT call when "
+                "the patient is merely updating a field — for that, give a conversational reply "
+                "or call fire_symptom_trigger / fire_checkin_trigger."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "intake_text": {"type": "string"},
+                    "reason": {
+                        "type": "string",
+                        "description": "One-sentence why the patient asked to restart intake.",
+                    },
                 },
-                "required": ["intake_text"],
+                "required": ["reason"],
             },
         },
     },
@@ -236,6 +242,7 @@ async def _dispatch_tool(
     name: str,
     arguments: dict[str, Any],
     trigger_executor: TriggerExecutor,
+    user_token: str | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """
     Returns (tool_result_for_llm, extra_events).
@@ -272,13 +279,31 @@ async def _dispatch_tool(
         )
 
     if name == "fire_intake_trigger":
-        result = await trigger_executor(
-            "intake",
-            {"intake_text": arguments.get("intake_text", "")},
-        )
+        # Admin escape hatch: patient explicitly asked to restart intake.
+        # Wipe their intake row so the next /patient/me/intake-status returns
+        # state="needs_intake" and the frontend re-opens the intake modal.
+        if not user_token:
+            return (
+                {"ok": False, "error": "no authenticated patient on this chat session"},
+                [],
+            )
+        try:
+            import user_store as _us
+            _us.delete_intake(user_token)
+        except Exception as exc:
+            logger.exception("delete_intake failed")
+            return (
+                {"ok": False, "error": str(exc)},
+                [],
+            )
+        reason = arguments.get("reason", "patient requested restart")
         return (
-            {"ok": True, **result},
-            [{"type": "tool_result", "name": name, "result": result}],
+            {"ok": True, "action": "redirect_intake_ui", "reason": reason},
+            [{
+                "type": "tool_result",
+                "name": name,
+                "result": {"action": "redirect_intake_ui", "reason": reason},
+            }],
         )
 
     if name == "fire_checkin_trigger":
@@ -312,6 +337,7 @@ async def chat_stream(
     protocol: dict[str, Any],
     trigger_executor: TriggerExecutor,
     max_iters: int = 3,
+    user_token: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """
     Drive a tool-using OpenAI chat completion. Yields the event protocol
@@ -413,7 +439,7 @@ async def chat_stream(
             yield {"type": "tool_call", "name": name, "arguments": arguments}
 
             result, extra_events = await _dispatch_tool(
-                name, arguments, trigger_executor
+                name, arguments, trigger_executor, user_token=user_token,
             )
             for ev in extra_events:
                 yield ev

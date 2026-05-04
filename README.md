@@ -49,7 +49,7 @@ cited evidence in the PR body.
 
 | Trigger button | Endpoint | What the agent does | UI artifact |
 |---|---|---|---|
-| `1 intake` | `POST /triggers/intake` | Initialize `protocol.yaml` from intake answers + matching `protocol-library/` entry | Current Protocol card populates |
+| `1 intake` | `POST /patient/interact` (auth) | Run the structured `IntakeAgent` chat in the intake modal; on completion auto-fire `PlanGenerationAgent`, which calls the CodingAgent to write `protocol.yaml` and open a PR | Intake modal → plan-gen modal streaming the AG2 trace → PR card |
 | `2 weekly plan` | `POST /triggers/weekly-cron` | Read current protocol, evaluate progression criteria against wearable trends, advance/hold per `.cursorrules` | Current Protocol card updates to next week |
 | `3 check-in` | `POST /triggers/checkin` | Append today's check-in to `log.yaml`, flag any trend that should trigger a follow-up | log entry visible in PR diff |
 | `4 symptom` | `POST /triggers/symptom` | Patch one exercise in `protocol.yaml` based on the symptom report, cite a regression entry | Current Protocol card shows the patched exercise |
@@ -58,8 +58,17 @@ Demo starts empty (`patient: null, phase: pending_intake, exercises: []`).
 Each flow's PR must be approved before the next flow runs, so the chain
 state propagates through `protocol.yaml` on `main`.
 
-The four flows can also be fired through chat (Coach Maya parses natural
-language and routes via `fire_*_trigger` tools).
+The frontend asks `GET /patient/me/intake-status` on auth-ready and routes
+to the right modal based on server-derived state (`needs_intake` →
+intake modal, `needs_plan` → plan-gen modal, `ready` → main UI). The
+`intake_records` row + `protocol_state.last_pr_url` are the source of truth;
+no localStorage flag drives the gating for authed users.
+
+Flows 2-4 can also be fired through chat (Coach Maya parses natural
+language and routes via `fire_*_trigger` tools). `fire_intake_trigger` is now
+a narrow admin escape hatch — it deletes the patient's intake row so the
+modal re-opens on next reload, and is only invoked when the patient explicitly
+asks to restart their intake.
 
 ## Stack
 
@@ -69,13 +78,24 @@ language and routes via `fire_*_trigger` tools).
   `supabase/migrations/` and auto-applies on push to main via Supabase's
   GitHub integration
 - **Auth**: Supabase Auth on the chat surface — HS256 JWT verified in
-  `backend/auth.py`, `auth.uid()` becomes the patient identifier server-side.
-  Slack/iOS shortcut flows still use the legacy UUID-bearer model
+  `backend/auth.py`, `auth.uid()` becomes the patient identifier server-side
 - **Backend**: FastAPI (Python 3.11+), serves both API and frontend
-- **Cloud agent**: Node helper wrapping `@cursor/sdk` (TypeScript-only SDK)
-  spawned as a subprocess from Python
-- **Chat coach**: OpenAI `gpt-4o-mini` via the `coach_chat` module
-- **Video coach (optional)**: Tavus CVI iframe
+- **Patient agents**: AG2 / Anthropic Claude Sonnet 4.6 — `IntakeAgent`
+  (structured 7-field intake) and `PlanGenerationAgent` (loads intake +
+  wearables + KB, calls the CodingAgent to write `protocol.yaml` + open PR).
+  Wired to the frontend through `POST /patient/interact` and the intake +
+  plan-gen modals
+- **Cloud coding agent**: AG2 (`AGENT_PROVIDER=ag2`) is the default live
+  path; Cursor SDK / Cursor GitHub mention available as alternates;
+  `cached_replay` is the silent demo fallback
+- **Chat coach**: OpenAI `gpt-4o-mini` via the `coach_chat` module — covers
+  ongoing coaching after the plan exists. Fires `fire_symptom_trigger`,
+  `fire_checkin_trigger`, `fire_weekly_plan_trigger`, and the
+  intake-restart admin escape hatch `fire_intake_trigger`
+- **Form-check (in-browser)**: MediaPipe Pose Landmarker + custom rep
+  counter; per-set summaries POST to `/pose/session` (one row per set)
+- **Video coach (optional)**: Tavus CVI iframe — narrative layer only,
+  not an intake/checkin agent
 - **Wearables**: Apple Health via iOS Shortcut → `/health-sync`, with Open
   Wearables as an optional read-only source
 - **Frontend**: Vanilla JS, no build step
@@ -120,12 +140,22 @@ rehab-as-code/
   backend/
     main.py                        FastAPI app
     agents/
-      __init__.py                  factory keyed on AGENT_PROVIDER
-      base.py                      ABC + dataclasses (CodingAgent, TraceEvent)
-      cursor_sdk.py                spawns orchestrator/ subprocess
+      __init__.py                  factory keyed on AGENT_PROVIDER + patient
+                                   agent registry (intake, plan_generation)
+      base.py                      ABC + dataclasses (CodingAgent, PatientAgent,
+                                   TraceEvent, InvocationRequest, etc.)
+      ag2_agent.py                 default live coding-agent path (Anthropic
+                                   Claude + AG2 multi-agent: repo_reader,
+                                   protocol_editor, git_publisher)
+      cursor_sdk.py                alternate live path; spawns orchestrator/
       cursor_github.py             @cursor mention via gh CLI
-      cached_replay.py             replays JSON traces
+      cached_replay.py             replays JSON traces (silent demo fallback)
       mock.py                      scripted fake
+      intake_agent.py              PatientAgent — structured 7-field intake
+                                   chat surfaced through /patient/interact
+      plan_generation_agent.py     PatientAgent — loads intake + wearables +
+                                   KB, calls the CodingAgent, persists
+                                   protocol_state.last_pr_url
     cached_runs/
       intake.json                  pinned fallback trace per flow
       weekly_plan.json
@@ -157,9 +187,13 @@ rehab-as-code/
     .demo-snapshots/               snapshots for demo reset
     log.yaml                       check-in log (agent appends)
   frontend/
-    index.html                     dashboard
-    app.js                         SSE consumer + tool calls + Approve/Reset
-    style.css                      dark theme
+    index.html                     dashboard + intake modal + plan-gen modal
+                                   + auth overlay
+    app.js                         SSE consumer + tool calls + Approve/Reset +
+                                   patient state machine (refreshPatientState,
+                                   showIntakeModal, showPlanGenModal)
+    style.css                      dark theme + modal styles
+    pose.js                        in-browser MediaPipe form-check
   api/
     index.py                       Vercel entrypoint (re-exports backend/main.py)
   supabase/
@@ -228,7 +262,9 @@ Production: https://rehab-as-code-five.vercel.app
 | GET | `/calendar` | Today's calendar events |
 | POST | `/agent/invoke` | Fire an agent run; returns `invocation_id`, `pr_url`, `branch`, `provider` |
 | GET | `/agent/stream/{id}` | SSE stream of TraceEvents |
-| POST | `/triggers/{intake,weekly-cron,checkin,symptom}` | Funnel into `_invoke_with_fallback` |
+| POST | `/triggers/{weekly-cron,checkin,symptom}` | Funnel into `_invoke_with_fallback` |
+| POST | `/patient/interact` | Auth-gated. Drives the IntakeAgent → PlanGenerationAgent flow that backs the intake + plan-gen modals. `metadata.force = "plan_generation"` re-runs plan generation |
+| GET | `/patient/me/intake-status` | Auth-gated. Returns `state ∈ {needs_intake, needs_plan, ready}` so the frontend can route to the right modal |
 | POST | `/pr/apply` | Mark draft ready then `gh pr merge --squash` (the Approve gesture) |
 | POST | `/demo/reset` | Rewrite `protocol.yaml` to `pending_intake` via GitHub contents API |
 | POST | `/chat` | OpenAI chat; tools include `fire_intake_trigger` etc. **Requires `Authorization: Bearer <supabase_jwt>` header** |
