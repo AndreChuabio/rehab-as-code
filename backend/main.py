@@ -880,6 +880,79 @@ async def chat(req: ChatRequest):
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
+# ── Patient Journey Agent endpoints ──────────────────────────────────────────
+
+
+class PatientInteractionRequest(BaseModel):
+    slack_user_id: str | None = None
+    token: str | None = None        # omit on first contact; session manager creates it
+    message: str
+    metadata: dict = {}
+
+
+@app.post("/patient/interact")
+async def patient_interact(req: PatientInteractionRequest):
+    """Entry point for all patient agent interactions.
+
+    Routes through SessionManagerAgent → domain agent.
+    Returns the domain agent's PatientResponse as JSON.
+    """
+    from agents import get_patient_agent, PatientRequest
+
+    sm = get_patient_agent("session_manager")
+    patient_req = PatientRequest(
+        user_token=req.token or "",
+        message=req.message,
+        slack_user_id=req.slack_user_id,
+        metadata=req.metadata,
+    )
+    sm_response = await sm.handle(patient_req)
+
+    if not sm_response.next_agent:
+        return {
+            "agent": sm_response.agent_name,
+            "message": sm_response.message,
+            "next_agent": None,
+            "data": sm_response.data,
+            "artifacts": sm_response.artifacts,
+        }
+
+    domain_agent = get_patient_agent(sm_response.next_agent)
+    patient_req.user_token = sm_response.data.get("user_token", patient_req.user_token)
+    patient_req.metadata.update(sm_response.data)
+
+    domain_response = await domain_agent.handle(patient_req)
+    return {
+        "agent": domain_response.agent_name,
+        "message": domain_response.message,
+        "next_agent": domain_response.next_agent,
+        "data": domain_response.data,
+        "artifacts": domain_response.artifacts,
+        "user_token": patient_req.user_token,
+    }
+
+
+@app.get("/patient/{token}/status")
+def patient_status(token: str):
+    """Return a summary of the patient's current state."""
+    import user_store as us
+    user = us.load_user(token)
+    if not user:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="unknown token")
+    ps = user.get("protocol_state") or {}
+    return {
+        "token": token,
+        "patient_name": user.get("patient_name"),
+        "has_intake": user.get("intake") is not None,
+        "has_protocol": ps != {},
+        "session_count": len(user.get("session_history", [])),
+        "current_phase": ps.get("current_phase"),
+        "current_week": ps.get("current_week"),
+        "last_pr_url": ps.get("last_pr_url"),
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
