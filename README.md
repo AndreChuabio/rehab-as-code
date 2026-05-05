@@ -1,13 +1,14 @@
 # RehabAsCode
 
-Rehab protocols as code. A Cursor cloud agent reads the patient's wearables
-and current protocol, opens a PR with reasoning and library citations, and a
-clinician approves it from the chat. Coach Maya (a GPT-4o chat persona, with
-Tavus video as an optional surface) walks the patient through the result.
+Rehab protocols as code. A cloud coding agent (AG2 multi-agent pipeline by
+default; Cursor SDK as an alternate) reads the patient's wearables and current
+protocol, opens a PR with reasoning and library citations, and a clinician
+approves it from the chat. Coach Maya (a GPT-4o chat persona, with Tavus video
+as an optional surface) walks the patient through the result.
 
 Built at Slop Con NYC 2026-05-02. Now in production: deployed on Vercel,
-backed by Supabase Postgres + Supabase Auth (HS256 JWT) for the chat surface.
-Live at https://rehab-as-code-five.vercel.app.
+backed by Supabase Postgres + Supabase Auth (HS256 JWT, magic-link sign-in)
+for the patient-scoped surfaces. Live at https://rehab-as-code-five.vercel.app.
 
 ## How it works
 

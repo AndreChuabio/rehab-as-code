@@ -6,12 +6,13 @@ the agent's PRs and the app code share one repo and one audit trail.
 
 ## What this directory is
 
-The current week's protocol lives in `protocol.yaml`. Cursor cloud agents
-read the patient's wearable data (under `data/`) and reported symptoms,
-consult `protocol-library/` for evidence-based progressions, and open
-draft PRs that update `protocol.yaml`. The clinician approves each PR
-from the RehabAsCode UI (which calls `POST /pr/apply` to squash-merge it
-onto main); the next flow's agent then reads the updated state.
+The current week's protocol lives in `protocol.yaml`. The cloud coding agent
+(AG2 multi-agent pipeline by default; Cursor SDK as an alternate) reads the
+patient's wearable data (under `data/`) and reported symptoms, consults
+`protocol-library/` for evidence-based progressions, and opens draft PRs
+that update `protocol.yaml`. The clinician approves each PR from the
+RehabAsCode UI (which calls `POST /pr/apply` to squash-merge it onto main);
+the next flow's agent then reads the updated state.
 
 This is **rehab as code**: every change to the program is a commit, every
 weekly progression is a reviewable diff, every adjustment cites the

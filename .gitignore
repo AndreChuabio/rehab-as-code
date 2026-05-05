@@ -64,3 +64,4 @@ Thumbs.db
 users/
 .vercel
 .env*.local
+.mcp.json

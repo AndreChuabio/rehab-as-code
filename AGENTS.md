@@ -68,9 +68,11 @@ it from the UI.
 
 The repo IS the message bus. Don't add side channels.
 
-**Stack**: FastAPI · `@cursor/sdk` (TypeScript, wrapped by a Node helper) ·
-OpenAI gpt-4o-mini (chat) · Anthropic (context) · Tavus CVI (optional
-video) · vanilla JS frontend.
+**Stack**: FastAPI · AG2 (multi-agent pipeline, default coding-agent path,
+Anthropic Claude Sonnet 4.6) · `@cursor/sdk` (TypeScript, wrapped by a Node
+helper, alternate live path) · OpenAI gpt-4o-mini (chat) · Supabase Postgres
++ Supabase Auth (HS256 JWT, magic-link sign-in) · Tavus CVI (optional video)
+· vanilla JS frontend · Vercel hosting.
 
 ## Repo layout
 
@@ -135,8 +137,9 @@ reflects which one actually ran.
 
 | Provider | Notes |
 |---|---|
-| `cursor_sdk` | Live primary. Spawns `tsx orchestrator/src/orchestrator.ts` via subprocess. Requires `CURSOR_API_KEY` and `cd orchestrator && npm install`. |
-| `cached_replay` | Replays JSON from `backend/cached_runs/{flow}.json`. Default fallback. |
+| `ag2` | Default live path. AG2 multi-agent pipeline (repo_reader → protocol_editor → git_publisher) backed by Anthropic Claude Sonnet 4.6. Requires `ANTHROPIC_API_KEY`. |
+| `cursor_sdk` | Alternate live path. Spawns `tsx orchestrator/src/orchestrator.ts` via subprocess. Requires `CURSOR_API_KEY` and `cd orchestrator && npm install`. |
+| `cached_replay` | Replays JSON from `backend/cached_runs/{flow}.json`. Default fallback when env is unset and the silent safety net inside `_invoke_with_fallback()`. |
 | `cursor_github` | `@cursor` GitHub mention via gh CLI. Backup path. |
 | `mock` | Scripted fake, no network. Dev / unit tests. |
 
@@ -244,13 +247,20 @@ cannot uninstall. Run `pip install --ignore-installed pyjwt` before
   SSE stream and renders inline as a chat bubble; `streamPlanGenTrace`
   does the same thing for the plan-gen modal
 
-## Hackathon context
+## Origin and current posture
 
-- Built at Slop Con NYC 2026-05-02 (single day)
-- Two-person team (Andre + Nikki Hu)
-- Priority order: working demo > clean code > full features
-- `cursor_sdk` is the live primary path; `cached_replay` is the silent
-  safety net that catches anything that breaks live
-- The Approve and apply button is the visible clinician-gate gesture
-  for the pitch story; Cursor cloud agents auto-merge their own PRs
-  in seconds, so the Approve handler treats "already merged" as success
+- Built at Slop Con NYC 2026-05-02 (single day). Two-person team (Andre + Nikki Hu).
+- **Hackathon mode is over.** The repo is now in production posture: real
+  Supabase auth, real Postgres, real patients in scope. Priority order is
+  now patient safety > production reliability > velocity. Tests are
+  required for backend changes that mutate patient state. Migrations are
+  append-only. No silent fallbacks masking real bugs. See the project
+  CLAUDE.md for the full operating manual.
+- `ag2` is the default live coding-agent path; `cursor_sdk` is an alternate;
+  `cached_replay` is the silent safety net that catches anything that
+  breaks live. `cached_replay` should not be used to mask production bugs
+  — surface errors instead.
+- The Approve and apply button is the clinician safety gate. AG2 opens a
+  draft PR; Cursor cloud agents auto-merge their own PRs in seconds, so
+  the Approve handler treats "already merged" as success on the cursor
+  path. Don't add an auto-merge for clinical content.
