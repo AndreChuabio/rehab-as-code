@@ -29,11 +29,24 @@ const STEP_ROUTES = {
 // Route #intake to the structured modal for authed users; fall back to the
 // legacy demo-mode chat flow when there's no JWT (so the UI is still walkable
 // in demo mode without sign-in).
-function navigateToIntake() {
+//
+// IMPORTANT: this runs from routeFromHash() on DOMContentLoaded, which fires
+// before RehabAuth.init() has resolved the cached session. If we synchronously
+// check getJwt() at that moment we get null even for returning signed-in
+// users, and the legacy chat opens by mistake. So await the init first.
+async function navigateToIntake() {
+  setActiveStepBtn("intake");
+  try {
+    if (window.RehabAuth?.init) await window.RehabAuth.init();
+  } catch (_) {
+    // init failure is handled in bootstrapAuth (toast + overlay); fall through
+    // to legacy chat so the page is still walkable.
+  }
   const authed = !!window.RehabAuth?.getJwt?.();
   if (authed) {
-    showIntakeModal();
-    setActiveStepBtn("intake");
+    // refreshPatientState picks the right modal (#intakeModal vs #planGenModal)
+    // based on server state. Don't second-guess by opening intake unconditionally.
+    refreshPatientState().catch((e) => console.warn("state refresh failed", e));
   } else {
     triggerIntake();
   }
@@ -237,13 +250,27 @@ async function refreshPatientState({ openModalIfNeeded = true } = {}) {
   try {
     const res = await authedFetch(`${API_BASE}/patient/me/intake-status`);
     if (!res.ok) {
-      console.warn("intake-status fetch failed:", res.status);
+      const body = await res.text().catch(() => "");
+      console.warn("intake-status fetch failed:", res.status, body);
+      // Surface 401s loudly — usually means SUPABASE_JWT_SECRET is missing
+      // or wrong on the server. Without this toast the modal silently
+      // doesn't open and the user falls back to the legacy chat with no
+      // explanation.
+      if (res.status === 401) {
+        showToast(
+          "Auth check failed (401). Verify SUPABASE_JWT_SECRET in Vercel.",
+          "error",
+        );
+      } else {
+        showToast(`Patient state check failed (${res.status})`, "error");
+      }
       patientState = null;
       return null;
     }
     patientState = await res.json();
   } catch (e) {
     console.warn("intake-status error:", e);
+    showToast(`Couldn't load patient state: ${e.message || e}`, "error");
     patientState = null;
     return null;
   }
@@ -275,6 +302,15 @@ function showIntakeModal() {
   const log = document.getElementById("intakeLog");
   const fill = document.getElementById("intakeProgressFill");
   if (!modal) return;
+  // If the legacy demo chat was already running (e.g., the page loaded with
+  // #intake before auth resolved), tear it down so the modal isn't competing
+  // with a half-filled legacy conversation behind it.
+  if (typeof activeFlow !== "undefined" && activeFlow) {
+    activeFlow = null;
+    if (typeof updateFlowUI === "function") updateFlowUI(false);
+    if (typeof resetInputPlaceholder === "function") resetInputPlaceholder();
+    if (typeof clearChatLog === "function") clearChatLog();
+  }
   modal.hidden = false;
   if (log && log.childElementCount === 0) {
     intakeHistory = [];

@@ -1335,12 +1335,21 @@ body {
 }
 /* When pose UI is mounted inside the gallery-video-wrap, neutralize the
  * wrap's flex-centering / clipping so the toolbar + warnings + stage stack
- * vertically and stay visible. */
+ * vertically and stay visible. The child-video max-height: 340px cap
+ * (set on .gallery-video-wrap video for the regular gallery thumbnail)
+ * also has to be lifted, otherwise the side-by-side reference + webcam
+ * videos get pinned to 340px tall and the bottom half of the viewport
+ * goes empty. */
 .gallery-video-wrap:has(#poseRoot) {
   display: block;
   max-height: none;
   overflow: visible;
   background: transparent;
+}
+.gallery-video-wrap:has(#poseRoot) video,
+.gallery-video-wrap:has(#poseRoot) img {
+  max-height: none;
+  height: 100%;
 }
 #poseRoot {
   display: flex;
@@ -1474,6 +1483,10 @@ body.pose-active .chat-suggestions,
 body.pose-active .chat-header { display: none !important; }
 body.pose-active .agent-panel { display: none; }
 body.pose-active .main { max-width: none; padding: 16px 24px; }
+/* Let the pose-split claim full viewport-driven height. The gallery's
+   default overflow: hidden is fine for thumbnails but clips the form-check
+   videos when they ask for calc(100vh - 160px). */
+body.pose-active .exercise-gallery { overflow: visible; }
 .pose-split-ref {
   position: relative;
   background: #000;
