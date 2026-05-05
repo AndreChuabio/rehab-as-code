@@ -860,7 +860,23 @@ body {
   border-radius: var(--radius);
   padding: 18px;
 }
-.stage-chat .chat-card { padding: 18px 18px 16px; }
+/* Stretch the chat surface to claim real vertical real-estate. Without this,
+   the card sizes to content and looks tiny when only one bubble is visible
+   (e.g., the first turn of an intake). chat-log also flexes to fill the
+   gap so messages have room to scroll into. */
+.stage-chat { display: flex; flex-direction: column; }
+.stage-chat .chat-card {
+  padding: 18px 18px 16px;
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: calc(100vh - 240px);
+}
+.stage-chat .chat-card .chat-log {
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 280px;
+}
 .stage-video .video-container { padding: 0; min-height: 540px; }
 
 .video-hint {
@@ -1487,6 +1503,11 @@ body.pose-active .main { max-width: none; padding: 16px 24px; }
    default overflow: hidden is fine for thumbnails but clips the form-check
    videos when they ask for calc(100vh - 160px). */
 body.pose-active .exercise-gallery { overflow: visible; }
+/* The chat-card min-height (set above to keep regular intake feeling
+   substantial) would force a giant scroll area below the pose-split.
+   Pose owns the full pane while active. */
+body.pose-active .stage-chat .chat-card { min-height: 0; }
+body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .pose-split-ref {
   position: relative;
   background: #000;
