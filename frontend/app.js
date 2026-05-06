@@ -394,11 +394,14 @@ async function submitIntakeTurn(userText) {
 
     if (payload.intake_complete) {
       // IntakeAgent saved + already kicked plan_generation. Close intake,
-      // open plan-gen modal, surface the PR card if we already have one.
+      // open plan-gen modal, surface whichever artifact we have:
+      //   pending_protocol_id (PROTOCOL_WRITE_TARGET=supabase) → approve via DB
+      //   pr_url              (legacy github path)             → approve via /pr/apply
       closeIntakeModal();
       const inv = payload.data?.invocation_id || null;
       const pr = payload.data?.pr_url || null;
-      showPlanGenModal({ invocation_id: inv, pr_url: pr });
+      const pending = payload.data?.pending_protocol_id || null;
+      showPlanGenModal({ invocation_id: inv, pr_url: pr, pending_protocol_id: pending });
     }
   } catch (err) {
     console.error("intake turn failed:", err);
@@ -413,7 +416,7 @@ async function submitIntakeTurn(userText) {
   }
 }
 
-async function showPlanGenModal({ invocation_id = null, pr_url = null, kickoff = false } = {}) {
+async function showPlanGenModal({ invocation_id = null, pr_url = null, pending_protocol_id = null, kickoff = false } = {}) {
   const modal = document.getElementById("planGenModal");
   const trace = document.getElementById("planGenTrace");
   const prCard = document.getElementById("planGenPrCard");
@@ -426,8 +429,8 @@ async function showPlanGenModal({ invocation_id = null, pr_url = null, kickoff =
 
   appendPlanGenLine("[start]", "Calling plan generator…");
 
-  // If we don't already have an invocation, force one now.
-  if (!invocation_id && (kickoff || !pr_url)) {
+  // If we don't already have an invocation or a finished artifact, force one now.
+  if (!invocation_id && !pr_url && !pending_protocol_id) {
     try {
       const body = {
         message: "Generate my rehab plan.",
@@ -443,6 +446,7 @@ async function showPlanGenModal({ invocation_id = null, pr_url = null, kickoff =
       const payload = await res.json();
       invocation_id = payload.data?.invocation_id || null;
       pr_url = payload.data?.pr_url || pr_url;
+      pending_protocol_id = payload.data?.pending_protocol_id || pending_protocol_id;
       if (payload.message) appendPlanGenLine("[plan]", payload.message);
     } catch (err) {
       appendPlanGenLine("[fail]", `Plan generation failed: ${err.message || err}`, true);
@@ -452,11 +456,16 @@ async function showPlanGenModal({ invocation_id = null, pr_url = null, kickoff =
   if (invocation_id) {
     streamPlanGenTrace(invocation_id, () => {
       if (pr_url) renderPlanGenPr(pr_url);
+      if (pending_protocol_id) renderPlanGenPending(pending_protocol_id);
       if (cont) cont.hidden = false;
     });
   } else if (pr_url) {
     // Cached_replay returns pr_url directly with no streamable invocation.
     renderPlanGenPr(pr_url);
+    if (cont) cont.hidden = false;
+  } else if (pending_protocol_id) {
+    // Supabase write path: no streamable trace, the row is already pending.
+    renderPlanGenPending(pending_protocol_id);
     if (cont) cont.hidden = false;
   } else {
     if (cont) cont.hidden = false;
@@ -478,6 +487,55 @@ function renderPlanGenPr(prUrl) {
   if (!prCard) return;
   prCard.hidden = false;
   prCard.innerHTML = `<span>PR opened →</span> <a href="${prUrl}" target="_blank" rel="noopener">${prUrl}</a>`;
+}
+
+// Supabase write-path equivalent of renderPlanGenPr: a pending_review row in
+// the protocols table. Approve hits POST /protocols/{id}/approve which flips
+// the row to active in a transaction. Same UX shape as the GitHub Approve
+// button so the modal looks identical to today.
+function renderPlanGenPending(protocolId) {
+  const prCard = document.getElementById("planGenPrCard");
+  if (!prCard) return;
+  const safeId = escapeHtml(protocolId);
+  prCard.hidden = false;
+  prCard.innerHTML = `
+    <span>Protocol pending clinician review</span>
+    <button class="pr-approve-btn" data-protocol-id="${safeId}">Approve and apply</button>
+  `;
+  const btn = prCard.querySelector(".pr-approve-btn");
+  if (btn) {
+    btn.addEventListener("click", () => approvePendingProtocol(protocolId, btn));
+  }
+}
+
+async function approvePendingProtocol(protocolId, btn) {
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Applying...";
+  }
+  try {
+    const res = await authedFetch(`${API_BASE}/protocols/${encodeURIComponent(protocolId)}/approve`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.detail || `approve failed: ${res.status}`);
+    }
+    if (btn) {
+      btn.textContent = "Applied to active protocol";
+      btn.classList.add("applied");
+    }
+    loadProtocol();
+  } catch (e) {
+    console.error("approve failed", e);
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "Approve and apply";
+    }
+    showToast?.(`Approve failed: ${e.message}`, "error");
+  }
 }
 
 function streamPlanGenTrace(invocationId, onDone) {
