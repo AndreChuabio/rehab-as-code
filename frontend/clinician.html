@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RehabAsCode — Clinician Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <link rel="stylesheet" href="/static/clinician.css" />
+</head>
+<body class="clinician-body">
+  <header class="clinician-header">
+    <div class="clinician-header-title">
+      <span class="clinician-badge">Clinician</span>
+      <h1>Pending review</h1>
+    </div>
+    <div class="clinician-header-meta">
+      <span class="clinician-email" id="clinicianEmail"></span>
+      <button type="button" class="clinician-signout" id="clinicianSignout">Sign out</button>
+    </div>
+  </header>
+
+  <main class="clinician-main">
+    <aside class="clinician-queue">
+      <div class="clinician-queue-header">
+        <span id="queueCount">—</span> pending
+        <button type="button" class="clinician-refresh" id="queueRefresh">↻</button>
+      </div>
+      <ol class="clinician-queue-list" id="queueList"></ol>
+      <div class="clinician-queue-empty" id="queueEmpty" hidden>
+        Nothing to review.
+      </div>
+    </aside>
+
+    <section class="clinician-detail" id="clinicianDetail">
+      <div class="clinician-detail-empty" id="detailEmpty">
+        Select a pending protocol from the queue.
+      </div>
+      <article class="clinician-detail-body" id="detailBody" hidden>
+        <header class="clinician-detail-header">
+          <div>
+            <h2 id="detailPatient"></h2>
+            <div class="clinician-detail-sub" id="detailSub"></div>
+          </div>
+          <div class="clinician-detail-actions">
+            <button type="button" class="btn-reject" id="rejectBtn">Reject</button>
+            <button type="button" class="btn-approve" id="approveBtn">Approve</button>
+          </div>
+        </header>
+
+        <details class="clinician-context" open>
+          <summary>Patient context</summary>
+          <pre id="detailContext"></pre>
+        </details>
+
+        <div class="clinician-diff">
+          <div class="clinician-diff-col">
+            <div class="clinician-diff-label">Current active</div>
+            <pre id="diffActive"></pre>
+          </div>
+          <div class="clinician-diff-col">
+            <div class="clinician-diff-label">Proposed</div>
+            <pre id="diffProposed"></pre>
+          </div>
+        </div>
+
+        <div class="clinician-notes" id="notesBlock" hidden>
+          <label for="reviewNotes">Review notes <span id="notesRequired" hidden>(required)</span></label>
+          <textarea id="reviewNotes" rows="3" placeholder="Optional for approve, required for reject"></textarea>
+          <div class="clinician-notes-actions">
+            <button type="button" class="btn-cancel" id="notesCancel">Cancel</button>
+            <button type="button" class="btn-confirm" id="notesConfirm">Confirm</button>
+          </div>
+        </div>
+
+        <div class="clinician-toast" id="clinicianToast" hidden></div>
+      </article>
+    </section>
+  </main>
+
+  <script src="/static/auth.js"></script>
+  <script src="/static/clinician.js"></script>
+</body>
+</html>
