@@ -805,6 +805,89 @@ def apply_pr(req: ApplyPrRequest):
     return {"applied": True, "pr_number": pr_num}
 
 
+# ─── Supabase-backed protocol approval (Phase 2) ───────────────────────────
+#
+# These endpoints replace /pr/apply for the new write path. PlanGenerationAgent
+# under PROTOCOL_WRITE_TARGET=supabase inserts pending_review rows instead of
+# opening PRs; clinicians (or, in the demo, the patient self-approving) flip
+# them active here.
+#
+# Auth posture: require any authenticated user. The clinician role gate lands
+# in Phase 3 when the dashboard ships — at that point this becomes "must be
+# clinician OR self-approving in demo mode". Today the patient clicks an
+# Approve button on their own pending row, identical to today's /pr/apply UX.
+
+
+class ApproveProtocolRequest(BaseModel):
+    notes: str | None = None
+
+
+class RejectProtocolRequest(BaseModel):
+    notes: str
+
+
+@app.post("/protocols/{protocol_id}/approve")
+def approve_protocol(
+    protocol_id: str,
+    req: ApproveProtocolRequest,
+    user_id: str = Depends(current_user_id),
+):
+    """Promote a pending_review protocol to active. Transactional — supersedes
+    the previous active row in the same statement. Idempotency: re-calling
+    on an already-active row returns 409 (the unique partial index also
+    catches concurrent approvals)."""
+    import protocol_repo
+    try:
+        result = protocol_repo.approve(
+            protocol_id=protocol_id,
+            reviewed_by=user_id,
+            notes=req.notes,
+        )
+    except protocol_repo.ProtocolRepoError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        logger.exception("approve_protocol failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return {
+        "approved": True,
+        "protocol_id": result["id"],
+        "status": result["status"],
+        "reviewed_at": result["reviewed_at"].isoformat()
+        if result.get("reviewed_at") else None,
+    }
+
+
+@app.post("/protocols/{protocol_id}/reject")
+def reject_protocol(
+    protocol_id: str,
+    req: RejectProtocolRequest,
+    user_id: str = Depends(current_user_id),
+):
+    """Mark a pending_review protocol as rejected. Active row unchanged.
+    Notes required for the audit trail."""
+    import protocol_repo
+    try:
+        result = protocol_repo.reject(
+            protocol_id=protocol_id,
+            reviewed_by=user_id,
+            notes=req.notes,
+        )
+    except protocol_repo.ProtocolRepoError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        logger.exception("reject_protocol failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return {
+        "rejected": True,
+        "protocol_id": result["id"],
+        "status": result["status"],
+        "reviewed_at": result["reviewed_at"].isoformat()
+        if result.get("reviewed_at") else None,
+    }
+
+
 _EMPTY_PROTOCOL_TEMPLATE = """\
 # Awaiting patient intake.
 # Click "1 intake" in the app to begin onboarding. The cursor cloud agent
