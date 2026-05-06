@@ -684,7 +684,7 @@ async function loadProtocol() {
     return;
   }
   try {
-    const res = await fetch(`${API_BASE}/protocol`);
+    const res = await authedFetch(`${API_BASE}/protocol`);
     const data = await res.json();
     renderProtocol(data);
     const link = document.getElementById("repoLink");
@@ -1256,7 +1256,7 @@ async function renderPlanBuilder() {
 
   // Fetch exercises and inject rows
   try {
-    const res = await fetch(`${API_BASE}/protocol/exercises`);
+    const res = await authedFetch(`${API_BASE}/protocol/exercises`);
     if (!res.ok) throw new Error(`status ${res.status}`);
     const data = await res.json();
     const exercises = data.exercises || [];
@@ -1347,7 +1347,7 @@ async function showPlanWithApprove() {
   const log = document.getElementById("chatLog");
   if (!log) return;
   try {
-    const res = await fetch(`${API_BASE}/protocol/exercises`);
+    const res = await authedFetch(`${API_BASE}/protocol/exercises`);
     if (!res.ok) throw new Error(`status ${res.status}`);
     const data = await res.json();
     const exercises = data.exercises || [];
@@ -1469,7 +1469,7 @@ async function loadExerciseCards() {
     return;
   }
   try {
-    const res = await fetch(`${API_BASE}/protocol/exercises`);
+    const res = await authedFetch(`${API_BASE}/protocol/exercises`);
     if (!res.ok) throw new Error(`status ${res.status}`);
     const data = await res.json();
     render(data.exercises || []);
@@ -2254,7 +2254,7 @@ function removeFromToday(id) {
 // ---------------------------------------------------------------------------
 async function refreshProtocol() {
   try {
-    const res = await fetch(`${API_BASE}/protocol`);
+    const res = await authedFetch(`${API_BASE}/protocol`);
     const data = await res.json();
     renderProtocol(data);
   } catch (e) {
