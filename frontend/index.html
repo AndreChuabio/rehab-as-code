@@ -274,11 +274,13 @@
     </div>
   </div>
 
-  <!-- Header pill (signed-in identity + sign out), injected by app.js when
-       a session is active. -->
+  <!-- Always-visible auth pill. Shows current auth state and the matching
+       action: signed-in → sign out; demo mode → sign in; anonymous (no JWT,
+       no skip flag) → the overlay covers the page so the pill stays hidden. -->
   <div class="auth-pill" id="authPill" hidden>
+    <span class="auth-pill-dot" id="authPillDot" aria-hidden="true"></span>
     <span class="auth-pill-email" id="authPillEmail"></span>
-    <button type="button" class="auth-pill-signout" id="authPillSignout">Sign out</button>
+    <button type="button" class="auth-pill-action" id="authPillAction">Sign out</button>
   </div>
 
   <script>
