@@ -63,7 +63,7 @@ from user_store import (
     get_last_set_completion,
 )
 from shortcut_template import generate_shortcut
-from auth import current_user_id, optional_user_id
+from auth import current_user_id, is_clinician, optional_user_id, require_clinician_id
 import coach_chat
 import qrcode
 import qrcode.image.svg
@@ -109,6 +109,32 @@ def root():
     if index.exists():
         return FileResponse(str(index))
     return {"status": "ok", "app": "Wellness Coach AI"}
+
+
+@app.get("/clinician")
+def clinician_root():
+    """Serve the clinician dashboard. Auth is checked client-side via /me/role
+    (the dashboard JS redirects to / if the caller is not a clinician). This
+    route just serves the static HTML."""
+    page = FRONTEND_DIR / "clinician.html"
+    if page.exists():
+        return FileResponse(str(page))
+    raise HTTPException(status_code=404, detail="clinician dashboard not built")
+
+
+@app.get("/me/role")
+def me_role(user_id: str | None = Depends(optional_user_id)):
+    """Return the caller's role for client-side routing.
+
+    role=anonymous   no JWT
+    role=patient     authenticated, not in clinicians table
+    role=clinician   authenticated, in clinicians table
+    """
+    if not user_id:
+        return {"role": "anonymous", "user_id": None}
+    if is_clinician(user_id):
+        return {"role": "clinician", "user_id": user_id}
+    return {"role": "patient", "user_id": user_id}
 
 
 @app.get("/config")
@@ -824,6 +850,87 @@ class ApproveProtocolRequest(BaseModel):
 
 class RejectProtocolRequest(BaseModel):
     notes: str
+
+
+@app.get("/protocols/pending")
+def list_pending_protocols(
+    limit: int = Query(50, ge=1, le=200),
+    user_id: str = Depends(require_clinician_id),
+):
+    """Clinician dashboard queue. Returns pending_review rows newest-first
+    with the patient's display name (looked up from `users.patient_name`)
+    so the dashboard can render the list without a second roundtrip."""
+    import protocol_repo
+    import user_store
+
+    rows = protocol_repo.list_pending(limit=limit)
+    patient_lookup: dict[str, str | None] = {}
+    out = []
+    for row in rows:
+        token = row.get("token")
+        if token and token not in patient_lookup:
+            user = user_store.load_user(token) or {}
+            patient_lookup[token] = user.get("patient_name") or (
+                user.get("intake") or {}
+            ).get("name")
+        out.append({
+            "id": row["id"],
+            "token": token,
+            "patient_name": patient_lookup.get(token),
+            "phase": (row.get("payload") or {}).get("phase"),
+            "week": (row.get("payload") or {}).get("week"),
+            "created_by_agent": row.get("created_by_agent"),
+            "created_at": row["created_at"].isoformat()
+            if row.get("created_at") else None,
+        })
+    return {"pending": out}
+
+
+@app.get("/protocols/{protocol_id}")
+def get_protocol_detail(
+    protocol_id: str,
+    user_id: str = Depends(require_clinician_id),
+):
+    """Single protocol with the patient's currently-active row alongside,
+    for diff rendering. Returns 404 if not found."""
+    import protocol_repo
+    import user_store
+
+    target = protocol_repo.get(protocol_id)
+    if not target:
+        raise HTTPException(status_code=404, detail="protocol not found")
+    active = protocol_repo.get_active(target["token"])
+    if active and active["id"] == target["id"]:
+        # The target is itself the active row — no separate "previous active"
+        active_for_diff = None
+    else:
+        active_for_diff = active
+
+    user = user_store.load_user(target["token"]) or {}
+    return {
+        "target": _serialize_protocol_row(target),
+        "active": _serialize_protocol_row(active_for_diff) if active_for_diff else None,
+        "patient": {
+            "token": target["token"],
+            "patient_name": user.get("patient_name") or (
+                user.get("intake") or {}
+            ).get("name"),
+            "intake": user.get("intake"),
+            "recent_sessions": user_store.get_session_history(
+                target["token"], limit=5),
+        },
+    }
+
+
+def _serialize_protocol_row(row: dict | None) -> dict | None:
+    if not row:
+        return None
+    out = dict(row)
+    if out.get("created_at") and not isinstance(out["created_at"], str):
+        out["created_at"] = out["created_at"].isoformat()
+    if out.get("reviewed_at") and not isinstance(out["reviewed_at"], str):
+        out["reviewed_at"] = out["reviewed_at"].isoformat()
+    return out
 
 
 @app.post("/protocols/{protocol_id}/approve")

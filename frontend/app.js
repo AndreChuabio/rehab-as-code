@@ -124,6 +124,23 @@ function authedFetch(path, options = {}) {
   return fetch(path, { ...options, headers: hdrs });
 }
 
+// Role-based redirect: if the signed-in user is a clinician, send them to
+// /clinician. The patient/clinician views are completely separate pages so
+// nothing leaks across the role boundary in the DOM. This runs once per
+// auth event; non-clinicians silently stay on the patient page.
+async function maybeRedirectToClinician() {
+  try {
+    const res = await authedFetch(`${API_BASE}/me/role`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.role === "clinician") {
+      window.location.replace("/clinician");
+    }
+  } catch (e) {
+    console.warn("role check failed", e);
+  }
+}
+
 async function bootstrapAuth() {
   const overlay = document.getElementById("authOverlay");
   const pill    = document.getElementById("authPill");
@@ -170,6 +187,10 @@ async function bootstrapAuth() {
       localStorage.removeItem(AUTH_SKIP_KEY);
       showOverlay(false);
       showPill(window.RehabAuth.getUser());
+      // Role-based redirect: clinicians get the dashboard, patients stay
+      // here. Best-effort — failure to look up role just leaves the
+      // patient on / which is safe (clinician endpoints are 403-gated).
+      maybeRedirectToClinician();
       // Server-driven state machine: ask the backend whether this patient
       // needs intake / plan-gen / nothing, and route to the right modal.
       refreshPatientState().catch((e) => console.warn("state refresh failed", e));

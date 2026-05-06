@@ -119,3 +119,53 @@ async def optional_user_id(
         return await current_user_id(authorization)
     except HTTPException:
         return None
+
+
+# ── Clinician role gate ───────────────────────────────────────────────────────
+#
+# The `clinicians` table holds one row per Supabase auth user permitted to
+# review and approve patient protocols. This is intentionally a separate
+# DB table rather than a JWT custom claim — see migration
+# 20260506220000_clinicians_table.sql for the rationale.
+
+def is_clinician(user_id: str | None) -> bool:
+    """Return True if `user_id` has a row in the `clinicians` table.
+
+    Returns False (not raises) on missing DATABASE_URL or DB error so
+    public endpoints stay reachable when Postgres is down — the caller
+    decides whether the absence of a clinician role should be a 401/403.
+    """
+    if not user_id:
+        return False
+    dsn = os.getenv("DATABASE_URL", "").strip()
+    if not dsn:
+        return False
+    try:
+        import psycopg
+    except ImportError:
+        return False
+    try:
+        with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1 FROM clinicians WHERE user_id = %s LIMIT 1",
+                        (user_id,))
+            return cur.fetchone() is not None
+    except Exception as exc:
+        logger.warning("is_clinician check failed: %s", exc)
+        return False
+
+
+async def require_clinician_id(
+    authorization: str | None = Header(None),
+) -> str:
+    """
+    Required-clinician dependency. Returns auth.uid() if the JWT is valid
+    AND the user is in the `clinicians` table. Raises 401 on missing/invalid
+    JWT, 403 on authenticated-but-not-clinician.
+    """
+    user_id = await current_user_id(authorization)
+    if not is_clinician(user_id):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail="clinician role required",
+        )
+    return user_id
