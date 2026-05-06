@@ -157,9 +157,11 @@ async function bootstrapAuth() {
 
   function showOverlay(show) { if (overlay) overlay.hidden = !show; }
 
+  const setPwBtn = document.getElementById("authPillSetPw");
+
   // Three pill states:
-  //   "signed-in" → email + Sign out (clears storage + reloads)
-  //   "demo"      → "Demo mode" + Sign in (clears skip flag, reopens overlay)
+  //   "signed-in" → email + Set password + Sign out
+  //   "demo"      → "Demo mode" + Sign in
   //   "hidden"    → covered by overlay, pill stays hidden
   let pillMode = "hidden";
   function setPill(mode, user) {
@@ -170,14 +172,17 @@ async function bootstrapAuth() {
       action.textContent = "Sign out";
       action.className = "auth-pill-action auth-pill-action-signout";
       if (pillDot) pillDot.className = "auth-pill-dot auth-pill-dot-ok";
+      if (setPwBtn) setPwBtn.hidden = false;
       pill.hidden = false;
     } else if (mode === "demo") {
       pillEm.textContent = "Demo mode";
       action.textContent = "Sign in";
       action.className = "auth-pill-action auth-pill-action-signin";
       if (pillDot) pillDot.className = "auth-pill-dot auth-pill-dot-demo";
+      if (setPwBtn) setPwBtn.hidden = true;
       pill.hidden = false;
     } else {
+      if (setPwBtn) setPwBtn.hidden = true;
       pill.hidden = true;
     }
   }
@@ -278,12 +283,45 @@ async function bootstrapAuth() {
         // Successful sign-in fires onChange which closes the overlay and
         // shows the signed-in pill — no further UI work needed here.
       } catch (err) {
-        status.hidden = false;
-        status.textContent = `Sign-in failed: ${err.message || err}`;
-        status.className = "auth-status auth-status-err";
+        // "Invalid login credentials" is Supabase's catch-all for
+        // (a) account doesn't exist and (b) wrong password. Try signing
+        // up with the same email+password — if (a), it succeeds and the
+        // user is signed in. If (b) (account exists with different password
+        // or no password set), Supabase rejects with "User already
+        // registered", which we surface as a clearer error.
+        const msg = String(err.message || err).toLowerCase();
+        const isCredsErr = msg.includes("invalid login credentials")
+          || msg.includes("invalid_credentials");
+        if (isCredsErr) {
+          submit.textContent = "Creating account…";
+          try {
+            const result = await window.RehabAuth.signUp(v, pw);
+            // signUp may or may not return a session depending on whether
+            // email confirmation is required in Supabase project settings.
+            if (!result?.session) {
+              status.hidden = false;
+              status.textContent = `Account created — check ${v} for a confirmation link.`;
+              status.className = "auth-status auth-status-ok";
+            }
+            // If a session is returned, onChange handles the UI transition.
+          } catch (signupErr) {
+            const sm = String(signupErr.message || signupErr).toLowerCase();
+            status.hidden = false;
+            if (sm.includes("already registered") || sm.includes("user already")) {
+              status.textContent = "Account exists with a different password. Use 'Send magic link' to sign in, then set a new password from the menu.";
+            } else {
+              status.textContent = `Sign-up failed: ${signupErr.message || signupErr}`;
+            }
+            status.className = "auth-status auth-status-err";
+          }
+        } else {
+          status.hidden = false;
+          status.textContent = `Sign-in failed: ${err.message || err}`;
+          status.className = "auth-status auth-status-err";
+        }
       } finally {
         submit.disabled = false;
-        submit.textContent = "Sign in";
+        submit.textContent = "Sign in / Sign up";
         if (magicBtn) magicBtn.disabled = false;
       }
     });
@@ -325,6 +363,61 @@ async function bootstrapAuth() {
         localStorage.removeItem(AUTH_SKIP_KEY);
         setPill("hidden");
         showOverlay(true);
+      }
+    });
+  }
+
+  // Set-password modal: lets a signed-in user create or change a password
+  // via Supabase's updateUser. Solves the magic-link-only-account case —
+  // sign in once via magic link, set a password here, password sign-in
+  // works forever after.
+  const setPwModal  = document.getElementById("setPwModal");
+  const setPwInput  = document.getElementById("setPwInput");
+  const setPwSave   = document.getElementById("setPwSave");
+  const setPwCancel = document.getElementById("setPwCancel");
+  const setPwStatus = document.getElementById("setPwStatus");
+  function openSetPw() {
+    if (!setPwModal) return;
+    if (setPwStatus) { setPwStatus.hidden = true; setPwStatus.textContent = ""; }
+    if (setPwInput) { setPwInput.value = ""; }
+    setPwModal.hidden = false;
+    setTimeout(() => setPwInput?.focus(), 50);
+  }
+  function closeSetPw() {
+    if (setPwModal) setPwModal.hidden = true;
+  }
+  if (setPwBtn) setPwBtn.addEventListener("click", openSetPw);
+  if (setPwCancel) setPwCancel.addEventListener("click", closeSetPw);
+  if (setPwSave) {
+    setPwSave.addEventListener("click", async () => {
+      const newPw = (setPwInput?.value || "").trim();
+      if (newPw.length < 6) {
+        if (setPwStatus) {
+          setPwStatus.hidden = false;
+          setPwStatus.textContent = "Password must be at least 6 characters.";
+          setPwStatus.className = "setpw-status setpw-status-err";
+        }
+        return;
+      }
+      setPwSave.disabled = true;
+      setPwSave.textContent = "Saving…";
+      try {
+        await window.RehabAuth.updatePassword(newPw);
+        if (setPwStatus) {
+          setPwStatus.hidden = false;
+          setPwStatus.textContent = "Password saved. Use it next sign-in.";
+          setPwStatus.className = "setpw-status setpw-status-ok";
+        }
+        setTimeout(closeSetPw, 1200);
+      } catch (err) {
+        if (setPwStatus) {
+          setPwStatus.hidden = false;
+          setPwStatus.textContent = `Couldn't save: ${err.message || err}`;
+          setPwStatus.className = "setpw-status setpw-status-err";
+        }
+      } finally {
+        setPwSave.disabled = false;
+        setPwSave.textContent = "Save";
       }
     });
   }

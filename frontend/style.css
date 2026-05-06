@@ -1847,6 +1847,100 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 .auth-pill-action-signin:hover { background: rgba(63, 182, 139, 0.26); }
 
+/* "Set password" mini-button on the signed-in pill. */
+.auth-pill-setpw {
+  background: rgba(80, 180, 220, 0.12);
+  border: 1px solid rgba(80, 180, 220, 0.4);
+  color: #50b4dc;
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.auth-pill-setpw:hover { background: rgba(80, 180, 220, 0.22); }
+.auth-pill-setpw[hidden] { display: none; }
+
+/* Set-password modal */
+.setpw-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: rgba(8, 12, 20, 0.78);
+  display: grid;
+  place-items: center;
+}
+.setpw-modal[hidden] { display: none; }
+.setpw-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 22px 24px;
+  width: min(420px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: var(--shadow);
+}
+.setpw-card h3 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text);
+}
+.setpw-blurb {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.setpw-card input[type="password"] {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-size: 14px;
+  color: var(--text);
+  font-family: inherit;
+}
+.setpw-card input[type="password"]:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+.setpw-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+.setpw-cancel, .setpw-save {
+  padding: 8px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  border: 1px solid transparent;
+}
+.setpw-cancel {
+  background: transparent;
+  border-color: var(--border);
+  color: var(--muted);
+}
+.setpw-cancel:hover { color: var(--text); }
+.setpw-save {
+  background: var(--accent);
+  color: #0d1117;
+}
+.setpw-save:hover:not(:disabled) { filter: brightness(1.08); }
+.setpw-save:disabled { opacity: 0.6; cursor: not-allowed; }
+.setpw-status {
+  font-size: 12px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--surface2);
+}
+.setpw-status-ok  { color: var(--accent); border: 1px solid rgba(63, 182, 139, 0.3); }
+.setpw-status-err { color: var(--danger); border: 1px solid rgba(248, 113, 113, 0.3); }
+
 /* ── Structured intake modal ────────────────────────────────────────────── */
 
 .intake-modal {
