@@ -46,7 +46,12 @@ from calendar_fetch import get_calendar_events
 from context_builder import build_system_prompt
 from tavus_client import create_conversation
 from agents import AgentInvocation, InvocationRequest, get_agent
-from protocol_loader import fetch_protocol, write_context_files, PROTOCOL_REPO
+from protocol_loader import (
+    fetch_protocol,
+    fetch_protocol_for_user,
+    write_context_files,
+    PROTOCOL_REPO,
+)
 import user_store
 from user_store import (
     create_token,
@@ -58,7 +63,7 @@ from user_store import (
     get_last_set_completion,
 )
 from shortcut_template import generate_shortcut
-from auth import current_user_id
+from auth import current_user_id, optional_user_id
 import coach_chat
 import qrcode
 import qrcode.image.svg
@@ -402,20 +407,27 @@ def serve_shortcut(token: str):
 
 
 @app.get("/protocol")
-def protocol():
+def protocol(user_id: str | None = Depends(optional_user_id)):
     """Return the current rehab protocol. Returns pending_intake state as-is so the
-    sidebar starts empty until the patient completes intake."""
-    p = fetch_protocol()
+    sidebar starts empty until the patient completes intake.
+
+    Optional auth: when called with a valid JWT and PROTOCOL_SOURCE=supabase
+    is set, returns the patient's active protocol from the `protocols` table.
+    Without auth (or with PROTOCOL_SOURCE=github), falls back to the legacy
+    single-tenant GitHub fetch."""
+    p = fetch_protocol_for_user(user_id) if user_id else fetch_protocol()
     return {"repo": PROTOCOL_REPO, "protocol": p}
 
 
 @app.get("/protocol/exercises")
-def protocol_exercises():
+def protocol_exercises(user_id: str | None = Depends(optional_user_id)):
     """Return protocol exercises enriched with KB video data for the Guided Exercise view.
-    Falls back to the week-4 demo snapshot when the live protocol has no exercises yet."""
+    Falls back to the week-4 demo snapshot when the live protocol has no exercises yet.
+
+    Optional auth: same per-user routing as `/protocol`."""
     import exercise_kb
     import yaml as _yaml
-    p = fetch_protocol()
+    p = fetch_protocol_for_user(user_id) if user_id else fetch_protocol()
     exercises_raw = p.get("exercises", [])
 
     # Demo fallback: if protocol is still pending or has no exercises, use the snapshot
@@ -968,7 +980,7 @@ async def chat(req: ChatRequest, user_id: str = Depends(current_user_id)):
     """
     ensure_user(user_id)
     health = get_health_data()
-    protocol_payload = fetch_protocol() or {}
+    protocol_payload = fetch_protocol_for_user(user_id) or {}
     recent_set = get_last_set_completion(user_id)
     if recent_set:
         protocol_payload["_recent_set"] = recent_set
