@@ -253,9 +253,10 @@
        form-check are inert until a JWT is present. -->
   <div class="auth-overlay" id="authOverlay" hidden>
     <div class="auth-card">
-      <h2>Sign in to RehabAsCode</h2>
+      <h2>Sign in or sign up</h2>
       <p class="auth-blurb">
-        Enter email + password, or leave password blank for a magic link.
+        New here? Pick a password — your account is created on first sign in.
+        Returning? Enter your password. Forgot it? Leave blank for a magic link.
       </p>
       <form id="authForm">
         <input
@@ -271,7 +272,7 @@
           placeholder="password (optional)"
           autocomplete="current-password"
         />
-        <button type="submit" id="authSubmit">Sign in</button>
+        <button type="submit" id="authSubmit">Sign in / Sign up</button>
         <button type="button" id="authMagicLink" class="auth-secondary">
           Send magic link instead
         </button>
@@ -284,12 +285,38 @@
   </div>
 
   <!-- Always-visible auth pill. Shows current auth state and the matching
-       action: signed-in → sign out; demo mode → sign in; anonymous (no JWT,
-       no skip flag) → the overlay covers the page so the pill stays hidden. -->
+       action: signed-in → sign out (+ Set password); demo mode → sign in;
+       anonymous (no JWT, no skip flag) → the overlay covers the page so
+       the pill stays hidden. -->
   <div class="auth-pill" id="authPill" hidden>
     <span class="auth-pill-dot" id="authPillDot" aria-hidden="true"></span>
     <span class="auth-pill-email" id="authPillEmail"></span>
+    <button type="button" class="auth-pill-setpw" id="authPillSetPw" hidden>
+      Set password
+    </button>
     <button type="button" class="auth-pill-action" id="authPillAction">Sign out</button>
+  </div>
+
+  <!-- Set/change password modal. Shown when the signed-in user clicks the
+       "Set password" affordance on the pill. Calls RehabAuth.updatePassword. -->
+  <div class="setpw-modal" id="setPwModal" hidden>
+    <div class="setpw-card">
+      <h3>Set or change password</h3>
+      <p class="setpw-blurb">
+        After this, you can sign in with email + password — no more magic links.
+      </p>
+      <input
+        type="password"
+        id="setPwInput"
+        placeholder="new password (min 6 chars)"
+        autocomplete="new-password"
+      />
+      <div class="setpw-actions">
+        <button type="button" class="setpw-cancel" id="setPwCancel">Cancel</button>
+        <button type="button" class="setpw-save" id="setPwSave">Save</button>
+      </div>
+      <div class="setpw-status" id="setPwStatus" hidden></div>
+    </div>
   </div>
 
   <script>

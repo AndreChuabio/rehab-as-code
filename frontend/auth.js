@@ -1,10 +1,12 @@
-// auth.js — Supabase sign-in (password or magic-link).
+// auth.js — Supabase sign-in (password, sign-up, or magic-link).
 //
 // Loads the Supabase JS client from the ESM CDN, fetches /config to get the
 // project URL + anon (publishable) key, and exposes a tiny API:
 //
 //   await window.RehabAuth.init()
 //   await window.RehabAuth.signInWithPassword(email, password)
+//   await window.RehabAuth.signUp(email, password)
+//   await window.RehabAuth.updatePassword(newPassword)   // signed-in only
 //   await window.RehabAuth.sendMagicLink(email)
 //   window.RehabAuth.getJwt()                  -> string | null
 //   window.RehabAuth.getUser()                 -> { id, email } | null
@@ -123,6 +125,32 @@
     return data;
   }
 
+  async function signUp(email, password) {
+    if (!client) await init();
+    const redirectTo = `${window.location.origin}${window.location.pathname}`;
+    const { data, error } = await client.auth.signUp({
+      email: String(email || "").trim(),
+      password: String(password || ""),
+      options: { emailRedirectTo: redirectTo },
+    });
+    if (error) throw error;
+    if (data?.session) setSession(data.session);
+    return data;
+  }
+
+  // Set or change the password for the *currently signed-in* user. Requires
+  // an active session; throws if none. Works for users created via magic-link
+  // who never set a password — sign in once via magic link, call this once,
+  // password sign-in works forever after.
+  async function updatePassword(password) {
+    if (!client) await init();
+    const { data, error } = await client.auth.updateUser({
+      password: String(password || ""),
+    });
+    if (error) throw error;
+    return data;
+  }
+
   async function signOut() {
     if (!client) return;
     await client.auth.signOut();
@@ -153,6 +181,8 @@
     init,
     sendMagicLink,
     signInWithPassword,
+    signUp,
+    updatePassword,
     signOut,
     getJwt,
     getUser,
