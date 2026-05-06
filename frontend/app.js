@@ -147,11 +147,13 @@ async function bootstrapAuth() {
   const pillEm  = document.getElementById("authPillEmail");
   const pillDot = document.getElementById("authPillDot");
   const action  = document.getElementById("authPillAction");
-  const form    = document.getElementById("authForm");
-  const email   = document.getElementById("authEmail");
-  const submit  = document.getElementById("authSubmit");
-  const status  = document.getElementById("authStatus");
-  const skipBtn = document.getElementById("authSkip");
+  const form     = document.getElementById("authForm");
+  const email    = document.getElementById("authEmail");
+  const password = document.getElementById("authPassword");
+  const submit   = document.getElementById("authSubmit");
+  const magicBtn = document.getElementById("authMagicLink");
+  const status   = document.getElementById("authStatus");
+  const skipBtn  = document.getElementById("authSkip");
 
   function showOverlay(show) { if (overlay) overlay.hidden = !show; }
 
@@ -228,27 +230,74 @@ async function bootstrapAuth() {
     }
   });
 
+  // The form's primary submit signs in with email+password if a password is
+  // filled; otherwise it falls back to sending a magic link. The "Send magic
+  // link instead" button always goes through magic-link regardless of what's
+  // in the password field — useful when the user genuinely doesn't have a
+  // password set yet.
+  async function sendMagicLinkFlow(v) {
+    submit.disabled = true;
+    if (magicBtn) magicBtn.disabled = true;
+    const prev = submit.textContent;
+    submit.textContent = "Sending…";
+    status.hidden = true;
+    try {
+      await window.RehabAuth.sendMagicLink(v);
+      status.hidden = false;
+      status.textContent = `Check ${v} for the magic link. Click it on this device.`;
+      status.className = "auth-status auth-status-ok";
+    } catch (err) {
+      status.hidden = false;
+      status.textContent = `Couldn't send link: ${err.message || err}`;
+      status.className = "auth-status auth-status-err";
+    } finally {
+      submit.disabled = false;
+      submit.textContent = prev;
+      if (magicBtn) magicBtn.disabled = false;
+    }
+  }
+
   if (form) {
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const v = (email.value || "").trim();
       if (!v) return;
+      const pw = (password?.value || "").trim();
+
+      if (!pw) {
+        await sendMagicLinkFlow(v);
+        return;
+      }
+
       submit.disabled = true;
-      submit.textContent = "Sending…";
+      if (magicBtn) magicBtn.disabled = true;
+      submit.textContent = "Signing in…";
       status.hidden = true;
       try {
-        await window.RehabAuth.sendMagicLink(v);
-        status.hidden = false;
-        status.textContent = `Check ${v} for the magic link. Click it on this device.`;
-        status.className = "auth-status auth-status-ok";
+        await window.RehabAuth.signInWithPassword(v, pw);
+        // Successful sign-in fires onChange which closes the overlay and
+        // shows the signed-in pill — no further UI work needed here.
       } catch (err) {
         status.hidden = false;
-        status.textContent = `Couldn't send link: ${err.message || err}`;
+        status.textContent = `Sign-in failed: ${err.message || err}`;
         status.className = "auth-status auth-status-err";
       } finally {
         submit.disabled = false;
-        submit.textContent = "Send magic link";
+        submit.textContent = "Sign in";
+        if (magicBtn) magicBtn.disabled = false;
       }
+    });
+  }
+  if (magicBtn) {
+    magicBtn.addEventListener("click", async () => {
+      const v = (email.value || "").trim();
+      if (!v) {
+        status.hidden = false;
+        status.textContent = "Enter your email first.";
+        status.className = "auth-status auth-status-err";
+        return;
+      }
+      await sendMagicLinkFlow(v);
     });
   }
   if (skipBtn) {

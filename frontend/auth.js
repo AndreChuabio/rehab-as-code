@@ -1,9 +1,10 @@
-// auth.js — Supabase magic-link sign-in.
+// auth.js — Supabase sign-in (password or magic-link).
 //
 // Loads the Supabase JS client from the ESM CDN, fetches /config to get the
 // project URL + anon (publishable) key, and exposes a tiny API:
 //
 //   await window.RehabAuth.init()
+//   await window.RehabAuth.signInWithPassword(email, password)
 //   await window.RehabAuth.sendMagicLink(email)
 //   window.RehabAuth.getJwt()                  -> string | null
 //   window.RehabAuth.getUser()                 -> { id, email } | null
@@ -111,6 +112,17 @@
     if (error) throw error;
   }
 
+  async function signInWithPassword(email, password) {
+    if (!client) await init();
+    const { data, error } = await client.auth.signInWithPassword({
+      email: String(email || "").trim(),
+      password: String(password || ""),
+    });
+    if (error) throw error;
+    if (data?.session) setSession(data.session);
+    return data;
+  }
+
   async function signOut() {
     if (!client) return;
     await client.auth.signOut();
@@ -137,5 +149,13 @@
     };
   }
 
-  window.RehabAuth = { init, sendMagicLink, signOut, getJwt, getUser, onChange };
+  window.RehabAuth = {
+    init,
+    sendMagicLink,
+    signInWithPassword,
+    signOut,
+    getJwt,
+    getUser,
+    onChange,
+  };
 })();

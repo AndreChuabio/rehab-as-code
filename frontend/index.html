@@ -255,7 +255,7 @@
     <div class="auth-card">
       <h2>Sign in to RehabAsCode</h2>
       <p class="auth-blurb">
-        Enter your email — we'll send you a magic link. No password.
+        Enter email + password, or leave password blank for a magic link.
       </p>
       <form id="authForm">
         <input
@@ -265,7 +265,16 @@
           autocomplete="email"
           required
         />
-        <button type="submit" id="authSubmit">Send magic link</button>
+        <input
+          type="password"
+          id="authPassword"
+          placeholder="password (optional)"
+          autocomplete="current-password"
+        />
+        <button type="submit" id="authSubmit">Sign in</button>
+        <button type="button" id="authMagicLink" class="auth-secondary">
+          Send magic link instead
+        </button>
       </form>
       <div class="auth-status" id="authStatus" hidden></div>
       <button type="button" class="auth-skip" id="authSkip">
