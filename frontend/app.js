@@ -145,7 +145,8 @@ async function bootstrapAuth() {
   const overlay = document.getElementById("authOverlay");
   const pill    = document.getElementById("authPill");
   const pillEm  = document.getElementById("authPillEmail");
-  const signOut = document.getElementById("authPillSignout");
+  const pillDot = document.getElementById("authPillDot");
+  const action  = document.getElementById("authPillAction");
   const form    = document.getElementById("authForm");
   const email   = document.getElementById("authEmail");
   const submit  = document.getElementById("authSubmit");
@@ -153,21 +154,42 @@ async function bootstrapAuth() {
   const skipBtn = document.getElementById("authSkip");
 
   function showOverlay(show) { if (overlay) overlay.hidden = !show; }
-  function showPill(user) {
+
+  // Three pill states:
+  //   "signed-in" → email + Sign out (clears storage + reloads)
+  //   "demo"      → "Demo mode" + Sign in (clears skip flag, reopens overlay)
+  //   "hidden"    → covered by overlay, pill stays hidden
+  let pillMode = "hidden";
+  function setPill(mode, user) {
+    pillMode = mode;
     if (!pill) return;
-    if (user) {
-      pillEm.textContent = user.email || "signed in";
+    if (mode === "signed-in") {
+      pillEm.textContent = user?.email || "signed in";
+      action.textContent = "Sign out";
+      action.className = "auth-pill-action auth-pill-action-signout";
+      if (pillDot) pillDot.className = "auth-pill-dot auth-pill-dot-ok";
+      pill.hidden = false;
+    } else if (mode === "demo") {
+      pillEm.textContent = "Demo mode";
+      action.textContent = "Sign in";
+      action.className = "auth-pill-action auth-pill-action-signin";
+      if (pillDot) pillDot.className = "auth-pill-dot auth-pill-dot-demo";
       pill.hidden = false;
     } else {
       pill.hidden = true;
     }
   }
+  function showPill(user) { setPill(user ? "signed-in" : (localStorage.getItem(AUTH_SKIP_KEY) === "1" ? "demo" : "hidden"), user); }
 
   // Render initial state synchronously so the overlay doesn't flash on every
   // returning visit. RehabAuth.init() will refine this when the SDK loads.
   const skipped = localStorage.getItem(AUTH_SKIP_KEY) === "1";
   const cachedJwt = localStorage.getItem("supabaseJwt");
   if (!cachedJwt && !skipped) showOverlay(true);
+  // If the user previously chose Demo mode, show the demo pill immediately
+  // so they always have a path back to sign-in. Refined again below once the
+  // Supabase SDK resolves the actual session.
+  if (skipped && !cachedJwt) setPill("demo");
 
   if (!window.RehabAuth) {
     console.warn("auth.js not loaded; running in unauthenticated mode");
@@ -233,12 +255,28 @@ async function bootstrapAuth() {
     skipBtn.addEventListener("click", () => {
       localStorage.setItem(AUTH_SKIP_KEY, "1");
       showOverlay(false);
+      setPill("demo");
       showToast("Demo mode — chat and form-check log won't save", "info");
     });
   }
-  if (signOut) {
-    signOut.addEventListener("click", async () => {
-      try { await window.RehabAuth.signOut(); } catch (_) {}
+  if (action) {
+    action.addEventListener("click", async () => {
+      if (pillMode === "signed-in") {
+        // Hard sign-out: clear all storage so we don't keep stale session data,
+        // then reload so the page boots from a clean slate.
+        try { await window.RehabAuth.signOut(); } catch (_) {}
+        try {
+          localStorage.removeItem(AUTH_SKIP_KEY);
+          localStorage.removeItem("supabaseJwt");
+        } catch (_) {}
+        window.location.reload();
+      } else if (pillMode === "demo") {
+        // Escape demo mode — drop the skip flag and re-open the auth overlay
+        // so the user can enter their email.
+        localStorage.removeItem(AUTH_SKIP_KEY);
+        setPill("hidden");
+        showOverlay(true);
+      }
     });
   }
 }

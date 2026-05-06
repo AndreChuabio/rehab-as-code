@@ -1796,6 +1796,39 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 .auth-pill-signout:hover { background: rgba(248, 113, 113, 0.22); }
 
+/* Status dot — green for signed-in, amber for demo-mode. */
+.auth-pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+.auth-pill-dot-ok   { background: #3fb68b; box-shadow: 0 0 6px rgba(63, 182, 139, 0.6); }
+.auth-pill-dot-demo { background: #f5b945; box-shadow: 0 0 6px rgba(245, 185, 69, 0.55); }
+
+/* Generic action button — variants below pick the colour. */
+.auth-pill-action {
+  border-radius: 999px;
+  padding: 3px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.auth-pill-action-signout {
+  background: rgba(248, 113, 113, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  color: var(--danger);
+}
+.auth-pill-action-signout:hover { background: rgba(248, 113, 113, 0.22); }
+.auth-pill-action-signin {
+  background: rgba(63, 182, 139, 0.14);
+  border: 1px solid rgba(63, 182, 139, 0.45);
+  color: var(--accent);
+}
+.auth-pill-action-signin:hover { background: rgba(63, 182, 139, 0.26); }
+
 /* ── Structured intake modal ────────────────────────────────────────────── */
 
 .intake-modal {
