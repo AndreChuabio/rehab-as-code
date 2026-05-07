@@ -530,6 +530,16 @@ async function refreshPatientState({ openModalIfNeeded = true } = {}) {
   // state -> copy mapping.
   renderReviewPill(patientState?.review_status || null);
 
+  // PR-M flow stitching: surface the "Start today's session" CTA when a
+  // protocol was recently approved and the patient hasn't started today
+  // yet. Decoupled from openModalIfNeeded — the CTA is an inline render,
+  // not a blocking modal, so it should refresh on every state poll.
+  // Errors are logged + swallowed; the CTA is a soft affordance and
+  // should never break the rest of refreshPatientState.
+  refreshTodaysFlowCTA().catch((e) =>
+    console.warn("refreshTodaysFlowCTA failed:", e),
+  );
+
   if (!openModalIfNeeded) return patientState;
 
   // We deliberately do NOT auto-open the intake or plan-gen modals based
@@ -3133,6 +3143,15 @@ function renderAutoCheckinCard({ sessionId, worstStatus, exerciseName }) {
     state.submitted = true;
     // Replace card body with a single confirmation row using Unicode check.
     card.innerHTML = `<div class="auto-checkin-logged">Logged. ✓</div>`;
+    // PR-M flow stitching: if the patient is mid-session (started via the
+    // post-approval CTA), chain the next-exercise prompt off the logged
+    // check-in. No-op when the patient triggered form-check standalone
+    // (todaysSessionState.active === false).
+    try {
+      advanceToNextExercise();
+    } catch (e) {
+      console.warn("advanceToNextExercise failed:", e);
+    }
   };
 
   async function doSubmit() {
@@ -3192,6 +3211,504 @@ async function postAutoCheckin(payload) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
+}
+
+// ── PR-M: Flow stitching after clinician approval ───────────────────────────
+//
+// After a clinician approves a draft protocol, walk the patient through
+// pick → guided → check-in as a single stepped flow rather than three
+// disconnected UI surfaces. Trigger condition:
+//
+//   review_status.state === "recently_approved"
+//   AND no /sessions/today rows have status === "completed"
+//
+// Architecture:
+//   * todaysSessionState holds the session position (in-memory; lost on
+//     reload — acceptable for v1, patient can pick up from the gallery).
+//   * The "Start today's session?" CTA renders both inline at the top of
+//     the chat scroll and inside the sidebar today-session card.
+//   * Click → fetch /protocol/exercises → render an in-chat picker.
+//   * Click an exercise (or "Start with first") → render its library card
+//     in chat AND auto-trigger the form-check button on it. Reuses
+//     renderExerciseCard + togglePoseFormCheck (no fork of the pose flow).
+//   * When the auto check-in card from PR-N logs successfully, advanceToNextExercise()
+//     fires the "Next exercise?" CTA (or workout-complete summary if done).
+//
+// PHI hygiene: console logs only carry session position + exercise_id.
+// Patient name / symptom text never reach the console.
+
+const _todaysSessionState = {
+  active: false,            // true once startTodaysSession() runs
+  exercises: [],            // [{id, name, default_dose, cues, ...}] from /protocol/exercises
+  currentIdx: 0,            // 0-based pointer into exercises
+  completedIds: [],         // exercise_ids the user finished + checked in for
+  skipPick: false,          // "Skip pick — start all" mode: skip intermediate picker
+  startedAtMs: null,        // performance.now() at startTodaysSession; powers totalTimeMin
+};
+
+// Pure helper. Given the current state, return the next exercise to play
+// (or null if done). Also returns whether the workout is complete.
+// Exposed on window.__flowHelpers for the unit test.
+function nextExerciseAfter(state) {
+  const exercises = state.exercises || [];
+  const nextIdx = (state.currentIdx ?? -1) + 1;
+  if (!exercises.length) return { done: true, exercise: null, nextIdx };
+  if (nextIdx >= exercises.length) return { done: true, exercise: null, nextIdx };
+  return { done: false, exercise: exercises[nextIdx], nextIdx };
+}
+
+// Pure helper. Normalize a /protocol/exercises payload into picker rows.
+// Filters out exercises without a usable id (defensive — every row should
+// have one, but if /protocol/exercises returns malformed data we skip
+// rather than render an unclickable card).
+function buildPickerItems(exercises) {
+  if (!Array.isArray(exercises)) return [];
+  return exercises
+    .filter((ex) => ex && (ex.id || ex.name))
+    .map((ex) => ({
+      id: ex.id || ex.name,
+      name: ex.name || ex.id || "exercise",
+      default_dose: ex.default_dose || ex.spec || "",
+      cues: ex.cues || [],
+      generated_video_url: ex.generated_video_url || "",
+      youtube_id: ex.youtube_id || "",
+      youtube_watch_url: ex.youtube_watch_url || "",
+      thumbnail_url: ex.thumbnail_url || "",
+    }));
+}
+
+if (typeof window !== "undefined") {
+  window.__flowHelpers = { nextExerciseAfter, buildPickerItems };
+}
+
+// Refresh the "Start today's session" CTA. Decides visibility from
+// patientState + today's session list; renders into both the chat scroll
+// and the sidebar today-session card. Idempotent — safe to call on every
+// patient-state poll.
+async function refreshTodaysFlowCTA() {
+  const sidebarSlot = document.getElementById("todaysFlowSidebarCTA");
+  const chatLog = document.getElementById("chatLog");
+
+  // Tear down stale CTAs first; we always rebuild from current state.
+  if (sidebarSlot) {
+    sidebarSlot.innerHTML = "";
+    sidebarSlot.hidden = true;
+  }
+  const existingChatCta = document.getElementById("todaysFlowChatCTA");
+  if (existingChatCta) existingChatCta.remove();
+
+  // Don't show the CTA mid-flow — once the patient clicks Start, the picker
+  // owns the chat scroll. The flow itself surfaces the next-exercise CTA.
+  if (_todaysSessionState.active) return;
+
+  const reviewState = patientState?.review_status?.state;
+  if (reviewState !== "recently_approved") return;
+
+  // Today's session: refresh if we don't already have a fresh mirror, then
+  // gate on completion count. If any row is completed today, the patient
+  // has already started — don't double-prompt.
+  if (window.RehabAuth?.getJwt?.()) {
+    try {
+      await refreshTodaySession();
+    } catch (e) {
+      console.warn("refreshTodaysFlowCTA: refreshTodaySession failed:", e);
+    }
+  }
+  const completedToday = todaySession.filter((s) => s.status === "completed").length;
+  if (completedToday > 0) return;
+
+  // Render inline CTA at the top of the chat scroll.
+  if (chatLog) {
+    const cta = document.createElement("div");
+    cta.id = "todaysFlowChatCTA";
+    cta.className = "todays-session-cta";
+    cta.innerHTML = `
+      <div class="todays-session-cta-title">Your plan is ready.</div>
+      <div class="todays-session-cta-sub">Start today's session?</div>
+      <button type="button" class="todays-session-cta-btn">Start session →</button>
+    `;
+    cta.querySelector("button").addEventListener("click", startTodaysSession);
+    // Insert right after the chat-empty placeholder if present, else prepend.
+    const empty = document.getElementById("chatEmpty");
+    if (empty && empty.parentElement === chatLog) {
+      empty.insertAdjacentElement("afterend", cta);
+    } else {
+      chatLog.insertBefore(cta, chatLog.firstChild);
+    }
+  }
+
+  // Mirror in the sidebar.
+  if (sidebarSlot) {
+    sidebarSlot.hidden = false;
+    sidebarSlot.innerHTML = `
+      <button type="button" class="todays-session-sidebar-btn">
+        Start today's session →
+      </button>
+    `;
+    sidebarSlot.querySelector("button").addEventListener("click", startTodaysSession);
+  }
+}
+
+// Click handler for both CTAs. Fetches the active protocol's exercises
+// from /protocol/exercises, populates _todaysSessionState, and renders
+// the in-chat picker. Surfaces a friendly toast on failure (no silent
+// fallback — an empty picker would confuse the patient).
+async function startTodaysSession() {
+  if (_todaysSessionState.active) return;
+  // Tear down the entry CTAs immediately so the picker has a clean slate.
+  const sidebarSlot = document.getElementById("todaysFlowSidebarCTA");
+  if (sidebarSlot) { sidebarSlot.hidden = true; sidebarSlot.innerHTML = ""; }
+  const chatCta = document.getElementById("todaysFlowChatCTA");
+  if (chatCta) chatCta.remove();
+
+  showCoachWorkingIndicator();
+  try {
+    const res = await authedFetch(`${API_BASE}/protocol/exercises`);
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const data = await res.json();
+    const items = buildPickerItems(data.exercises || []);
+    if (!items.length) {
+      hideCoachWorkingIndicator();
+      showToast("No exercises in your protocol yet — check back after your PT updates it.", "info");
+      return;
+    }
+    _todaysSessionState.active = true;
+    _todaysSessionState.exercises = items;
+    _todaysSessionState.currentIdx = -1;
+    _todaysSessionState.completedIds = [];
+    _todaysSessionState.skipPick = false;
+    _todaysSessionState.startedAtMs = (typeof performance !== "undefined" ? performance.now() : Date.now());
+    console.info("[flow-m] startTodaysSession exercises=%d", items.length);
+    hideCoachWorkingIndicator();
+    renderExercisePicker();
+  } catch (e) {
+    hideCoachWorkingIndicator();
+    console.warn("startTodaysSession failed:", e);
+    showToast(`Couldn't load today's plan: ${e.message || e}`, "error");
+  }
+}
+
+// Render the intermediate exercise picker into the chat scroll. Lists
+// every exercise in the active protocol with a checkbox-style row and
+// two affordances: "Start with first exercise →" and "Skip pick — start all".
+// The picker is the canonical entry into each guided session; clicking
+// any single exercise jumps directly to that one (and the rest of the
+// flow loops from there).
+function renderExercisePicker() {
+  const log = document.getElementById("chatLog");
+  if (!log) return;
+  // Drop any prior picker (re-renders happen if the patient bails + restarts).
+  const prev = document.getElementById("exercisePickerCard");
+  if (prev) prev.remove();
+
+  const card = document.createElement("div");
+  card.id = "exercisePickerCard";
+  card.className = "exercise-picker-card";
+
+  const items = _todaysSessionState.exercises;
+  const completed = new Set(_todaysSessionState.completedIds);
+  const remaining = items.filter((e) => !completed.has(e.id));
+  const total = items.length;
+  const doneCount = items.length - remaining.length;
+
+  const headline = doneCount === 0
+    ? `Today's plan: ${total} exercise${total === 1 ? "" : "s"}`
+    : `Today's plan: ${doneCount} of ${total} done — ${remaining.length} to go`;
+
+  const rows = items.map((ex) => {
+    const isDone = completed.has(ex.id);
+    const dose = ex.default_dose ? `<span class="picker-row-dose">${escapeHtml(ex.default_dose)}</span>` : "";
+    const checkGlyph = isDone ? "✓" : "";
+    return `
+      <button type="button" class="picker-row ${isDone ? "done" : ""}" data-ex-id="${escapeHtml(ex.id)}" ${isDone ? "disabled" : ""}>
+        <span class="picker-row-check" aria-hidden="true">${checkGlyph}</span>
+        <span class="picker-row-name">${escapeHtml(ex.name)}</span>
+        ${dose}
+      </button>
+    `;
+  }).join("");
+
+  card.innerHTML = `
+    <div class="exercise-picker-header">${escapeHtml(headline)}</div>
+    <div class="exercise-picker-list">${rows}</div>
+    <div class="exercise-picker-actions">
+      <button type="button" class="picker-action primary" id="pickerStartFirst">
+        ${doneCount === 0 ? "Start with first exercise →" : "Continue with next →"}
+      </button>
+      <button type="button" class="picker-action" id="pickerSkipPick">
+        Skip pick — start all
+      </button>
+      <button type="button" class="picker-action ghost" id="pickerBail">
+        Take a break, log later
+      </button>
+    </div>
+  `;
+
+  log.appendChild(card);
+
+  // Wire row clicks: jump straight to that exercise.
+  card.querySelectorAll(".picker-row").forEach((row) => {
+    row.addEventListener("click", () => {
+      const exId = row.dataset.exId;
+      const idx = items.findIndex((e) => e.id === exId);
+      if (idx < 0) return;
+      _todaysSessionState.currentIdx = idx - 1;  // launch advances by 1
+      _todaysSessionState.skipPick = false;
+      launchCurrentExercise();
+    });
+  });
+
+  card.querySelector("#pickerStartFirst").addEventListener("click", () => {
+    // Start with the first not-yet-completed exercise.
+    const firstUndoneIdx = items.findIndex((e) => !completed.has(e.id));
+    if (firstUndoneIdx < 0) {
+      // Everything done — bounce to the workout-complete card.
+      renderWorkoutComplete();
+      return;
+    }
+    _todaysSessionState.currentIdx = firstUndoneIdx - 1;
+    _todaysSessionState.skipPick = false;
+    launchCurrentExercise();
+  });
+
+  card.querySelector("#pickerSkipPick").addEventListener("click", () => {
+    const firstUndoneIdx = items.findIndex((e) => !completed.has(e.id));
+    if (firstUndoneIdx < 0) {
+      renderWorkoutComplete();
+      return;
+    }
+    _todaysSessionState.currentIdx = firstUndoneIdx - 1;
+    _todaysSessionState.skipPick = true;
+    launchCurrentExercise();
+  });
+
+  card.querySelector("#pickerBail").addEventListener("click", bailFlow);
+
+  scrollChatLog();
+}
+
+// Advance currentIdx by 1 and render that exercise's card + auto-open
+// the form-check. Called by both the picker (initial launch) and the
+// "Continue →" CTA (loop iteration).
+function launchCurrentExercise() {
+  const next = nextExerciseAfter(_todaysSessionState);
+  if (next.done) {
+    renderWorkoutComplete();
+    return;
+  }
+  _todaysSessionState.currentIdx = next.nextIdx;
+  const ex = next.exercise;
+  console.info("[flow-m] launchCurrentExercise idx=%d ex=%s", next.nextIdx, ex.id);
+
+  // Drop the picker — it'll re-render on next exercise advance.
+  const picker = document.getElementById("exercisePickerCard");
+  if (picker) picker.remove();
+
+  // Render the exercise card via the existing chat-card renderer. This
+  // automatically attaches "Add to today" + "Start guided form-check"
+  // (when EXERCISES has the id), so we get the full surface the same
+  // way the gallery would.
+  renderExerciseCard(ex);
+
+  // Auto-trigger the form-check button. We have to wait for the next
+  // tick because attachChatCardFormCheckBtn is sync but pose.init is
+  // async; clicking immediately works because togglePoseFormCheck
+  // handles the loading state internally.
+  setTimeout(() => {
+    // Find the most-recently-rendered exercise card with this id and
+    // click its form-check button. We don't tag the card with the id,
+    // so use lastElementChild that is .exercise-card.
+    const log = document.getElementById("chatLog");
+    if (!log) return;
+    const cards = log.querySelectorAll(".exercise-card");
+    const card = cards[cards.length - 1];
+    if (!card) {
+      console.warn("[flow-m] no exercise card found to auto-launch form-check");
+      return;
+    }
+    const btn = card.querySelector(".pose-form-check-btn");
+    if (!btn) {
+      // Pose registry doesn't have this exercise — that's expected for
+      // some library exercises (stationary_bike etc). Surface a nudge
+      // instead of silently leaving the patient stuck.
+      const nudge = document.createElement("div");
+      nudge.className = "flow-nudge";
+      nudge.innerHTML = `
+        <span>No guided form-check available for this exercise. Mark it done when finished.</span>
+        <button type="button" class="picker-action primary" id="flowMarkManualDone">Mark done</button>
+      `;
+      card.appendChild(nudge);
+      nudge.querySelector("#flowMarkManualDone").addEventListener("click", () => {
+        // No pose session, no auto check-in card. Mark complete + advance.
+        const exId = ex.id;
+        if (!_todaysSessionState.completedIds.includes(exId)) {
+          _todaysSessionState.completedIds.push(exId);
+        }
+        renderNextExerciseCTA();
+      });
+      return;
+    }
+    btn.click();
+  }, 0);
+
+  scrollChatLog();
+}
+
+// Called from renderAutoCheckinCard's renderLogged when a patient
+// finishes a check-in. If the flow is active, advance: mark current
+// exercise as completed, then either render the next-exercise CTA
+// (or skip straight to launching the next one in skipPick mode) or
+// render the workout-complete summary.
+function advanceToNextExercise() {
+  if (!_todaysSessionState.active) return;
+  const items = _todaysSessionState.exercises;
+  const idx = _todaysSessionState.currentIdx;
+  const current = items[idx];
+  if (current && !_todaysSessionState.completedIds.includes(current.id)) {
+    _todaysSessionState.completedIds.push(current.id);
+  }
+  console.info(
+    "[flow-m] advanceToNextExercise idx=%d done=%d/%d",
+    idx, _todaysSessionState.completedIds.length, items.length,
+  );
+
+  // All done?
+  if (_todaysSessionState.completedIds.length >= items.length) {
+    renderWorkoutComplete();
+    return;
+  }
+
+  // skipPick mode: jump directly to next exercise without an interstitial.
+  if (_todaysSessionState.skipPick) {
+    launchCurrentExercise();
+    return;
+  }
+
+  renderNextExerciseCTA();
+}
+
+function renderNextExerciseCTA() {
+  const log = document.getElementById("chatLog");
+  if (!log) return;
+  const items = _todaysSessionState.exercises;
+  const completed = new Set(_todaysSessionState.completedIds);
+  const justFinished = items[_todaysSessionState.currentIdx];
+  const nextIdx = items.findIndex((e) => !completed.has(e.id));
+  const next = nextIdx >= 0 ? items[nextIdx] : null;
+
+  if (!next) {
+    renderWorkoutComplete();
+    return;
+  }
+
+  const card = document.createElement("div");
+  card.className = "next-exercise-cta";
+  const finishedName = justFinished?.name || "exercise";
+  const nextName = next.name || "next exercise";
+  const nextDose = next.default_dose ? ` (${next.default_dose})` : "";
+  const position = `${_todaysSessionState.completedIds.length + 1} of ${items.length}`;
+
+  card.innerHTML = `
+    <div class="next-exercise-row">
+      <span class="next-exercise-check" aria-hidden="true">✓</span>
+      <span class="next-exercise-finished">${escapeHtml(finishedName)} complete</span>
+    </div>
+    <div class="next-exercise-prompt">
+      Next: ${escapeHtml(nextName)}${escapeHtml(nextDose)} (${escapeHtml(position)})?
+    </div>
+    <div class="next-exercise-actions">
+      <button type="button" class="picker-action primary" data-action="continue">Continue →</button>
+      <button type="button" class="picker-action ghost" data-action="bail">Take a break, log later</button>
+    </div>
+  `;
+
+  card.querySelector('[data-action="continue"]').addEventListener("click", () => {
+    card.remove();
+    // Move currentIdx to one before next so launchCurrentExercise advances onto it.
+    _todaysSessionState.currentIdx = nextIdx - 1;
+    launchCurrentExercise();
+  });
+  card.querySelector('[data-action="bail"]').addEventListener("click", bailFlow);
+
+  log.appendChild(card);
+  scrollChatLog();
+}
+
+function renderWorkoutComplete() {
+  const log = document.getElementById("chatLog");
+  if (!log) return;
+  const items = _todaysSessionState.exercises;
+  const totalDone = _todaysSessionState.completedIds.length;
+  const totalPlan = items.length;
+  const startedMs = _todaysSessionState.startedAtMs;
+  const nowMs = (typeof performance !== "undefined" ? performance.now() : Date.now());
+  const elapsedMin = startedMs ? Math.max(1, Math.round((nowMs - startedMs) / 60000)) : null;
+
+  // Pull form-warning summary from the last guided session if present —
+  // pose.js stores warnings on the session row, but we don't have a
+  // cross-session aggregator yet, so we just count the local state.
+  const summaryLines = [
+    `Today's session: ${totalDone} of ${totalPlan} exercise${totalPlan === 1 ? "" : "s"} ✓`,
+  ];
+  if (elapsedMin) summaryLines.push(`Total time: ${elapsedMin} min`);
+
+  const card = document.createElement("div");
+  card.className = "workout-complete-card";
+  card.innerHTML = `
+    <div class="workout-complete-title">Workout complete</div>
+    <div class="workout-complete-summary">
+      ${summaryLines.map((l) => `<div>${escapeHtml(l)}</div>`).join("")}
+    </div>
+    <div class="workout-complete-actions">
+      <button type="button" class="picker-action primary" id="workoutCompleteRecord">View today's record</button>
+    </div>
+  `;
+  card.querySelector("#workoutCompleteRecord").addEventListener("click", () => {
+    // Scroll the sidebar today-session card into view; that's the
+    // canonical "today's record" surface.
+    const todaySidebar = document.getElementById("todaySessionCard");
+    if (todaySidebar) todaySidebar.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+
+  log.appendChild(card);
+
+  // Reset flow state so the entry CTA is suppressed (completedToday > 0
+  // gates it via /sessions/today on next refresh).
+  _todaysSessionState.active = false;
+  _todaysSessionState.exercises = [];
+  _todaysSessionState.currentIdx = -1;
+  _todaysSessionState.completedIds = [];
+  _todaysSessionState.skipPick = false;
+  _todaysSessionState.startedAtMs = null;
+
+  // Refresh today-session sidebar mirror (status flags should be up to date
+  // from the /pose/session writes during the flow) and the CTA.
+  refreshTodaySession().catch(() => {});
+  refreshTodaysFlowCTA().catch(() => {});
+  scrollChatLog();
+}
+
+// Patient bails out mid-flow. We keep the completedIds (already persisted
+// via /sessions POSTs / /pose/session writes), drop the active flag so
+// the entry CTA can re-render on next refresh, and clear the in-flight
+// picker / next-CTA. Re-entry from the gallery still works.
+function bailFlow() {
+  console.info(
+    "[flow-m] bailFlow done=%d/%d",
+    _todaysSessionState.completedIds.length,
+    _todaysSessionState.exercises.length,
+  );
+  _todaysSessionState.active = false;
+  _todaysSessionState.skipPick = false;
+
+  const picker = document.getElementById("exercisePickerCard");
+  if (picker) picker.remove();
+  document.querySelectorAll(".next-exercise-cta").forEach((n) => n.remove());
+
+  showToast("Saved your progress. Pick up anytime from the exercise tab.", "info");
+  // Don't re-show the post-approval CTA right away — the patient just
+  // dismissed it. refreshTodaysFlowCTA() gates on completedToday from
+  // /sessions/today; the CTA returns naturally if zero completed today.
 }
 
 // "Coach Maya is on it" transient. Quick-action buttons + sendChat() both

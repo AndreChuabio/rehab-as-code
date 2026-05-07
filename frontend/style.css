@@ -2968,3 +2968,272 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   }
   .auto-checkin-scale { gap: 4px; }
 }
+
+/* ── PR-M: Flow-stitching CTAs and picker ─────────────────────────────────
+   Mobile-first. All interactive surfaces below have ≥40x40px tap targets.
+   Visual language matches the existing exercise-card / auto-checkin-card
+   tokens (var(--surface2), var(--border), var(--accent)).
+*/
+
+/* Top-of-chat "Start today's session" CTA. Renders when
+   review_status.state === "recently_approved" AND no completed sessions today.
+   Sits above the chat-empty placeholder, dropped into chatLog. */
+.todays-session-cta {
+  align-self: stretch;
+  background: linear-gradient(135deg, rgba(63, 182, 139, 0.14), rgba(63, 182, 139, 0.04));
+  border: 1px solid rgba(63, 182, 139, 0.4);
+  border-radius: 10px;
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex-shrink: 0;
+  animation: fadeIn 0.2s ease-out;
+}
+.todays-session-cta-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+.todays-session-cta-sub {
+  font-size: 13px;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.todays-session-cta-btn {
+  align-self: flex-start;
+  background: var(--accent);
+  color: #0d1117;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 40px;
+  transition: filter 0.12s ease;
+}
+.todays-session-cta-btn:hover { filter: brightness(1.08); }
+.todays-session-cta-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Sidebar mirror of the same CTA. Lighter footprint — single button. */
+.todays-session-sidebar-cta { margin-bottom: 10px; }
+.todays-session-sidebar-btn {
+  width: 100%;
+  background: var(--accent);
+  color: #0d1117;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 40px;
+}
+.todays-session-sidebar-btn:hover { filter: brightness(1.08); }
+
+/* In-chat exercise picker. Shows when the patient clicks the entry CTA.
+   Lists every protocol exercise; row click jumps to that exercise. */
+.exercise-picker-card {
+  align-self: stretch;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex-shrink: 0;
+  animation: fadeIn 0.2s ease-out;
+}
+.exercise-picker-header {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.exercise-picker-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.picker-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  text-align: left;
+  cursor: pointer;
+  min-height: 44px;
+  color: var(--text);
+  font-size: 14px;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.picker-row:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: rgba(63, 182, 139, 0.06);
+}
+.picker-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.picker-row:disabled,
+.picker-row.done {
+  cursor: default;
+  opacity: 0.55;
+}
+.picker-row-check {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  min-height: 22px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--accent);
+  font-weight: 700;
+}
+.picker-row.done .picker-row-check {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #0d1117;
+}
+.picker-row-name { flex: 1; font-weight: 500; }
+.picker-row-dose {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.exercise-picker-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.picker-action {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  min-height: 40px;
+  transition: border-color 0.12s ease, background 0.12s ease;
+}
+.picker-action:hover { border-color: var(--accent); }
+.picker-action:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.picker-action.primary {
+  background: var(--accent);
+  color: #0d1117;
+  border-color: var(--accent);
+  font-weight: 600;
+}
+.picker-action.primary:hover { filter: brightness(1.08); }
+.picker-action.ghost { color: var(--muted); }
+
+/* "Next exercise?" CTA between guided sessions. */
+.next-exercise-cta {
+  align-self: stretch;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 0;
+  animation: fadeIn 0.2s ease-out;
+}
+.next-exercise-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.next-exercise-check {
+  color: var(--accent);
+  font-weight: 700;
+}
+.next-exercise-finished { color: var(--text); }
+.next-exercise-prompt {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.next-exercise-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+/* Workout-complete celebration card. Shown after the final check-in logs. */
+.workout-complete-card {
+  align-self: stretch;
+  background: linear-gradient(135deg, rgba(63, 182, 139, 0.18), rgba(63, 182, 139, 0.04));
+  border: 1px solid rgba(63, 182, 139, 0.5);
+  border-radius: 10px;
+  padding: 16px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  flex-shrink: 0;
+  animation: fadeIn 0.2s ease-out;
+}
+.workout-complete-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+}
+.workout-complete-summary {
+  font-size: 13px;
+  color: var(--text);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.workout-complete-summary div { color: var(--muted); }
+.workout-complete-summary div:first-child { color: var(--text); font-weight: 600; }
+.workout-complete-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Inline nudge when an exercise has no pose-form-check available. */
+.flow-nudge {
+  margin-top: 10px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+@media (max-width: 480px) {
+  .todays-session-cta { padding: 14px 12px; }
+  .todays-session-cta-btn { width: 100%; }
+  .exercise-picker-card { padding: 12px; }
+  .picker-row { padding: 12px; min-height: 48px; font-size: 13px; }
+  .picker-action { width: 100%; }
+  .exercise-picker-actions { flex-direction: column; }
+  .next-exercise-actions { flex-direction: column; }
+  .next-exercise-actions .picker-action { width: 100%; }
+  .flow-nudge { flex-direction: column; align-items: stretch; }
+}

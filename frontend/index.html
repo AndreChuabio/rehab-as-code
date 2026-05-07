@@ -46,6 +46,12 @@
         <section class="card today-session-card" id="todaySessionCard"
                  style="display:none">
           <h3>Today's Session</h3>
+          <!-- PR-M flow-stitching: post-approval "Start today's session" CTA.
+               Mirrors the chat-scroll CTA at #todaysFlowChatCTA. Both fire the
+               same handler (startTodaysSession). Hidden until refreshPatientState
+               sees review_status.state === "recently_approved" AND today has no
+               completed sessions. -->
+          <div class="todays-session-sidebar-cta" id="todaysFlowSidebarCTA" hidden></div>
           <ul class="today-session-list" id="todaySessionList"></ul>
           <p class="today-session-hint">
             Logged to your record. Reviewed by your clinician.
