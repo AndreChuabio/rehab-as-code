@@ -871,3 +871,20 @@
   color: var(--muted);
   font-size: 12px;
 }
+
+/* PR-T2: dim sessions whose body_region differs from the patient's
+   currently-active protocol. Adherence-as-history — we show the row
+   but make clear it's not part of the current plan. Uses the Clinical
+   Twilight ai-bg token for the left border so out-of-region rows read
+   as "system context," not as a warning state. */
+.session-item.out-of-region {
+  opacity: 0.55;
+  border-left: 2px solid var(--ai-bg);
+  padding-left: 8px;
+}
+.session-region-tag {
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+  margin-left: 6px;
+}

@@ -4160,6 +4160,12 @@ async function refreshTodaySession() {
       status: s.status,
       planned_sets: s.planned_sets,
       planned_reps: s.planned_reps,
+      // PR-T2: enrichment fields. is_current_region tells the renderer
+      // whether to dim + label the row as "from a prior protocol." We
+      // preserve the body_region literal so the label can show "prior:
+      // knee" rather than just a generic dim.
+      body_region: s.body_region || null,
+      is_current_region: s.is_current_region === true,
     }));
     renderTodaySession();
   } catch (e) {
@@ -4242,9 +4248,18 @@ function renderTodaySession() {
         e.status === "in_progress" ? "..." :
         e.status === "skipped" ? "—" : "";
       const statusClass = e.status || "planned";
+      // PR-T2: dim + label rows where the exercise's body_region differs
+      // from the active protocol's. is_current_region===false means
+      // either the row is from a prior protocol (different region) or
+      // there's no active protocol at all. We render a small inline
+      // tag so the patient understands why a stale row is showing
+      // through dimmed.
+      const outOfRegionClass = e.is_current_region ? "" : " out-of-region";
+      const regionTag = e.is_current_region ? "" : `
+      <span class="today-session-region-tag">prior: ${escapeHtml(e.body_region || "unknown")}</span>`;
       return `
-    <li class="today-session-item ${statusClass}">
-      <span class="today-session-name">${escapeHtml(friendly)}</span>
+    <li class="today-session-item ${statusClass}${outOfRegionClass}">
+      <span class="today-session-name">${escapeHtml(friendly)}</span>${regionTag}
       <span class="today-session-status">${escapeHtml(statusGlyph)}</span>
       <button class="today-session-remove"
               onclick="markSessionSkipped('${escapeHtml(e.id)}')"
