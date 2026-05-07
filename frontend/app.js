@@ -1862,8 +1862,13 @@ function speakNow(text) {
 function parseSetsReps(doseStr) {
   if (!doseStr) return { sets: 1, reps: null };
   const s = String(doseStr);
-  const m = s.match(/(\d+)\s*[x×]\s*(\d+)/i);
-  if (m) return { sets: parseInt(m[1], 10), reps: parseInt(m[2], 10) };
+  // Tight form: digits across 'x' or '×' with whitespace only ("3 x 10").
+  const tight = s.match(/(\d+)\s*[x×]\s*(\d+)/i);
+  if (tight) return { sets: parseInt(tight[1], 10), reps: parseInt(tight[2], 10) };
+  // Verbose form: "N sets x M reps" / "N set M reps" with words between.
+  const verbose = s.match(/(\d+)\s*sets?\s*[x×]?\s*(\d+)\s*rep/i);
+  if (verbose) return { sets: parseInt(verbose[1], 10), reps: parseInt(verbose[2], 10) };
+  // Reps-only fallback ("10 reps", "12 repetitions").
   const repsOnly = s.match(/(\d+)\s*rep/i);
   if (repsOnly) return { sets: 1, reps: parseInt(repsOnly[1], 10) };
   return { sets: 1, reps: null };
@@ -1887,13 +1892,15 @@ function spokenCount(n) {
 // Throttle rules (PR-J spec):
 //   * Same correctionKey speaks at most once per rep.
 //   * Distinct cues are gapped by `gapMs` so they don't trample each other.
+//     The very first cue always fires (lastCueTs starts as null/undefined).
 //   * Picks the FIRST eligible transition with a known cue, so a single
 //     payload yields at most one spoken cue.
 //
 // Pure / DOM-free so the tests under frontend/tests can exercise it.
 function decideCorrectionCue(state, transitions, corrections, nowTs, gapMs) {
   if (!transitions || !transitions.length) return null;
-  if (nowTs - (state.lastCueTs || 0) < gapMs) return null;
+  // lastCueTs == null means "never fired"; the first cue always passes.
+  if (state.lastCueTs != null && nowTs - state.lastCueTs < gapMs) return null;
   for (const t of transitions) {
     const key = t.correctionKey;
     if (!key) continue;
@@ -2248,7 +2255,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
     restTimer: null,
     correctionFadeTimer: null,
     lastSpokenCount: -1,
-    lastCorrectionTs: 0,
+    lastCorrectionTs: null,  // null = "never fired" so first cue always passes
   };
 
   function clearTimers() {
