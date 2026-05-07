@@ -25,7 +25,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
@@ -163,30 +162,11 @@ def _fetch_active_from_supabase(token: str) -> dict | None:
     return payload
 
 
-def write_context_files(
-    flow: str,
-    wearables: dict,
-    symptom_log: str,
-) -> dict[str, str]:
-    """Build the dict of {path: content} the backend will push to the protocol
-    repo before invoking an agent.
-
-    Returns the mapping (caller decides how to push: gh CLI, API, etc).
-    All paths are under PROTOCOL_SUBDIR so the agent's file tool stays
-    scoped to the protocols/ area of the repo.
-    """
-    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-    suffix = "" if flow == "weekly_plan" else f"-{flow.replace('_', '-')}"
-    files = {
-        _in_subdir(f"data/wearables-{today}.json"): json.dumps(wearables, indent=2),
-        _in_subdir(f"data/symptoms-{today}{suffix}.md"): _format_symptom_log(symptom_log),
-    }
-    return files
-
-
-def _format_symptom_log(text: str) -> str:
-    ts = datetime.now(timezone.utc).isoformat()
-    return f"# Symptom log\n\n_Recorded: {ts}_\n\n{text.strip()}\n"
+# write_context_files() and its _format_symptom_log helper were retired
+# post-PR-#62 along with the CodingAgent abstraction. The chat path now
+# composes its own prompt context inline (chat_protocol_drafter.py) and
+# writes pending_review rows directly to Supabase; nothing pushes context
+# files to a GitHub repo anymore.
 
 
 def _stub_protocol() -> dict:
