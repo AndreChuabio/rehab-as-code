@@ -1655,6 +1655,98 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
     }
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# PR-N: Direct check-in endpoint (auto check-in card after pose session)
+#
+# Lives at the bottom of main.py to stay clear of PR-I's edit zone around
+# /protocols/{id}. Writes go through user_store.save_checkin -> the existing
+# `checkins` table (RLS already in place; no migration needed).
+#
+# PHI hygiene: log token + pain_level (an integer is not PHI on its own) +
+# returned checkin_id. Never log `notes` content.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class CheckinCreate(BaseModel):
+    """Auto-checkin payload posted right after a pose-form-check session.
+
+    pain_level is the only required field. rpe + notes + associated_session_id
+    are all optional — the patient can dismiss the card without filling them.
+    """
+    pain_level: int
+    rpe: int | None = None
+    notes: str | None = None
+    associated_session_id: str | None = None
+
+
+def _sanitize_checkin_notes(raw: str | None) -> str | None:
+    """Strip control chars, trim whitespace, truncate to 500.
+
+    Spec calls for >500 chars to truncate silently and 201-succeed (the card
+    is mid-flow UX; rejecting on a stray paste would lose the patient's whole
+    pain/rpe input). Truncation is logged at the call site without content.
+    """
+    if raw is None:
+        return None
+    cleaned = "".join(ch for ch in raw if ch == "\n" or ch == "\t" or ord(ch) >= 0x20)
+    cleaned = cleaned.strip()
+    if not cleaned:
+        return None
+    return cleaned[:500]
+
+
+@app.post("/checkins", status_code=201)
+def create_checkin(
+    req: CheckinCreate,
+    user_id: str = Depends(current_user_id),
+):
+    """Persist a patient self-reported check-in.
+
+    Validates pain_level [0, 10] and rpe [1, 10] if provided. Sanitizes notes
+    and truncates >500 chars. Returns {checkin_id, created_at}.
+    """
+    if req.pain_level < 0 or req.pain_level > 10:
+        raise HTTPException(
+            status_code=422,
+            detail="pain_level must be between 0 and 10 inclusive",
+        )
+    if req.rpe is not None and (req.rpe < 1 or req.rpe > 10):
+        raise HTTPException(
+            status_code=422,
+            detail="rpe must be between 1 and 10 inclusive",
+        )
+
+    notes_in_len = len(req.notes) if req.notes else 0
+    sanitized_notes = _sanitize_checkin_notes(req.notes)
+    truncated = notes_in_len > 500
+
+    ensure_user(user_id)
+
+    recorded_at = datetime.now(timezone.utc).isoformat()
+    payload: dict = {
+        "kind": "auto_checkin",
+        "pain_level": req.pain_level,
+        "rpe": req.rpe,
+        "notes": sanitized_notes,
+        "associated_session_id": req.associated_session_id,
+        "recorded_at": recorded_at,
+        "client": "web/auto-checkin-v1",
+    }
+
+    save_checkin(user_id, payload)
+
+    checkin_id = payload.get("session_id")
+    logger.info(
+        "auto_checkin saved token=%s pain_level=%s rpe=%s notes_truncated=%s checkin_id=%s",
+        user_id, req.pain_level, req.rpe, truncated, checkin_id,
+    )
+
+    return {
+        "checkin_id": checkin_id,
+        "created_at": payload.get("recorded_at"),
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
