@@ -346,14 +346,17 @@
         if (s.pose_metrics?.rep_count != null) meta.push(`${s.pose_metrics.rep_count} reps`);
         if (s.pose_metrics?.worst_status) meta.push(s.pose_metrics.worst_status);
         const metaStr = meta.length ? ` (${meta.join(", ")})` : "";
-        // PR-T2: dim + label rows whose body_region differs from the
-        // patient's currently-active protocol. is_current_region===false
-        // means the row is from a prior protocol; we don't drop it
-        // (adherence is history) but the dim makes it clear which
-        // sessions count toward the current plan.
-        const outOfRegionClass = s.is_current_region === false ? " out-of-region" : "";
-        const regionTag = s.is_current_region === false
-          ? `<span class="session-region-tag">prior region: ${escapeHtml(s.body_region || "unknown")}</span>`
+        // PR-T2 + PR-U7: dim + label rows ONLY when body_region is
+        // confirmed and differs from the active protocol. Planner-
+        // generated exercise IDs that aren't in the library come back
+        // with body_region: null; we used to render those as "prior
+        // region: unknown" + dimmed, which falsely flagged current-
+        // region regressions as adherence-from-elsewhere. Treat null
+        // as "no info" and render normally.
+        const knownOutOfRegion = s.is_current_region === false && !!s.body_region;
+        const outOfRegionClass = knownOutOfRegion ? " out-of-region" : "";
+        const regionTag = knownOutOfRegion
+          ? `<span class="session-region-tag">prior region: ${escapeHtml(s.body_region)}</span>`
           : "";
         return `<li class="session-item ${s.status}${outOfRegionClass}">
           <span class="session-status">${escapeHtml(s.status)}</span>
