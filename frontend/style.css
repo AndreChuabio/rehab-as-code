@@ -1847,6 +1847,27 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 .auth-pill-action-signin:hover { background: rgba(63, 182, 139, 0.26); }
 
+/* Floating chip shown when a clinician has opted into "View as patient"
+   mode, so they can flip back without retyping the URL. Pinned bottom-left
+   so it doesn't fight the auth pill in the top-right. */
+.back-to-dash-chip {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  z-index: 8500;
+  background: rgba(74, 144, 226, 0.14);
+  border: 1px solid rgba(74, 144, 226, 0.5);
+  color: #b6d2f7;
+  border-radius: 999px;
+  padding: 7px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  box-shadow: var(--shadow);
+}
+.back-to-dash-chip:hover { background: rgba(74, 144, 226, 0.26); color: #fff; }
+
 /* "Set password" mini-button on the signed-in pill. */
 .auth-pill-setpw {
   background: rgba(80, 180, 220, 0.12);

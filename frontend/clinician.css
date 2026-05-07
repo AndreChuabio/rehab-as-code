@@ -61,6 +61,20 @@
 }
 .clinician-signout:hover { background: #1a2029; }
 
+.clinician-as-patient {
+  background: transparent;
+  border: 1px solid #4a90e2;
+  color: #88b6f0;
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.clinician-as-patient:hover {
+  background: rgba(74, 144, 226, 0.12);
+  color: #b6d2f7;
+}
+
 .clinician-main {
   display: grid;
   grid-template-columns: 320px 1fr;

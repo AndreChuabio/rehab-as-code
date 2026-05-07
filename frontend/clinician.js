@@ -79,6 +79,18 @@
     $("queueRefresh")?.addEventListener("click", loadQueue);
     $("clinicianSignout")?.addEventListener("click", async () => {
       try { await window.RehabAuth.signOut(); } catch (_) {}
+      try {
+        localStorage.removeItem("authSkipped");
+        localStorage.removeItem("supabaseJwt");
+        sessionStorage.removeItem("asPatient");
+      } catch (_) {}
+      window.location.replace("/");
+    });
+    // "View as patient" — set the override flag and navigate to /. The
+    // patient page checks sessionStorage.asPatient and skips its
+    // auto-redirect-to-clinician when it's set.
+    $("clinicianAsPatient")?.addEventListener("click", () => {
+      sessionStorage.setItem("asPatient", "1");
       window.location.replace("/");
     });
     $("approveBtn")?.addEventListener("click", () => beginAction("approve"));
