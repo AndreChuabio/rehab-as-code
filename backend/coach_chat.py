@@ -244,6 +244,59 @@ TOOLS: list[dict[str, Any]] = [
             "parameters": {"type": "object", "properties": {}},
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "start_intake_tool",
+            "description": (
+                "Begin or update a patient intake conversationally. Use when the "
+                "patient mentions a new or existing injury and you have enough info "
+                "to capture intake fields (injury_type, surgery_date if applicable, "
+                "pain_level, symptoms, goals). Capture incrementally - if a field "
+                "is missing, ask the patient on the next turn. Do NOT call until "
+                "you have at least an injury_type and a pain_level. Never call "
+                "this tool twice in the same conversation."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "injury_type": {
+                        "type": "string",
+                        "description": "Free-text injury description, e.g. 'lateral ankle sprain'.",
+                    },
+                    "pain_level": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 10,
+                    },
+                    "symptoms": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "goals": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "surgery_date": {
+                        "type": "string",
+                        "description": "ISO date or relative phrase like '3 weeks ago'.",
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["new", "update"],
+                        "description": (
+                            "new = start a fresh intake (use when the patient "
+                            "describes a new injury). update = patch the latest "
+                            "row's payload with the fields provided "
+                            "(use when the patient is refining or adding to an "
+                            "existing intake)."
+                        ),
+                    },
+                },
+                "required": ["injury_type", "mode"],
+            },
+        },
+    },
 ]
 
 
@@ -322,6 +375,16 @@ def build_system_prompt(
         "7. After firing a trigger tool, give the patient a one-sentence summary "
         "noting that a draft has been queued for clinician review (e.g., "
         "'logged - drafted a regression for clinician review on /clinician').\n"
+        "8. If the patient mentions a NEW injury (in addition to or instead of an "
+        "existing one), you can capture intake conversationally with "
+        "start_intake_tool. Capture as much as the patient gives in one turn; "
+        "ask one targeted question for any required-but-missing field on the "
+        "next turn. Do NOT call the tool until you have at least an injury_type "
+        "AND a pain_level. Never call it twice in the same conversation. After "
+        "a successful capture, acknowledge with one sentence (e.g., 'got it - "
+        "captured intake for [injury]') and, if the patient seems ready, offer "
+        "a chip 'Draft me a plan based on this' rather than auto-firing "
+        "fire_weekly_plan_trigger.\n"
     )
     if triage_block:
         base = base + triage_block
@@ -446,6 +509,62 @@ async def _dispatch_tool(
             logger.exception("fire_weekly_plan_trigger executor failed")
             err = {"ok": False, "error": str(exc), "flow": "weekly_plan"}
             return (err, [{"type": "tool_result", "name": name, "result": err}])
+        return (
+            {"ok": True, **result},
+            [{"type": "tool_result", "name": name, "result": result}],
+        )
+
+    if name == "start_intake_tool":
+        # PR-K conversational intake. The structured intake modal still works;
+        # this is the alternate path Maya uses when the patient mentions a
+        # new injury mid-chat. We forward the args verbatim to
+        # agents.intake_agent.capture_intake_from_chat, which validates,
+        # persists, and returns fields_captured + fields_missing.
+        if not user_token:
+            err = {
+                "ok": False,
+                "error": "no authenticated patient on this chat session",
+            }
+            return (err, [{"type": "tool_result", "name": name, "result": err}])
+
+        mode = arguments.get("mode")
+        if mode not in ("new", "update"):
+            err = {"ok": False, "error": f"invalid mode: {mode!r}"}
+            return (err, [{"type": "tool_result", "name": name, "result": err}])
+
+        # Strip the routing key from the persisted fields.
+        fields = {k: v for k, v in arguments.items() if k != "mode"}
+
+        try:
+            from agents.intake_agent import (
+                IntakeCaptureError,
+                capture_intake_from_chat,
+            )
+            result = capture_intake_from_chat(user_token, fields, mode)
+        except Exception as exc:
+            # Surface the error back to the model + frontend rather than
+            # pretending the capture succeeded. Both IntakeCaptureError
+            # (validation / DB failure we expect) and unexpected exceptions
+            # land here. PHI hygiene: log the token + mode + KEYS only,
+            # never the values themselves.
+            try:
+                from agents.intake_agent import IntakeCaptureError as _IC
+                is_known = isinstance(exc, _IC)
+            except Exception:
+                is_known = False
+            if is_known:
+                logger.warning(
+                    "start_intake_tool capture failed token=%s mode=%s keys=%s: %s",
+                    user_token, mode, sorted(fields.keys()), exc,
+                )
+            else:
+                logger.exception(
+                    "start_intake_tool unexpected failure token=%s mode=%s keys=%s",
+                    user_token, mode, sorted(fields.keys()),
+                )
+            err = {"ok": False, "error": str(exc)}
+            return (err, [{"type": "tool_result", "name": name, "result": err}])
+
         return (
             {"ok": True, **result},
             [{"type": "tool_result", "name": name, "result": result}],
