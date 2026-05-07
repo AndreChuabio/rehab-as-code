@@ -144,16 +144,23 @@ def create_conversation(
     # we keep the log lean.
     logger.info("tavus.create_conversation start replica=%s", replica_id)
 
-    try:
-        response = requests.post(
-            f"{TAVUS_BASE_URL}/conversations",
-            headers=headers,
-            json=payload,
-            timeout=15,
-        )
-    except requests.RequestException as exc:
-        logger.warning("tavus.create_conversation transport_error=%s", exc)
-        raise TavusAPIError(f"Tavus transport error: {exc}") from exc
+    # Manual Langfuse span - Tavus is HTTP, not Anthropic, so the OTel
+    # auto-instrumentation doesn't capture it. We emit a span so the
+    # admin / Langfuse dashboard can see Tavus latency + failure rate
+    # alongside the Anthropic agents. PHI: we metadata only replica_id
+    # (config), not user_name or prompt.
+    import langfuse_client
+    with langfuse_client.span("tavus.create_conversation", replica_id=replica_id):
+        try:
+            response = requests.post(
+                f"{TAVUS_BASE_URL}/conversations",
+                headers=headers,
+                json=payload,
+                timeout=15,
+            )
+        except requests.RequestException as exc:
+            logger.warning("tavus.create_conversation transport_error=%s", exc)
+            raise TavusAPIError(f"Tavus transport error: {exc}") from exc
 
     if response.status_code >= 400:
         # Don't echo Tavus's body verbatim back to the user; log it for ops

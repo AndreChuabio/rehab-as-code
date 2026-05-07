@@ -196,6 +196,16 @@ class PlanGenerationAgent(PatientAgent):
         _MAX_PLANNER_RETRIES, and saves the final draft as either
         pending_review or needs_clinician_review.
         """
+        # Local import to avoid circular dependency at module import.
+        # langfuse_client is a no-op when LANGFUSE_ENABLED != "true".
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).parent.parent))
+        import langfuse_client
+
+        with langfuse_client.span("plan_generation.handle"):
+            return await self._handle_impl(request)
+
+    async def _handle_impl(self, request: PatientRequest) -> PatientResponse:
         token = request.user_token
         api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
         if not api_key:
