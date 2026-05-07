@@ -273,6 +273,8 @@ async function bootstrapAuth() {
       patientState = null;
       todaySession = [];
       renderTodaySession();
+      // Clear the trust pill on sign-out so it doesn't leak across sessions.
+      renderReviewPill(null);
       // Re-show the overlay if it isn't a deliberate skip and user has no
       // session — but never on the magic-link redirect, which fires onChange
       // with a fresh session right after.
@@ -522,6 +524,12 @@ async function refreshPatientState({ openModalIfNeeded = true } = {}) {
     return null;
   }
 
+  // PR-H trust pill: render whenever review_status comes back from the
+  // server. Idempotent — a "none" state hides the pill, anything else
+  // surfaces it next to the auth pill. See renderReviewPill below for
+  // state -> copy mapping.
+  renderReviewPill(patientState?.review_status || null);
+
   if (!openModalIfNeeded) return patientState;
 
   // We deliberately do NOT auto-open the intake or plan-gen modals based
@@ -545,6 +553,101 @@ async function refreshPatientState({ openModalIfNeeded = true } = {}) {
     loadProtocol();
   }
   return patientState;
+}
+
+// ── Trust-loop review pill (PR-H, Phase S4) ───────────────────────────────
+//
+// Renders a small status pill in the header right column reflecting the
+// most-recent /protocols row for this patient:
+//
+//   none                    -> pill hidden (clean header)
+//   pending_review          -> "Awaiting your PT review · Xh ago"
+//   needs_clinician_review  -> "Flagged for your PT · Xh ago"
+//   recently_approved       -> "Approved by Dr. NH · Xh ago"
+//   recently_rejected       -> "PT review · see chat for notes"
+//
+// Click the pill to expand a small panel underneath; the rejected state
+// surfaces the clinician's review_notes excerpt so the patient can read
+// why without bouncing out of the chat.
+
+function renderReviewPill(reviewStatus) {
+  const pill   = document.getElementById("reviewPill");
+  const btn    = document.getElementById("reviewPillBtn");
+  const dot    = document.getElementById("reviewPillDot");
+  const label  = document.getElementById("reviewPillLabel");
+  const panel  = document.getElementById("reviewPillPanel");
+  const body   = document.getElementById("reviewPillPanelBody");
+  if (!pill || !btn || !dot || !label || !panel || !body) return;
+
+  const state = reviewStatus?.state || "none";
+  if (!reviewStatus || state === "none") {
+    pill.hidden = true;
+    panel.hidden = true;
+    btn.setAttribute("aria-expanded", "false");
+    return;
+  }
+
+  // Mode -> dot/label CSS class. The CSS picks the colour.
+  const modeClass = {
+    pending_review:         "review-pill-pending",
+    needs_clinician_review: "review-pill-flagged",
+    recently_approved:      "review-pill-approved",
+    recently_rejected:      "review-pill-rejected",
+  }[state] || "review-pill-pending";
+  pill.className = `review-pill ${modeClass}`;
+  dot.className = `review-pill-dot ${modeClass}-dot`;
+
+  // Label copy + dropdown body copy
+  let labelText, panelBody;
+  const ago = formatRelativeAgo(reviewStatus.submitted_at || reviewStatus.reviewed_at);
+  const initials = reviewStatus.reviewer_initials || "PT";
+
+  if (state === "pending_review") {
+    labelText = ago ? `Awaiting your PT review · ${ago}` : "Awaiting your PT review";
+    panelBody = "Your PT will see this in their queue. They'll approve, reject, or send notes back.";
+  } else if (state === "needs_clinician_review") {
+    labelText = ago ? `Flagged for your PT · ${ago}` : "Flagged for your PT";
+    panelBody = "We surfaced this as high priority for your clinician. They'll respond shortly.";
+  } else if (state === "recently_approved") {
+    labelText = ago ? `Approved by Dr. ${initials} · ${ago}` : `Approved by Dr. ${initials}`;
+    panelBody = "Your protocol is live. Continue with the plan in the sidebar.";
+  } else if (state === "recently_rejected") {
+    labelText = "PT review · see chat for notes";
+    panelBody = reviewStatus.notes_excerpt
+      ? `Note from Dr. ${initials}: ${reviewStatus.notes_excerpt}`
+      : "Your PT sent a note back. Open the chat to see the next step.";
+  } else {
+    labelText = "Review status";
+    panelBody = "";
+  }
+  label.textContent = labelText;
+  body.textContent = panelBody;
+
+  pill.hidden = false;
+  // Wire toggle once. Idempotent — onclick reassign is fine.
+  btn.onclick = () => {
+    const expanded = btn.getAttribute("aria-expanded") === "true";
+    btn.setAttribute("aria-expanded", expanded ? "false" : "true");
+    panel.hidden = expanded;
+  };
+}
+
+// Render a relative-time label like "10m" / "2h" / "1d" given an ISO8601
+// timestamp. Falls back to empty string when the input is missing or
+// unparseable so callers can omit the trailing dot cleanly.
+function formatRelativeAgo(iso) {
+  if (!iso) return "";
+  const ts = Date.parse(iso);
+  if (!Number.isFinite(ts)) return "";
+  const deltaMs = Date.now() - ts;
+  if (deltaMs < 0) return "just now";
+  const min = Math.floor(deltaMs / 60_000);
+  if (min < 1) return "just now";
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const d = Math.floor(hr / 24);
+  return `${d}d ago`;
 }
 
 function showIntakeModal() {
@@ -717,53 +820,24 @@ function appendPlanGenLine(glyph, text, isFail = false) {
 }
 
 // Render the pending_review row from chat_protocol_drafter or PlanGenerationAgent.
-// Approve hits POST /protocols/{id}/approve which flips the row to active in
-// a single transaction. The clinician dashboard at /clinician shows the same
-// row from the reviewer side; this in-app card is the patient's view of
-// "draft is queued and awaiting clinician review".
+// Patient view ONLY — there is no patient self-approve button. The clinician-
+// in-the-loop is the safety gate; only the clinician dashboard at /clinician
+// can promote a row to active. The patient sees a calm "sent to your PT for
+// review" surface and the trust pill in the header for status.
 function renderPlanGenPending(protocolId) {
   const prCard = document.getElementById("planGenPrCard");
   if (!prCard) return;
   const safeId = escapeHtml(protocolId);
   prCard.hidden = false;
   prCard.innerHTML = `
-    <span>Protocol pending clinician review</span>
-    <button class="pr-approve-btn" data-protocol-id="${safeId}">Approve and apply</button>
+    <div class="pr-pending-status" data-protocol-id="${safeId}">
+      <span class="pr-pending-dot" aria-hidden="true"></span>
+      <div class="pr-pending-copy">
+        <strong>Sent to your PT for review</strong>
+        <p>You'll see an update here once they decide. No further action needed.</p>
+      </div>
+    </div>
   `;
-  const btn = prCard.querySelector(".pr-approve-btn");
-  if (btn) {
-    btn.addEventListener("click", () => approvePendingProtocol(protocolId, btn));
-  }
-}
-
-async function approvePendingProtocol(protocolId, btn) {
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "Applying...";
-  }
-  try {
-    const res = await authedFetch(`${API_BASE}/protocols/${encodeURIComponent(protocolId)}/approve`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `approve failed: ${res.status}`);
-    }
-    if (btn) {
-      btn.textContent = "Applied to active protocol";
-      btn.classList.add("applied");
-    }
-    loadProtocol();
-  } catch (e) {
-    console.error("approve failed", e);
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "Approve and apply";
-    }
-    showToast?.(`Approve failed: ${e.message}`, "error");
-  }
 }
 
 function closePlanGenModal() {
@@ -1065,18 +1139,51 @@ function renderPendingProtocolCard(protocolId, summary, flowLabel) {
   const safeId = escapeHtml(protocolId);
   const safeSummary = escapeHtml(summary || "Protocol revision queued for clinician review.");
   const safeFlow = escapeHtml(flowLabel || "draft");
+  // Patient view: no self-approve button. The pending row is visible to the
+  // clinician at /clinician and only the clinician can promote it. The
+  // header trust pill (review_status) reflects pending -> approved/rejected.
   bubble.innerHTML = `
-    <div class="pr-result-header">${safeFlow} drafted — awaiting clinician review</div>
+    <div class="pr-result-header">${safeFlow} drafted — with your PT for review</div>
     <div class="pr-result-summary">${safeSummary}</div>
-    <div class="pr-result-actions">
-      <button class="pr-approve-btn" data-protocol-id="${safeId}">Approve and apply</button>
-      <a class="pr-result-cta" href="/clinician" target="_blank" rel="noopener">View in clinician dashboard</a>
+    <div class="pr-result-footnote" data-protocol-id="${safeId}">
+      You'll see an update here once your PT approves or sends notes back.
     </div>
   `;
-  const btn = bubble.querySelector(".pr-approve-btn");
-  if (btn) {
-    btn.addEventListener("click", () => approvePendingProtocol(protocolId, btn));
-  }
+  log.appendChild(bubble);
+  scrollChatLog?.();
+}
+
+// Triage alert (PR-H): patient-side receipt rendered when the symptom
+// classifier returned severity=clinician-attention. Always shown so the
+// patient knows their PT was flagged AND has an immediate escalation path
+// (urgent care / clinic phone) for severe symptoms. The actual chat reply
+// from Maya still streams below this; this is a system-level affordance,
+// not a Maya turn.
+function renderTriageAlert(event) {
+  const log = document.getElementById("chatLog");
+  if (!log) return;
+  const bubble = document.createElement("div");
+  bubble.className = "chat-bubble system triage-alert";
+  const keyword = event?.symptom_keyword;
+  const phone = event?.clinic_phone;
+  // Subject line: when keyword is known, use "Your message about [keyword]";
+  // otherwise fall back to a generic phrasing.
+  const subject = keyword
+    ? `Your message about <strong>${escapeHtml(keyword)}</strong> was flagged for your PT.`
+    : `Your message was flagged for your PT.`;
+  // Escalation copy: phone number (if configured) becomes a tel: link.
+  // Without one we say "call your clinic" - intentionally generic so the
+  // patient doesn't get a dead link.
+  const callCopy = phone
+    ? `call your clinic at <a href="tel:${escapeHtml(phone)}">${escapeHtml(phone)}</a>`
+    : "call your clinic";
+  bubble.innerHTML = `
+    <div class="triage-alert-header">PT alert</div>
+    <p class="triage-alert-body">${subject} They'll review it shortly.</p>
+    <p class="triage-alert-escalation">
+      If you have severe pain, swelling, or numbness now, ${callCopy} or go to urgent care.
+    </p>
+  `;
   log.appendChild(bubble);
   scrollChatLog?.();
 }
@@ -2670,10 +2777,25 @@ function handleChatEvent(event, coachBubble, appendDelta) {
           renderToolResultLine(event);
           renderPendingProtocolCard(r.pending_protocol_id, r.summary, flowLabel);
           refreshProtocol();
+          // Refresh the trust pill so the header flips from "none" to
+          // "pending_review" without requiring a page reload.
+          refreshPatientState({ openModalIfNeeded: false }).catch(() => {});
         } else if (r.ok === false && r.error) {
           renderPendingProtocolError(r.error, flowLabel);
         }
       }
+      break;
+
+    case "triage_alert":
+      // PR-H: symptom classifier flagged the patient's message for clinician
+      // attention. Render a system message with action guidance + clinic
+      // phone if configured. ALWAYS surface this — even if the writer
+      // failed — so a patient with severe symptoms knows to call urgent
+      // care instead of waiting for an asynchronous PT response.
+      renderTriageAlert(event);
+      // Also refresh the trust pill: backend just wrote a
+      // needs_clinician_review row.
+      refreshPatientState({ openModalIfNeeded: false }).catch(() => {});
       break;
 
     case "error":

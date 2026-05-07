@@ -234,6 +234,187 @@ def approve(
     return row
 
 
+# 72h trust-loop window. Rationale: a clinician approval/rejection ages out
+# of "recently_xxx" after 3 days so the patient header stops nagging once
+# they've had a reasonable chance to read it. Tunable from one place.
+RECENT_REVIEW_WINDOW_HOURS = 72
+
+
+def _initials_from_name(full_name: str | None) -> str | None:
+    """First letter of each whitespace-separated token, max two chars, upper.
+
+    Returns None on falsy / whitespace input. Single-name inputs ("Nikki")
+    return one initial ("N"). Empty/None -> None lets the caller decide
+    whether to fallback to the generic "PT" placeholder.
+    """
+    if not full_name:
+        return None
+    parts = [p for p in str(full_name).strip().split() if p]
+    if not parts:
+        return None
+    initials = "".join(p[0] for p in parts[:2]).upper()
+    return initials or None
+
+
+def _resolve_reviewer_initials(cur, reviewed_by: str | None) -> str | None:
+    """Look up auth.users.raw_user_meta_data.full_name -> initials.
+
+    Returns None on any failure (caller decides whether to fall back to
+    "PT"). Logs but does NOT raise — the trust-loop pill is informational
+    and a missing reviewer name should never 500 the intake-status call.
+    `auth.users` is in a separate schema; if the role lacks SELECT we
+    swallow the permission error the same way user_store.get_display_name
+    does.
+    """
+    if not reviewed_by:
+        return None
+    try:
+        cur.execute(
+            "SELECT raw_user_meta_data->>'full_name' AS full_name, "
+            "email FROM auth.users WHERE id::text = %s",
+            (str(reviewed_by),),
+        )
+        row = cur.fetchone()
+    except Exception as exc:  # pragma: no cover (depends on PG perms)
+        logger.warning("reviewer name lookup failed: %s", exc)
+        return None
+    if not row:
+        return None
+    initials = _initials_from_name(row.get("full_name"))
+    if initials:
+        return initials
+    # Email fallback: first letter of local-part, uppercased. Single char
+    # because we don't want to invent a surname from "andre@x.com".
+    email = (row.get("email") or "").strip()
+    if email and "@" in email:
+        local = email.split("@", 1)[0].strip()
+        if local:
+            return local[0].upper()
+    return None
+
+
+def get_review_status(token: str) -> dict | None:
+    """Return the patient's most-recent review state for the trust-loop pill.
+
+    Five states (str enum, see UX plan v2 / PR-H scope):
+
+      "pending_review"            -> latest row is `pending_review`
+      "needs_clinician_review"    -> latest row is high-severity flag
+      "recently_approved"         -> latest row is `active` AND was reviewed
+                                      within the last RECENT_REVIEW_WINDOW_HOURS
+      "recently_rejected"         -> latest row is `rejected` AND reviewed
+                                      within the same window
+      "none"                      -> nothing draft-state, no recent decision
+
+    Returns None ONLY on infra failure (DB error). The caller surfaces None
+    as "no pill" - same render as "none". Empty token -> None as well, so
+    callers don't accidentally query for the unauthenticated case.
+
+    PHI hygiene: reviewer_initials and notes_excerpt go in the response,
+    but never in logs. The caller (main.py) logs only the state enum.
+    """
+    if not token:
+        return None
+    try:
+        with _conn() as c, c.cursor() as cur:
+            cur.execute(
+                "SELECT id, status, created_at, reviewed_at, reviewed_by, "
+                "review_notes "
+                "FROM protocols WHERE token = %s "
+                "ORDER BY created_at DESC LIMIT 1",
+                (token,),
+            )
+            latest = cur.fetchone()
+            if not latest:
+                return {
+                    "state": "none",
+                    "protocol_id": None,
+                    "submitted_at": None,
+                    "reviewed_at": None,
+                    "reviewer_initials": None,
+                    "notes_excerpt": None,
+                }
+
+            status = latest["status"]
+            protocol_id = str(latest["id"])
+
+            if status in ("pending_review", "needs_clinician_review"):
+                return {
+                    "state": status,
+                    "protocol_id": protocol_id,
+                    "submitted_at": latest["created_at"].isoformat()
+                    if latest.get("created_at") else None,
+                    "reviewed_at": None,
+                    "reviewer_initials": None,
+                    "notes_excerpt": None,
+                }
+
+            # active / rejected: gate on the 72h recency window. If the
+            # decision is older than that the patient has had time to see
+            # it; we stop nagging the header.
+            reviewed_at = latest.get("reviewed_at")
+            if reviewed_at is None:
+                # Active row with no reviewed_at can't have come from the
+                # approve() flow — treat as no recent decision.
+                return {
+                    "state": "none",
+                    "protocol_id": protocol_id,
+                    "submitted_at": None,
+                    "reviewed_at": None,
+                    "reviewer_initials": None,
+                    "notes_excerpt": None,
+                }
+
+            from datetime import datetime, timezone, timedelta
+            now = datetime.now(timezone.utc)
+            # reviewed_at is a tz-aware datetime in psycopg3 by default
+            # (TIMESTAMPTZ column). Coerce naive to UTC defensively.
+            if reviewed_at.tzinfo is None:
+                reviewed_at = reviewed_at.replace(tzinfo=timezone.utc)
+            window = timedelta(hours=RECENT_REVIEW_WINDOW_HOURS)
+            within_window = (now - reviewed_at) <= window
+
+            if status == "active" and within_window:
+                initials = _resolve_reviewer_initials(cur, latest.get("reviewed_by")) or "PT"
+                return {
+                    "state": "recently_approved",
+                    "protocol_id": protocol_id,
+                    "submitted_at": None,
+                    "reviewed_at": reviewed_at.isoformat(),
+                    "reviewer_initials": initials,
+                    "notes_excerpt": None,
+                }
+
+            if status == "rejected" and within_window:
+                initials = _resolve_reviewer_initials(cur, latest.get("reviewed_by")) or "PT"
+                notes = latest.get("review_notes") or ""
+                excerpt = notes[:100] if notes else None
+                return {
+                    "state": "recently_rejected",
+                    "protocol_id": protocol_id,
+                    "submitted_at": None,
+                    "reviewed_at": reviewed_at.isoformat(),
+                    "reviewer_initials": initials,
+                    "notes_excerpt": excerpt,
+                }
+
+            # active/rejected but outside the recency window — don't pester.
+            return {
+                "state": "none",
+                "protocol_id": protocol_id,
+                "submitted_at": None,
+                "reviewed_at": None,
+                "reviewer_initials": None,
+                "notes_excerpt": None,
+            }
+    except ProtocolRepoError:
+        # Re-raise config errors; main.py turns them into "no pill".
+        raise
+    except Exception as exc:
+        logger.exception("get_review_status failed token=%s: %s", token, exc)
+        return None
+
+
 def reject(
     protocol_id: str,
     reviewed_by: str,

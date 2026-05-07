@@ -277,6 +277,26 @@
     <button type="button" class="auth-pill-action" id="authPillAction">Sign out</button>
   </div>
 
+  <!-- Trust-loop review pill (PR-H, Phase S4). Hidden by default; visible
+       when /patient/me/intake-status returns a non-"none" review_status.
+       Click toggles the dropdown panel underneath; rejected state shows
+       the clinician's notes_excerpt. -->
+  <div class="review-pill" id="reviewPill" hidden>
+    <button
+      type="button"
+      class="review-pill-btn"
+      id="reviewPillBtn"
+      aria-expanded="false"
+      aria-controls="reviewPillPanel"
+    >
+      <span class="review-pill-dot" id="reviewPillDot" aria-hidden="true"></span>
+      <span class="review-pill-label" id="reviewPillLabel"></span>
+    </button>
+    <div class="review-pill-panel" id="reviewPillPanel" hidden>
+      <p class="review-pill-panel-body" id="reviewPillPanelBody"></p>
+    </div>
+  </div>
+
   <!-- Set/change password modal. Shown when the signed-in user clicks the
        "Set password" affordance on the pill. Calls RehabAuth.updatePassword. -->
   <div class="setpw-modal" id="setPwModal" hidden>

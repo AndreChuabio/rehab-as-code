@@ -2598,3 +2598,205 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   #poseStage .pose-preflight-title { font-size: 18px; }
   #poseStage .pose-rest-ring { width: 56vw; height: 56vw; }
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Trust-loop review pill (PR-H, Phase S4).
+
+   Sits below the auth pill in the top-right column. Click toggles a small
+   dropdown panel that surfaces panel-body copy (rejected state shows the
+   clinician's review_notes excerpt). State -> colour mapping:
+
+     pending_review          muted blue
+     needs_clinician_review  amber
+     recently_approved       green
+     recently_rejected       red w/ pulse dot
+
+   Hidden by default; renderReviewPill() in app.js sets the modifier class
+   + label text whenever /patient/me/intake-status returns review_status.
+   ────────────────────────────────────────────────────────────────────── */
+
+.review-pill {
+  position: fixed;
+  top: 56px;          /* sits below the auth pill (auth-pill is at top: 14px). */
+  right: 18px;
+  z-index: 8500;
+  font-size: 12px;
+  color: var(--muted);
+}
+.review-pill[hidden] { display: none; }
+
+.review-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  color: inherit;
+  box-shadow: var(--shadow);
+  transition: filter 120ms ease;
+}
+.review-pill-btn:hover { filter: brightness(1.1); }
+
+.review-pill-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  display: inline-block;
+}
+
+/* State variants -------------------------------------------------------- */
+.review-pill.review-pill-pending .review-pill-btn {
+  border-color: rgba(80, 180, 220, 0.45);
+  color: #b8d6e8;
+}
+.review-pill-pending-dot {
+  background: #50b4dc;
+  box-shadow: 0 0 6px rgba(80, 180, 220, 0.55);
+}
+
+.review-pill.review-pill-flagged .review-pill-btn {
+  border-color: rgba(245, 185, 69, 0.55);
+  color: #f6c97a;
+}
+.review-pill-flagged-dot {
+  background: #f5b945;
+  box-shadow: 0 0 6px rgba(245, 185, 69, 0.6);
+}
+
+.review-pill.review-pill-approved .review-pill-btn {
+  border-color: rgba(63, 182, 139, 0.55);
+  color: #8be0bd;
+}
+.review-pill-approved-dot {
+  background: #3fb68b;
+  box-shadow: 0 0 6px rgba(63, 182, 139, 0.6);
+}
+
+.review-pill.review-pill-rejected .review-pill-btn {
+  border-color: rgba(248, 113, 113, 0.55);
+  color: #f8a3a3;
+}
+.review-pill-rejected-dot {
+  background: #f87171;
+  box-shadow: 0 0 8px rgba(248, 113, 113, 0.6);
+  animation: review-pill-rejected-pulse 1.4s ease-in-out infinite;
+}
+@keyframes review-pill-rejected-pulse {
+  0%, 100% { transform: scale(1);   opacity: 1;   }
+  50%      { transform: scale(1.3); opacity: 0.7; }
+}
+
+/* Dropdown panel — opens beneath the pill on click. */
+.review-pill-panel {
+  margin-top: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 12px;
+  max-width: 280px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--muted);
+  box-shadow: var(--shadow);
+}
+.review-pill-panel[hidden] { display: none; }
+.review-pill-panel-body { margin: 0; }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Patient-side pending-protocol surface (PR-H replaces the self-approve
+   button with a calm "sent to your PT" status).
+   ────────────────────────────────────────────────────────────────────── */
+
+.pr-pending-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 12px;
+  background: rgba(80, 180, 220, 0.08);
+  border: 1px solid rgba(80, 180, 220, 0.32);
+  border-radius: 10px;
+}
+.pr-pending-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: #50b4dc;
+  box-shadow: 0 0 6px rgba(80, 180, 220, 0.55);
+}
+.pr-pending-copy strong {
+  display: block;
+  color: var(--text);
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+.pr-pending-copy p {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+/* Footnote replacing the self-approve button on the chat-card path. */
+.pr-result-footnote {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Triage alert (PR-H): chat system message rendered when the symptom
+   classifier flags the patient's message for clinician attention. Always
+   visible after a clinician-attention triage so the patient knows their
+   PT was alerted AND has an urgent-care escalation path.
+   ────────────────────────────────────────────────────────────────────── */
+
+.chat-bubble.triage-alert {
+  background: rgba(245, 185, 69, 0.10);
+  border: 1px solid rgba(245, 185, 69, 0.45);
+  border-radius: 12px;
+  padding: 12px 14px;
+  color: var(--text);
+  align-self: stretch;
+  max-width: 100%;
+}
+.triage-alert-header {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #f5b945;
+  margin-bottom: 6px;
+}
+.triage-alert-body {
+  margin: 0 0 6px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.triage-alert-body strong { color: var(--text); }
+.triage-alert-escalation {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.triage-alert-escalation a {
+  color: #f6c97a;
+  text-decoration: underline;
+}
+.triage-alert-escalation a:hover { color: #fff; }
+
+/* On narrow screens slide the review pill below the auth pill more
+   gracefully and make it less than full-width. */
+@media (max-width: 480px) {
+  .review-pill { top: 50px; right: 12px; }
+  .review-pill-panel { max-width: calc(100vw - 24px); }
+}
