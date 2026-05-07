@@ -2499,7 +2499,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
                   Position your camera waist-high, about 8 feet away. Make sure your full body is visible inside the outline.
                 </div>
                 <div class="pose-preflight-status" id="posePreflightStatus">Waiting for camera...</div>
-                <button class="pose-preflight-go" id="posePreflightGoBtn" type="button" disabled>Start</button>
+                <button class="pose-preflight-go" id="posePreflightGoBtn" type="button">Start</button>
               </div>
             </div>
           </div>
@@ -2775,54 +2775,38 @@ async function togglePoseFormCheck(wrap, item, btn) {
   doneClose.onclick = () => { btn.click(); };
 
   function handlePreflight(payload) {
-    // Required-landmark gate. We don't see raw lms here, so proxy via the
-    // metrics list: if at least 2/3 of the exercise's checks resolved this
-    // frame, the body is visible enough.
+    // PR-U5: the Start button is no longer gated on detection. The
+    // patient often has to step *back* from the camera to be visible
+    // (webcam-style setups: laptop on a table, patient standing 6+ feet
+    // away), which means they can't reach the keyboard to click Start
+    // while the gate is open. Andre hit this — the gate created a
+    // step-in-step-out chicken-and-egg.
     //
-    // PR-U2: presence-mode exercises (ankle alphabet, band isolations,
-    // lateral hops) intentionally have a single "presence" check because
-    // 2D BlazePose can't reliably resolve their joint of interest. The
-    // generic Math.max(2, ...) gate makes this single-check case
-    // unreachable (got is at most 1), so the Start button stayed disabled
-    // forever. Branch on mode so presence-mode exercises gate on got >= 1.
+    // Now: status text updates with live tracking count + position
+    // hint, but the button stays clickable from the moment the panel
+    // mounts. Patient clicks Start when ready, then has time to walk
+    // into frame before the rep / hold runs.
     const exDef = window.PoseFormCheck.EXERCISES?.[item.ex.id];
-    const isPresenceMode = exDef?.mode === "presence";
     const expected = (exDef?.checks || []).length;
     const got = (payload.metrics || []).length;
-    const detected = isPresenceMode
-      ? got >= 1
-      : expected > 0 && got >= Math.max(2, Math.ceil(expected * 0.66));
-    // PR-U2 observability: surface the actual tracking count so a patient
-    // who's not making the gate sees WHY ("Tracking 0/3 markers" vs the
-    // opaque "Move so your full body is in frame"). This is what Andre
-    // means by AI observability — visible state for the AI pipeline so
-    // failure modes don't read as dead silence.
     const trackingChip = `Tracking ${got}/${expected} ${expected === 1 ? "marker" : "markers"}`;
-    const ts = performance.now();
-    if (detected) {
-      if (guided.detectedSinceTs == null) guided.detectedSinceTs = ts;
-      const heldMs = ts - guided.detectedSinceTs;
-      if (heldMs >= GUIDED.PREFLIGHT_DETECTED_HOLD_MS) {
-        if (preflightGo.disabled) {
-          preflightGo.disabled = false;
-          preflightGo.classList.add("ready");
-          preflightSt.textContent = `${trackingChip} — looking good. Tap Start when ready.`;
-        }
-      } else {
-        preflightSt.textContent = `${trackingChip} — hold still, locking in.`;
-      }
+    if (got === 0) {
+      preflightSt.textContent = `${trackingChip} — step into frame, then tap Start.`;
+    } else if (got < expected) {
+      preflightSt.textContent = `${trackingChip} — almost there. Tap Start when ready.`;
     } else {
-      guided.detectedSinceTs = null;
-      preflightGo.disabled = true;
+      preflightSt.textContent = `${trackingChip} — ready. Tap Start.`;
+    }
+    // Visual readiness cue (the "ready" class adds the soft glow). It's
+    // purely cosmetic now since the button is always clickable.
+    if (got >= 1) {
+      preflightGo.classList.add("ready");
+    } else {
       preflightGo.classList.remove("ready");
-      preflightSt.textContent = got === 0
-        ? `${trackingChip} — no body detected. Step into the outline.`
-        : `${trackingChip} — move so your full body is in frame.`;
     }
   }
 
   preflightGo.onclick = () => {
-    if (preflightGo.disabled) return;
     // First user gesture: warm up speechSynthesis (Safari autoplay gate).
     if (poseVoiceEnabled()) { try { speakNow("Set 1 of " + guided.totalSets); } catch (_) {} }
     startSet();
