@@ -72,7 +72,6 @@ from auth import (
     require_clinician_id,
 )
 from observability import attach_patient, clear_run_context, set_run_context
-import langfuse_client
 import coach_chat
 import qrcode
 import qrcode.image.svg
@@ -98,31 +97,11 @@ async def observability_request_context(request, call_next):
     patient_uid lands later inside the handler when current_user_id
     resolves the JWT. Agents wrapped with @trace_agent read this via
     contextvars and write one pipeline_runs row per call.
-
-    Langfuse layer (added 2026-05-07): if LANGFUSE_ENABLED=true, the
-    same request is wrapped in a Langfuse trace span. session_id is the
-    SHA-256 hash of patient_uid (PHI-safe); request_id lands as metadata
-    so admin dashboard rows and Langfuse traces are joinable. Failure
-    in the Langfuse layer logs but never blocks the request - kill-switch
-    is `LANGFUSE_ENABLED=false` (env update, no redeploy).
     """
-    request_id = set_run_context(request_id=None, patient_uid=None)
+    set_run_context(request_id=None, patient_uid=None)
     try:
-        with langfuse_client.request_span(
-            name=f"{request.method} {request.url.path}",
-            request_id=request_id,
-            patient_uid=None,  # late-bound via attach_patient inside handler
-            method=request.method,
-            path=request.url.path,
-        ):
-            response = await call_next(request)
+        response = await call_next(request)
     finally:
-        try:
-            langfuse_client.flush()
-        except Exception:
-            # request_span/flush already log on failure; this is the
-            # belt + suspenders no-silent-fallback gate.
-            pass
         clear_run_context()
     return response
 
@@ -181,14 +160,11 @@ def me_role(user_id: str | None = Depends(optional_user_id)):
     """Return the caller's role for client-side routing.
 
     role=anonymous   no JWT
-    role=patient     authenticated, no row in staff_users
-    role=clinician   authenticated, role='clinician' in staff_users
-    role=admin       authenticated, role='admin' in staff_users (superset)
+    role=patient     authenticated, not in clinicians table
+    role=clinician   authenticated, in clinicians table
     """
     if not user_id:
         return {"role": "anonymous", "user_id": None}
-    if is_admin(user_id):
-        return {"role": "admin", "user_id": user_id}
     if is_clinician(user_id):
         return {"role": "clinician", "user_id": user_id}
     return {"role": "patient", "user_id": user_id}
