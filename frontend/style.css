@@ -851,7 +851,7 @@ body {
 }
 
 .header-right { display: flex; align-items: center; gap: 16px; }
-.repo-link, .clinician-link {
+.repo-link {
   font-size: 12px;
   color: var(--accent2);
   text-decoration: none;
@@ -861,7 +861,33 @@ body {
   border: 1px solid var(--border);
   background: var(--surface2);
 }
-.repo-link:hover, .clinician-link:hover { border-color: var(--accent2); }
+.repo-link:hover { border-color: var(--accent2); }
+
+/* Clinician dashboard nav. Pinned below the auth pill (which is itself
+   fixed top:14px right:18px z:8500). Same right edge so the two pills
+   stack vertically; same z-index family so neither covers the other.
+   Without this, the link rendered in normal flow inside .header-right
+   and the absolute-positioned auth pill ate the click area. */
+.clinician-link {
+  position: fixed;
+  top: 52px;
+  right: 18px;
+  z-index: 8500;
+  font-size: 12px;
+  color: var(--accent2);
+  text-decoration: none;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  padding: 5px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  box-shadow: var(--shadow);
+}
+.clinician-link[hidden] { display: none; }
+.clinician-link:hover {
+  border-color: var(--accent2);
+  background: rgba(120, 200, 200, 0.10);
+}
 
 /* Status card (replaces the bulky orchestrator panel) */
 .status-card .agent-status {
