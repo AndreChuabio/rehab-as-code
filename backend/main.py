@@ -714,6 +714,12 @@ def list_pending_protocols(
             "created_by_agent": row.get("created_by_agent"),
             "created_at": row["created_at"].isoformat()
             if row.get("created_at") else None,
+            # status is `pending_review` for normal drafts and
+            # `needs_clinician_review` when SafetyReviewAgent flagged
+            # high severity. The frontend uses this to show the SAFETY
+            # badge and sort flagged rows to the top of the queue.
+            "status": row.get("status"),
+            "safety_concerns": row.get("safety_concerns"),
         })
     return {"pending": out}
 
@@ -1204,8 +1210,19 @@ async def patient_interact(
 
 
 async def _kick_plan_generation(user_id: str, message: str) -> dict:
-    """Run PlanGenerationAgent and return a serializable summary dict."""
+    """Run PlanGenerationAgent and return a serializable summary dict.
+
+    Translates PlanGenerationError into a 502-style HTTPException so the
+    caller (/patient/interact) surfaces a clear toast detail instead of
+    a generic 500 stacktrace. Sub-agent failures (Anthropic 5xx, etc.)
+    propagate up as PlanGenerationError; we treat them as upstream-AI
+    outage and return the underlying message verbatim so the toast can
+    say something like "researcher unavailable: ..." instead of a
+    cryptic FastAPI internal error.
+    """
     from agents import get_patient_agent, PatientRequest
+    from agents.plan_generation_agent import PlanGenerationError
+
     plan_agent = get_patient_agent("plan_generation")
     patient_req = PatientRequest(
         user_token=user_id,
@@ -1213,7 +1230,16 @@ async def _kick_plan_generation(user_id: str, message: str) -> dict:
         slack_user_id=None,
         metadata={},
     )
-    resp = await plan_agent.handle(patient_req)
+    try:
+        resp = await plan_agent.handle(patient_req)
+    except PlanGenerationError as exc:
+        logger.warning(
+            "plan_generation failed for user_id=%s: %s", user_id, exc,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=f"plan generation failed: {exc}",
+        ) from exc
     return {
         "agent": resp.agent_name,
         "message": resp.message,
