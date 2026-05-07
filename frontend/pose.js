@@ -387,42 +387,125 @@ function checkSway(lms) {
 // every backend run.
 // ---------------------------------------------------------------------------
 
+// Map a metric id (possibly "L_knee_valgus") to its correction key
+// ("knee_valgus"). Strips a leading "L_" or "R_" so the per-exercise
+// corrections map can use a single key for both sides.
+function correctionKey(metricId) {
+  return String(metricId).replace(/^[LR]_/, "");
+}
+
 const EXERCISES = {
   // ── Knee / quad-dominant (rep-tracked depth metrics) ────────────────
   // Mini squat: shallow, 0-45° flexion → 180-135° knee angle. Target 135°.
-  mini_squat:              { primary: "L_knee_depth", target: 135, mode: "max", checks: ["L_knee_depth", "R_knee_depth", "L_knee_valgus", "R_knee_valgus", "trunk_lean"] },
-  single_leg_squat:        { primary: "L_knee_depth", target: 75,  mode: "max", checks: ["L_knee_depth", "R_knee_depth", "L_knee_valgus", "R_knee_valgus", "trunk_lean"] },
-  wall_sit:                { primary: "L_knee_depth", target: 90,  mode: "max", checks: ["L_knee_depth", "R_knee_depth", "L_knee_valgus", "R_knee_valgus", "trunk_lean"] },
-  heel_slides:             { primary: "L_knee_depth", target: 100, mode: "max", checks: ["L_knee_depth", "R_knee_depth"] },
-  stationary_bike:         { primary: "L_knee_depth", target: 90,  mode: "max", checks: ["L_knee_depth", "R_knee_depth"] },
-  terminal_knee_extension: { primary: "L_knee_depth", target: 0,   mode: "min", checks: ["L_knee_depth", "R_knee_depth"] },
-  quad_sets:               { primary: "L_knee_depth", target: 0,   mode: "min", checks: ["L_knee_depth", "R_knee_depth"] },
+  mini_squat: {
+    primary: "L_knee_depth", target: 135, mode: "max",
+    checks: ["L_knee_depth", "R_knee_depth", "L_knee_valgus", "R_knee_valgus", "trunk_lean"],
+    corrections: {
+      knee_valgus: "Knees out, track over toes",
+      knee_depth:  "Sit back a little deeper",
+      trunk_lean:  "Chest up, stand tall",
+    },
+  },
+  single_leg_squat: {
+    primary: "L_knee_depth", target: 75, mode: "max",
+    checks: ["L_knee_depth", "R_knee_depth", "L_knee_valgus", "R_knee_valgus", "trunk_lean"],
+    corrections: {
+      knee_valgus: "Knee out, track over toes",
+      knee_depth:  "Lower under control",
+      trunk_lean:  "Hips square, chest up",
+    },
+  },
+  wall_sit: {
+    primary: "L_knee_depth", target: 90, mode: "max",
+    checks: ["L_knee_depth", "R_knee_depth", "L_knee_valgus", "R_knee_valgus", "trunk_lean"],
+    corrections: {
+      knee_valgus: "Knees out, press into the wall",
+      knee_depth:  "Slide down to ninety degrees",
+      trunk_lean:  "Back flat against the wall",
+    },
+  },
+  heel_slides: {
+    primary: "L_knee_depth", target: 100, mode: "max",
+    checks: ["L_knee_depth", "R_knee_depth"],
+    corrections: { knee_depth: "Pull your heel a little closer" },
+  },
+  stationary_bike: {
+    primary: "L_knee_depth", target: 90, mode: "max",
+    checks: ["L_knee_depth", "R_knee_depth"],
+    corrections: { knee_depth: "Full pedal stroke, knee through ninety" },
+  },
+  terminal_knee_extension: {
+    primary: "L_knee_depth", target: 0, mode: "min",
+    checks: ["L_knee_depth", "R_knee_depth"],
+    corrections: { knee_depth: "Lock the knee straight, squeeze the quad" },
+  },
+  quad_sets: {
+    primary: "L_knee_depth", target: 0, mode: "min",
+    checks: ["L_knee_depth", "R_knee_depth"],
+    corrections: { knee_depth: "Tighten the quad, push the knee down" },
+  },
 
   // ── Hip extension (glute / hamstring) ───────────────────────────────
-  glute_bridge:            { primary: "L_hip_angle",  target: 170, mode: "max_extension", checks: ["L_hip_angle", "R_hip_angle", "hip_symmetry"] },
+  glute_bridge: {
+    primary: "L_hip_angle", target: 170, mode: "max_extension",
+    checks: ["L_hip_angle", "R_hip_angle", "hip_symmetry"],
+    corrections: {
+      hip_angle:    "Drive hips higher, squeeze the glutes",
+      hip_symmetry: "Keep both hips level",
+    },
+  },
 
   // ── Hamstring / posterior chain. Walking lunge: front-leg knee ~90°,
   //    trunk upright. Same primitives as a squat but with the rep cycle
   //    driven by the front knee. Both sides tracked because the patient
   //    alternates legs across reps. ─────────────────────────────────────
-  ham_walking_lunge:       { primary: "L_knee_depth", target: 90,  mode: "max", checks: ["L_knee_depth", "R_knee_depth", "trunk_lean"] },
+  ham_walking_lunge: {
+    primary: "L_knee_depth", target: 90, mode: "max",
+    checks: ["L_knee_depth", "R_knee_depth", "trunk_lean"],
+    corrections: {
+      knee_depth: "Drop the back knee, ninety up front",
+      trunk_lean: "Trunk upright through the lunge",
+    },
+  },
 
   // ── Lower-back stability. Bird dog is a hold, not a rep. We don't try
   //    to count reps — we just surface real-time alignment so the patient
   //    sees if their hips drop / spine sags during the hold. ─────────────
-  lb_bird_dog:             { primary: "trunk_lean",   target: null, mode: "hold", checks: ["trunk_lean", "hip_symmetry", "hip_drop"] },
+  lb_bird_dog: {
+    primary: "trunk_lean", target: null, mode: "hold",
+    checks: ["trunk_lean", "hip_symmetry", "hip_drop"],
+    corrections: {
+      trunk_lean:   "Keep your back flat",
+      hip_symmetry: "Square your hips to the floor",
+      hip_drop:     "Don't let the hip drop",
+    },
+  },
 
   // ── Calf raises. BlazePose 2D ankle tracking is too noisy for direct
   //    heel-rise angle, so the rep signal here is the body-vertical-rise
   //    (hip.y delta) state machine in checkCalfRaiseRise. Trunk-lean
   //    catches the patient cheating with a forward sway. ─────────────────
-  ankle_calf_raises_double_leg: { primary: "calf_rise", target: null, mode: "rise", checks: ["calf_rise", "trunk_lean"] },
+  ankle_calf_raises_double_leg: {
+    primary: "calf_rise", target: null, mode: "rise",
+    checks: ["calf_rise", "trunk_lean"],
+    corrections: {
+      calf_rise:  "Up onto your toes",
+      trunk_lean: "Don't lean forward, stay tall",
+    },
+  },
 
   // ── Shoulder. Wall slides — track shoulder abduction (shoulder-hip-elbow
   //    angle, "max" mode toward overhead) and elbow flex/ext. Bilateral so
   //    the patient sees if one side is leading. No rep counting; the slow
   //    tempo + symmetric motion make the depth-cycle state machine unstable. ─
-  shoulder_wall_slides:    { primary: "L_shoulder_abduction", target: 160, mode: "max", checks: ["L_shoulder_abduction", "R_shoulder_abduction", "L_elbow_angle", "R_elbow_angle"] },
+  shoulder_wall_slides: {
+    primary: "L_shoulder_abduction", target: 160, mode: "max",
+    checks: ["L_shoulder_abduction", "R_shoulder_abduction", "L_elbow_angle", "R_elbow_angle"],
+    corrections: {
+      shoulder_abduction: "Reach overhead along the wall",
+      elbow_angle:        "Keep your elbows bent against the wall",
+    },
+  },
 };
 
 const DEFAULT_EX = EXERCISES.mini_squat;
@@ -808,6 +891,15 @@ let targetReps         = null;
 let halfwayAnnounced   = false;
 let setCompleteFired   = false;
 let lastVoiceTs        = 0;
+// suppressInternalVoice: when the guided-mode wrapper in app.js takes over
+// (PR-J), it owns set-complete + correction speech. We suppress the
+// internal halfway/set-complete cues, and silence the per-rep count cue
+// since the wrapper announces counts with set context. The wrapper's own
+// correction-bubble layer is fed by checkTransitions in the payload.
+let suppressInternalVoice = false;
+// Per-frame check-status memory so we can emit transition events when a
+// check flips from "good"/"idle" → "warn"/"bad". Reset on start().
+let prevCheckStatus = {};
 const VOICE_THROTTLE_MS = 600;
 const NUM_WORDS = [
   "zero","one","two","three","four","five","six","seven","eight","nine","ten",
@@ -871,30 +963,61 @@ function loop() {
       if (repEvents.length && summaryNow) {
         const headlineCount = summaryNow.repCount;
         const last = repEvents[repEvents.length - 1];
-        // Per-rep cue: bad/warn → speak the form msg; otherwise speak the count.
-        if (last.status === "warn" || last.status === "bad") {
-          maybeSpeak(last.msg || "form check", ts);
-        } else {
-          const word = NUM_WORDS[headlineCount] || String(headlineCount);
-          maybeSpeak(word, ts);
+        // Per-rep cue. When the guided-mode wrapper is driving (PR-J), the
+        // wrapper speaks the count itself with set context, so we skip the
+        // internal count + form cues here.
+        if (!suppressInternalVoice) {
+          if (last.status === "warn" || last.status === "bad") {
+            maybeSpeak(last.msg || "form check", ts);
+          } else {
+            const word = NUM_WORDS[headlineCount] || String(headlineCount);
+            maybeSpeak(word, ts);
+          }
         }
         // Halfway one-shot.
         if (
+          !suppressInternalVoice &&
           targetReps && targetReps >= 4 &&
           !halfwayAnnounced &&
           headlineCount === Math.floor(targetReps / 2)
         ) {
           halfwayAnnounced = true;
-          // Tiny delay so "halfway" lands after the count cue.
           setTimeout(() => { try { voiceCb && voiceCb("halfway"); } catch (_) {} }, 700);
         }
-        // Set complete one-shot.
+        // Set complete one-shot. Always raises the payload flag so the
+        // wrapper drives its rest-countdown UI off it; spoken cue is
+        // suppressed when the wrapper is driving voice.
         if (targetReps && !setCompleteFired && headlineCount >= targetReps) {
           setCompleteFired = true;
           setCompleteThisFrame = true;
-          setTimeout(() => { try { voiceCb && voiceCb("set complete"); } catch (_) {} }, 700);
+          if (!suppressInternalVoice) {
+            setTimeout(() => { try { voiceCb && voiceCb("set complete"); } catch (_) {} }, 700);
+          }
         }
       }
+
+      // Per-frame check-transitions (good/idle → warn/bad). The guided-mode
+      // wrapper uses these to fire correction TTS the moment a check flips,
+      // throttled per-rep on its side.
+      const checkTransitions = [];
+      const nextStatus = {};
+      for (const m of metrics) {
+        nextStatus[m.id] = m.status;
+        const prev = prevCheckStatus[m.id] || "idle";
+        const wasOk = prev === "good" || prev === "idle";
+        const isBad = m.status === "warn" || m.status === "bad";
+        if (wasOk && isBad) {
+          checkTransitions.push({
+            id: m.id,
+            from: prev,
+            to: m.status,
+            label: m.label,
+            msg: m.msg,
+            correctionKey: correctionKey(m.id),
+          });
+        }
+      }
+      prevCheckStatus = nextStatus;
 
       drawSkeleton(lms, metrics);
       drawTargetGhost(lms, metrics, ex);
@@ -919,6 +1042,14 @@ function loop() {
         }
 
         const summary = trackerSummary();
+        // inRep: any tracker is mid-cycle (descending or ascending). The
+        // wrapper uses the true → false transition (rep complete) as the
+        // signal to reset the spokenCorrections set so the next rep can
+        // re-speak a cue if the form error recurs.
+        const inRep = trackers.some(
+          (t) => t.state === "descending" || t.state === "ascending",
+        );
+        const exDef = EXERCISES[activeExId] || DEFAULT_EX;
         onPayloadCb({
           primary,
           metrics,
@@ -927,6 +1058,9 @@ function loop() {
           repSummary: summary,
           setComplete: setCompleteThisFrame,
           targetReps,
+          checkTransitions,
+          corrections: exDef.corrections || {},
+          inRep,
         });
       }
     } else if (ctx) {
@@ -949,6 +1083,9 @@ async function start(_videoEl, _canvasEl, exerciseId, onPayload, opts = {}) {
   halfwayAnnounced  = false;
   setCompleteFired  = false;
   lastVoiceTs       = 0;
+  // PR-J wrapper opts in to drive its own count + correction TTS.
+  suppressInternalVoice = !!opts.suppressInternalVoice;
+  prevCheckStatus       = {};
 
   resetSmoothing();
   resetCalfRaiseTracker();

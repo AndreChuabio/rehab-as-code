@@ -2291,3 +2291,310 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   margin-left: 4px;
   color: #6e6e73;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   PR-J: Guided exercise mode overlays.
+   These layer on top of #poseStage (which already hosts the webcam video
+   + skeleton canvas). Mobile-first; large readable text against any
+   video background. Overlay containers are pointer-events: none unless
+   they need clicks (preflight Start, between-set Tap, done Close).
+   ───────────────────────────────────────────────────────────────────────── */
+
+#poseStage .pose-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 5;
+}
+/* Children that need clicks re-enable pointer-events. */
+#poseStage .pose-overlay > * { pointer-events: auto; }
+#poseStage .pose-overlay-set,
+#poseStage .pose-overlay-rep,
+#poseStage .pose-overlay-pulse,
+#poseStage .pose-correction-bubble {
+  pointer-events: none;
+}
+
+/* Camera fit-to-frame outline, visible during preflight. JS toggles
+   `pose-stage--preflight` on #poseStage to show/hide. */
+#poseStage .pose-frame-guide {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 60%;
+  height: 90%;
+  border: 2px dashed rgba(255, 255, 255, 0.45);
+  border-radius: 50% / 35%;
+  pointer-events: none;
+  z-index: 4;
+  display: none;
+}
+#poseStage.pose-stage--preflight .pose-frame-guide { display: block; }
+
+/* Set + rep counters. Top corners. Large text. White with shadow so it
+   reads against any background. */
+#poseStage .pose-overlay-set {
+  position: absolute;
+  top: 12px;
+  left: 14px;
+  font-size: clamp(20px, 4vw, 36px);
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.02em;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.65);
+  font-variant-numeric: tabular-nums;
+}
+#poseStage .pose-overlay-rep {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  font-size: clamp(28px, 6vw, 60px);
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: 0.02em;
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.7);
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 480px) {
+  #poseStage .pose-overlay-rep { font-size: 10vw; top: 10px; right: 10px; }
+  #poseStage .pose-overlay-set { font-size: 6vw; top: 10px; left: 10px; }
+}
+
+/* Status pulse. Small dot in the bottom-right that pulses when the
+   patient has any warn/bad alignment. Color encodes the worst current
+   status. */
+#poseStage .pose-overlay-pulse {
+  position: absolute;
+  bottom: 14px;
+  right: 14px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: rgba(180, 180, 180, 0.6);
+  box-shadow: 0 0 0 0 rgba(0, 0, 0, 0);
+  transition: background 200ms ease;
+}
+#poseStage .pose-overlay-pulse[data-status="good"] {
+  background: rgba(80, 220, 180, 0.95);
+  box-shadow: 0 0 8px 2px rgba(80, 220, 180, 0.55);
+}
+#poseStage .pose-overlay-pulse[data-status="warn"] {
+  background: rgba(245, 200, 80, 0.95);
+  animation: pose-pulse 1.2s ease-in-out infinite;
+}
+#poseStage .pose-overlay-pulse[data-status="bad"] {
+  background: rgba(255, 100, 100, 0.95);
+  animation: pose-pulse 0.7s ease-in-out infinite;
+}
+@keyframes pose-pulse {
+  0%, 100% { box-shadow: 0 0 8px 2px rgba(255, 100, 100, 0.45); }
+  50%      { box-shadow: 0 0 16px 6px rgba(255, 100, 100, 0.75); }
+}
+
+/* Correction bubble. Center-top, large, fades out via JS toggling
+   [hidden] after CORRECTION_BUBBLE_MS. Red for bad, amber for warn. */
+#poseStage .pose-correction-bubble {
+  position: absolute;
+  top: 18%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 14px 22px;
+  font-size: clamp(20px, 4.5vw, 38px);
+  font-weight: 800;
+  color: #fff;
+  letter-spacing: 0.02em;
+  background: rgba(190, 60, 60, 0.85);
+  border-radius: 14px;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+  max-width: 80%;
+  text-align: center;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.55);
+  animation: pose-bubble-pop 220ms ease-out;
+}
+#poseStage .pose-correction-bubble[data-status="warn"] {
+  background: rgba(210, 150, 40, 0.88);
+}
+@keyframes pose-bubble-pop {
+  0%   { opacity: 0; transform: translate(-50%, -8px) scale(0.94); }
+  100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+
+/* Rest countdown overlay. Full-area dim, with a circular progress ring
+   + countdown number in the center. */
+#poseStage .pose-rest-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  z-index: 6;
+}
+#poseStage .pose-rest-ring {
+  position: relative;
+  width: clamp(180px, 38vw, 280px);
+  height: clamp(180px, 38vw, 280px);
+}
+#poseStage .pose-rest-ring svg {
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+#poseStage .pose-rest-ring-track {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.2);
+  stroke-width: 6;
+}
+#poseStage .pose-rest-ring-fill {
+  fill: none;
+  stroke: rgba(80, 220, 180, 0.9);
+  stroke-width: 6;
+  stroke-linecap: round;
+  transition: stroke-dashoffset 1s linear;
+}
+#poseStage .pose-rest-count {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: clamp(48px, 10vw, 96px);
+  font-weight: 900;
+  color: #fff;
+  font-variant-numeric: tabular-nums;
+}
+#poseStage .pose-rest-label {
+  font-size: clamp(18px, 3vw, 24px);
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* Between-set + done overlays. Centered card with a chunky CTA button. */
+#poseStage .pose-between-overlay,
+#poseStage .pose-done-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  z-index: 6;
+  padding: 24px;
+  text-align: center;
+}
+#poseStage .pose-between-title,
+#poseStage .pose-done-title {
+  font-size: clamp(28px, 5vw, 44px);
+  font-weight: 800;
+  color: #fff;
+}
+#poseStage .pose-between-sub,
+#poseStage .pose-done-sub {
+  font-size: clamp(16px, 2.5vw, 22px);
+  font-weight: 500;
+  color: rgba(255, 255, 255, 0.85);
+}
+#poseStage .pose-between-go,
+#poseStage .pose-done-close {
+  margin-top: 10px;
+  padding: 14px 32px;
+  font-size: clamp(16px, 2.6vw, 22px);
+  font-weight: 700;
+  color: #0b1a16;
+  background: rgba(120, 240, 200, 0.95);
+  border: 0;
+  border-radius: 10px;
+  cursor: pointer;
+  letter-spacing: 0.02em;
+}
+#poseStage .pose-between-go:hover,
+#poseStage .pose-done-close:hover {
+  background: rgba(140, 250, 215, 1);
+}
+
+/* Preflight overlay. Modal-style on the live stage. The Start button is
+   disabled until the wrapper detects required landmarks for ~2s; .ready
+   adds a soft glow when it flips enabled. */
+#poseStage .pose-preflight {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 7;
+  padding: 20px;
+}
+#poseStage .pose-preflight-card {
+  max-width: 460px;
+  width: 100%;
+  background: rgba(20, 24, 28, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  padding: 22px 24px;
+  color: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.55);
+}
+#poseStage .pose-preflight-title {
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+}
+#poseStage .pose-preflight-cues ul {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+  line-height: 1.5;
+  color: rgba(255, 255, 255, 0.82);
+}
+#poseStage .pose-preflight-help {
+  font-size: 13px;
+  line-height: 1.45;
+  color: rgba(255, 255, 255, 0.72);
+}
+#poseStage .pose-preflight-status {
+  font-size: 14px;
+  font-weight: 600;
+  color: rgba(255, 220, 130, 0.95);
+  min-height: 20px;
+}
+#poseStage .pose-preflight-go {
+  margin-top: 6px;
+  padding: 12px 18px;
+  font-size: 16px;
+  font-weight: 700;
+  color: #fff;
+  background: rgba(110, 110, 110, 0.7);
+  border: 0;
+  border-radius: 8px;
+  cursor: not-allowed;
+  transition: background 180ms ease, box-shadow 180ms ease;
+}
+#poseStage .pose-preflight-go:not(:disabled) {
+  cursor: pointer;
+  background: rgba(80, 220, 180, 0.92);
+  color: #0b1a16;
+}
+#poseStage .pose-preflight-go.ready {
+  box-shadow: 0 0 0 3px rgba(80, 220, 180, 0.35);
+}
+#poseStage .pose-preflight-go:not(:disabled):hover {
+  background: rgba(100, 235, 195, 1);
+}
+
+/* Mobile tightening at 375px wide. */
+@media (max-width: 480px) {
+  #poseStage .pose-preflight-card { padding: 16px 18px; gap: 10px; }
+  #poseStage .pose-preflight-title { font-size: 18px; }
+  #poseStage .pose-rest-ring { width: 56vw; height: 56vw; }
+}
