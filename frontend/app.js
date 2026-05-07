@@ -2064,7 +2064,12 @@ function maybeAttachFormCheckBtn(wrap, item) {
   // Only show the button on exercises that have pose criteria defined.
   // Without an EXERCISES entry the rep tracker no-ops silently and the
   // patient gets a confusing "0 reps" experience.
-  if (!window.PoseFormCheck.EXERCISES?.[item.ex.id]) return;
+  // PR-U8: My plan exercises carry both `id` (planner-generated, may not
+  // be in EXERCISES) and `library_id` (resolved canonical library entry).
+  // Prefer library_id so regressions like seated_heel_raise get the form-
+  // check flow of their canonical ankle exercise.
+  const poseKey = item.ex.library_id || item.ex.id;
+  if (!window.PoseFormCheck.EXERCISES?.[poseKey]) return;
   const videoWrap = wrap.querySelector("#galleryVideoWrap");
   if (!videoWrap || videoWrap.parentElement.querySelector(".pose-form-check-btn")) return;
   const btn = document.createElement("button");
@@ -2894,10 +2899,15 @@ async function togglePoseFormCheck(wrap, item, btn) {
   }
 
   try {
+    // PR-U8: pose.js EXERCISES is keyed by canonical library IDs. My plan
+    // exercises carry a separate `library_id` resolved server-side by
+    // exercise_kb.resolve_to_library; fall back to id if unset (Browse all
+    // items + legacy library exercises whose id IS the library id).
+    const poseExId = item.ex.library_id || item.ex.id;
     await window.PoseFormCheck.start(
       videoEl,
       canvasEl,
-      item.ex.id,
+      poseExId,
       onPosePayload,
       {
         exerciseName:          item.ex.name,
@@ -3207,7 +3217,10 @@ function attachChatCardFormCheckBtn(wrap, card) {
     console.warn("PoseFormCheck not loaded - pose.js failed to initialize");
     return;
   }
-  const exId = card.id || card.name;
+  // PR-U8: chat cards may carry a planner-generated id; prefer library_id
+  // when set so the form-check button shows on regressed-but-resolvable
+  // exercises (consistent with maybeAttachFormCheckBtn).
+  const exId = card.library_id || card.id || card.name;
   if (!exId || !window.PoseFormCheck.EXERCISES?.[exId]) return;
   const actions = wrap.querySelector(".exercise-actions");
   if (!actions || actions.querySelector(".pose-form-check-btn")) return;
