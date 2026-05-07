@@ -2565,6 +2565,19 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
 }
 
+/* PR-U6: HTML [hidden] is what the JS toggles, but our `display: flex`
+   rules below override the browser default `[hidden] { display: none }`.
+   Without this block, every overlay renders simultaneously the moment
+   the stage mounts — three rgba(0,0,0,0.55-0.60) backgrounds compound
+   to near-opaque and "Workout complete" / "Set 2 of 3" / "30" all bleed
+   over the live webcam. Restore the expected hidden semantics. */
+#poseStage .pose-rest-overlay[hidden],
+#poseStage .pose-between-overlay[hidden],
+#poseStage .pose-done-overlay[hidden],
+#poseStage .pose-preflight[hidden] {
+  display: none;
+}
+
 /* Rest countdown overlay. Full-area dim, with a circular progress ring
    + countdown number in the center. */
 #poseStage .pose-rest-overlay {
