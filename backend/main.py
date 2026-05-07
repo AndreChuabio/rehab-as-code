@@ -1479,6 +1479,12 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
       - "needs_intake"     no intake_records row
       - "needs_plan"       intake exists, protocol_state has no last_pr_url
       - "ready"            intake + protocol_state.last_pr_url both present
+
+    Also returns `review_status` (PR-H trust loop): a small dict telling the
+    frontend whether the patient has a draft awaiting clinician review, was
+    just approved/rejected, or has nothing in flight. None when the helper
+    errors — frontend renders no pill in that case (no silent fallback to a
+    fake state).
     """
     ensure_user(user_id)
     user = user_store.load_user(user_id) or {}
@@ -1494,6 +1500,29 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
     else:
         state = "ready"
 
+    # Review status (PR-H). Failures here log + return None; the call must
+    # not 5xx the intake-status endpoint just because the trust pill query
+    # missed.
+    review_status = None
+    try:
+        import protocol_repo
+        review_status = protocol_repo.get_review_status(user_id)
+        # PHI hygiene: log only the state enum + token, never reviewer name
+        # or notes_excerpt.
+        if review_status:
+            logger.info(
+                "review_status token=%s state=%s",
+                user_id, review_status.get("state"),
+            )
+    except protocol_repo.ProtocolRepoError as exc:
+        # DATABASE_URL not configured (local dev / sqlite). Frontend renders
+        # no pill; this is the documented graceful degrade.
+        logger.warning("review_status unavailable (config): %s", exc)
+        review_status = None
+    except Exception as exc:
+        logger.exception("review_status fetch failed token=%s: %s", user_id, exc)
+        review_status = None
+
     return {
         "state": state,
         "patient_name": user.get("patient_name"),
@@ -1503,6 +1532,7 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
         "current_week": ps.get("current_week"),
         "last_pr_url": ps.get("last_pr_url"),
         "session_count": len(user.get("session_history", [])),
+        "review_status": review_status,
     }
 
 

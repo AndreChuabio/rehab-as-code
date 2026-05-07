@@ -16,6 +16,14 @@ Event protocol yielded by chat_stream():
     {"type": "card",        "card": dict}                # exercise card
     {"type": "tool_call",   "name": str, "arguments": dict}
     {"type": "tool_result", "name": str, "result": dict} # includes pending_protocol_id
+    {"type": "triage_alert", "severity": str, "symptom_keyword": str | None,
+                              "clinic_phone": str | None}
+                                                          # PR-H: patient receipt
+                                                          # surfaced when symptom
+                                                          # classifier returns
+                                                          # severity=clinician-attention.
+                                                          # Frontend renders a
+                                                          # system message in chat.
     {"type": "error",       "message": str}
     {"type": "done"}
 """
@@ -62,6 +70,19 @@ _TRIAGE_SEEN: dict[tuple[str, str], bool] = {}
 def _triage_seen_key(session_id: str, message: str) -> tuple[str, str]:
     digest = hashlib.sha256(message.encode("utf-8")).hexdigest()
     return (session_id, digest)
+
+
+def _first_symptom_keyword(message: str) -> str | None:
+    """Return the first symptom-keyword match in the patient's message.
+
+    Used to populate the triage_alert event so the frontend can render
+    "Your message about a [keyword] was flagged for your PT". Falls back
+    to None when nothing matches (the frontend uses a generic phrase).
+    """
+    if not message:
+        return None
+    m = SYMPTOM_KEYWORD_RE.search(message)
+    return m.group(1).lower() if m else None
 
 
 def _format_triage_block(triage: dict[str, Any]) -> str:
@@ -552,6 +573,26 @@ async def chat_stream(
                         "error": str(exc),
                     },
                 }
+
+        # PR-H: patient-side receipt. ALWAYS emit when severity is
+        # clinician-attention so the patient sees a system message that
+        # their PT was flagged - even if the writer is absent (test path)
+        # or failed (we still want them to know to call urgent care if
+        # severe). Phone number is sourced from CLINIC_PHONE env, falling
+        # back to None so the frontend can render "call your clinic" copy
+        # without an actual link until ops configures the real number.
+        if (
+            triage_result
+            and triage_result.get("severity") == "clinician-attention"
+        ):
+            phone = (os.getenv("CLINIC_PHONE", "") or "").strip() or None
+            symptom_keyword = _first_symptom_keyword(latest_user_msg)
+            yield {
+                "type": "triage_alert",
+                "severity": "clinician-attention",
+                "symptom_keyword": symptom_keyword,
+                "clinic_phone": phone,
+            }
 
     system_prompt = build_system_prompt(
         health, protocol, display_name=display_name, triage_block=triage_block,

@@ -239,6 +239,16 @@ def test_clinician_attention_calls_writer_and_emits_tool_result(monkeypatch):
     assert triage_events[0]["result"]["severity"] == "clinician-attention"
     assert triage_events[0]["result"]["pending_protocol_id"] == "pending-uuid-cliniclock-1"
 
+    # PR-H: a triage_alert event should also fire so the patient frontend
+    # can render a system message ("Your message about a [keyword] was
+    # flagged for your PT"). Severity is the only required field; phone
+    # may be None (CLINIC_PHONE env not configured in tests).
+    alert_events = [e for e in events if e.get("type") == "triage_alert"]
+    assert len(alert_events) == 1
+    assert alert_events[0]["severity"] == "clinician-attention"
+    # symptom_keyword should match one of the regex hits in "knee keeps locking"
+    assert alert_events[0]["symptom_keyword"] in {"locking", "giving way"}
+
 
 def test_hold_load_does_not_call_writer(monkeypatch):
     """hold-load is steered via the prompt only - no protocols row written."""
@@ -273,6 +283,35 @@ def test_hold_load_does_not_call_writer(monkeypatch):
     ))
 
     assert writer_calls == []
+
+
+def test_hold_load_does_not_emit_triage_alert(monkeypatch):
+    """PR-H: triage_alert is clinician-attention-only. hold-load steers
+    via prompt only; no patient-facing system receipt needed."""
+    _reset_seen_dedup()
+    _patch_openai(monkeypatch)
+    _patch_classifier(monkeypatch, return_value={
+        "severity": "hold-load",
+        "reasoning": "pain isolated.",
+        "suggested_response": "Try the regression.",
+        "regression_exercise_id": "step_up",
+    })
+
+    import coach_chat
+
+    async def _no_executor(*a, **kw):
+        return {}
+
+    events = _drain(coach_chat.chat_stream(
+        messages=[{"role": "user", "content": "single leg squats hurt today"}],
+        health={},
+        protocol={},
+        trigger_executor=_no_executor,
+        user_token="patient-uuid",
+        session_id="sess-holdload-noalert",
+    ))
+    alert_events = [e for e in events if e.get("type") == "triage_alert"]
+    assert alert_events == []
 
 
 def test_minor_does_not_call_writer(monkeypatch):
@@ -414,3 +453,10 @@ def test_clinician_attention_writer_failure_emits_error_tool_result(monkeypatch)
     assert len(triage_events) == 1
     assert triage_events[0]["result"]["ok"] is False
     assert "supabase" in triage_events[0]["result"]["error"].lower()
+
+    # PR-H: triage_alert STILL fires when the writer fails. The patient
+    # deserves to know to call urgent care if symptoms are severe even if
+    # the backend couldn't queue the row. Receipt-on-failure parity.
+    alert_events = [e for e in events if e.get("type") == "triage_alert"]
+    assert len(alert_events) == 1
+    assert alert_events[0]["severity"] == "clinician-attention"
