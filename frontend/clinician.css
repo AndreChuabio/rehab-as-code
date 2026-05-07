@@ -230,6 +230,162 @@
   word-break: break-word;
 }
 
+/* Disrupt accidental Cmd-C on the raw JSON dump. This is friction +
+   audit logging, not access control — DevTools defeats it trivially.
+   The goal is "no accidental clipboard PHI on a queue scroll-by". */
+.raw-context-pre {
+  user-select: none;
+  -webkit-user-select: none;
+  -moz-user-select: none;
+}
+
+/* ─── Patient at-a-glance card (PR-G / S1) ──────────────────────────────
+   Replaces the old <pre> JSON dump. Renders structured intake summary +
+   pain trend. PHI lives here, so we keep it visually quiet (no flashy
+   colours) and hide rows for which the field is missing rather than
+   render "—" placeholders that read as broken UI. */
+.patient-summary {
+  background: #141a24;
+  border: 1px solid #1f2735;
+  border-radius: 8px;
+  padding: 14px 18px;
+  margin-bottom: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.patient-summary-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.patient-summary-identity {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.patient-summary-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #e6e8eb;
+}
+
+.patient-summary-age {
+  font-size: 13px;
+  color: #93a0b3;
+}
+
+.patient-summary-region {
+  background: #1f2c3f;
+  color: #b8d2f5;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid #2c3e5a;
+}
+
+.patient-summary-injury {
+  font-size: 13px;
+  color: #c5cdd9;
+}
+
+.patient-summary-postop {
+  color: #93a0b3;
+  margin-left: 6px;
+}
+
+.patient-summary-phase {
+  font-size: 12px;
+  color: #93a0b3;
+  background: #161e2a;
+  padding: 3px 8px;
+  border-radius: 4px;
+}
+
+.patient-summary-pain {
+  align-items: center;
+}
+
+.patient-summary-pain-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.patient-summary-pain-cap {
+  font-size: 12px;
+  color: #93a0b3;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.patient-summary-pain-num {
+  font-size: 15px;
+  font-weight: 600;
+}
+.patient-summary-pain-num.pain-low { color: #6ad999; }
+.patient-summary-pain-num.pain-mid { color: #d9b566; }
+.patient-summary-pain-num.pain-high { color: #f5a3a3; }
+
+.patient-summary-pain-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.pain-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2a323d;
+}
+.pain-dot.pain-low  { background: #4a8c66; }
+.pain-dot.pain-mid  { background: #a07a3a; }
+.pain-dot.pain-high { background: #a04545; }
+.pain-dot.pain-empty { background: #2a323d; }
+
+.patient-summary-trend {
+  font-size: 12px;
+  color: #93a0b3;
+}
+.pain-trend-cap {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-right: 4px;
+}
+
+.patient-summary-meta {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.patient-summary-symptoms,
+.patient-summary-goals {
+  font-size: 13px;
+  color: #c5cdd9;
+}
+
+.patient-summary-meta-cap {
+  color: #93a0b3;
+  margin-right: 6px;
+  font-size: 12px;
+}
+
+.patient-summary-meta-val {
+  color: #c5cdd9;
+}
+
 /* Safety review concerns block. Sits ABOVE the narrator summary so a
    clinician sees what the SafetyReviewAgent flagged before any other
    content. Red accent on the left edge mirrors the queue-item-flagged
@@ -355,13 +511,36 @@
   margin-bottom: 16px;
 }
 
+.narrator-summary-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
 .narrator-summary-label {
   font-size: 11px;
   color: #93a0b3;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  margin-bottom: 6px;
   font-weight: 600;
+}
+
+.narrator-retry {
+  background: transparent;
+  border: 1px solid #4a90e2;
+  color: #88b6f0;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+.narrator-retry:hover {
+  background: rgba(74, 144, 226, 0.12);
+  color: #b6d2f7;
 }
 
 .narrator-summary-body {
@@ -372,6 +551,29 @@
 
 .narrator-summary-body.narrator-summary-fallback {
   color: #6f7a8a;
+  font-style: italic;
+}
+
+.narrator-summary-body.narrator-summary-info {
+  color: #93a0b3;
+}
+
+.narrator-summary-body.narrator-summary-error {
+  color: #d9a08a;
+}
+
+/* Inline note shown when narrator_status == "no_diff" AND a safety
+   concern is flagged. Narrator block is hidden in that case; this
+   one-liner still points the clinician at the safety block. */
+.narrator-no-diff {
+  background: #161b24;
+  border: 1px solid #1f242b;
+  border-left: 3px solid #6a8cd9;
+  border-radius: 4px;
+  padding: 8px 12px;
+  margin-bottom: 14px;
+  color: #93a0b3;
+  font-size: 13px;
   font-style: italic;
 }
 

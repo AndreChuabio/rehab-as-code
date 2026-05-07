@@ -50,9 +50,48 @@
           </div>
         </header>
 
-        <details class="clinician-context" open>
-          <summary>Patient context</summary>
-          <pre id="detailContext"></pre>
+        <!-- Patient-at-a-glance card: structured summary that the clinician
+             can scan in seconds. Replaces the JSON dump that used to live
+             here; raw context is hidden behind a toggle and rendered with
+             user-select:none to discourage accidental clipboard PHI. -->
+        <section class="patient-summary" id="patientSummary" hidden>
+          <div class="patient-summary-row patient-summary-top">
+            <div class="patient-summary-identity">
+              <span class="patient-summary-name" id="psName"></span>
+              <span class="patient-summary-age" id="psAge" hidden></span>
+            </div>
+            <span class="patient-summary-region" id="psRegion" hidden></span>
+          </div>
+          <div class="patient-summary-row patient-summary-mid">
+            <div class="patient-summary-injury">
+              <span id="psInjury"></span>
+              <span class="patient-summary-postop" id="psPostOp" hidden></span>
+            </div>
+            <span class="patient-summary-phase" id="psPhase" hidden></span>
+          </div>
+          <div class="patient-summary-row patient-summary-pain" id="psPainRow" hidden>
+            <div class="patient-summary-pain-label">
+              <span class="patient-summary-pain-cap">Pain today</span>
+              <span class="patient-summary-pain-num" id="psPainNum"></span>
+              <span class="patient-summary-pain-bar" id="psPainBar" aria-hidden="true"></span>
+            </div>
+            <div class="patient-summary-trend" id="psTrend"></div>
+          </div>
+          <div class="patient-summary-row patient-summary-meta">
+            <div class="patient-summary-symptoms" id="psSymptoms" hidden>
+              <span class="patient-summary-meta-cap">Symptoms:</span>
+              <span class="patient-summary-meta-val" id="psSymptomsVal"></span>
+            </div>
+            <div class="patient-summary-goals" id="psGoals" hidden>
+              <span class="patient-summary-meta-cap">Goals:</span>
+              <span class="patient-summary-meta-val" id="psGoalsVal"></span>
+            </div>
+          </div>
+        </section>
+
+        <details class="clinician-context" id="rawContextDetails">
+          <summary>Show raw context</summary>
+          <pre id="detailContext" class="raw-context-pre"></pre>
         </details>
 
         <details class="clinician-sessions" open>
@@ -70,9 +109,16 @@
         </div>
 
         <div class="narrator-summary" id="narratorSummary" hidden>
-          <div class="narrator-summary-label">AI-generated summary</div>
+          <div class="narrator-summary-header">
+            <div class="narrator-summary-label" id="narratorSummaryLabel">AI-generated summary</div>
+            <button type="button" class="narrator-retry" id="narratorRetry" hidden>Retry</button>
+          </div>
           <div class="narrator-summary-body" id="narratorSummaryBody"></div>
         </div>
+        <!-- Inline note for the no_diff status: the narrator block is hidden,
+             but if the SafetyReviewAgent flagged something we still want a
+             one-liner pointing the clinician at the safety block. -->
+        <div class="narrator-no-diff" id="narratorNoDiff" hidden></div>
 
         <div class="clinician-diff">
           <div class="clinician-diff-col">

@@ -21,21 +21,31 @@ Caching:
   * Cache lifetime == Vercel function lifetime. On cold start it's empty;
     that's fine — the call is ~$0.001 and ~1s.
 
-Failure mode:
-  * Any error (no API key, SDK missing, Anthropic 5xx, malformed/empty
-    output, output >500 chars) returns None. The caller renders a muted
-    "Summary unavailable, see diff below" fallback. We do NOT silently
-    swap in a stale cache or invent text — clinicians need to know when
-    AI assistance failed.
+Failure modes are disambiguated via the returned status enum so the
+clinician UI can render the right micro-state instead of one generic
+"Summary unavailable" string. Statuses:
+  * "no_diff"        — active == proposed (no LLM call made)
+  * "no_api_key"     — ANTHROPIC_API_KEY unset
+  * "sdk_error"      — anthropic SDK raised (5xx, rate limit, timeout) or
+                       SDK module missing
+  * "empty_response" — model returned empty text or text >500 chars
+  * "ok"             — narration is valid model output
+
+We never silently swap in a stale cache or invent text — clinicians need
+to know when (and why) AI assistance is offline.
 """
 from __future__ import annotations
 
 import logging
 import os
 import time
-from typing import Any
+from typing import Any, Literal
 
 logger = logging.getLogger(__name__)
+
+# Status enum for summarize(). Exposed so callers (main.py, tests) can
+# match on it without re-declaring the literal.
+NarratorStatus = Literal["no_diff", "no_api_key", "sdk_error", "empty_response", "ok"]
 
 
 # Model ID is pinned. Production-grade prompts target a specific model
@@ -135,8 +145,8 @@ def summarize(
     proposed_id: str | None = None,
     protocol_id: str | None = None,
     clinician_id: str | None = None,
-) -> str | None:
-    """Produce a 2-3 sentence narration of the protocol diff.
+) -> tuple[str | None, NarratorStatus]:
+    """Produce a 2-3 sentence narration of the protocol diff plus a status.
 
     Parameters
     ----------
@@ -166,19 +176,20 @@ def summarize(
 
     Returns
     -------
-    str | None
-        The narration text on success, or None on:
-          * no meaningful diff between active and proposed
-          * missing ANTHROPIC_API_KEY
-          * Anthropic SDK error / 5xx / rate limit
-          * model returned empty or >500 chars
-
-        On None the frontend renders "Summary unavailable, see diff below"
-        in muted gray. We never raise, never silently substitute; the
-        clinician knows when AI assistance is offline.
+    tuple[str | None, NarratorStatus]
+        Pair of (narration_text, status). Narration is a non-empty string
+        only when status == "ok". For all other statuses, the narration
+        is None and the status disambiguates which failure mode produced
+        the gap so the clinician dashboard can render the right micro-
+        state (hide the block, show "key not configured", offer retry,
+        etc.). We never raise, never silently substitute; the clinician
+        always knows when (and why) AI assistance is offline.
     """
     if not _has_meaningful_diff(active_payload, proposed_payload):
-        return None
+        # No work to do. Don't log — happens on every patient self-fetch
+        # path that funnels through here, plus on stale drafts whose
+        # active row already matches.
+        return None, "no_diff"
 
     assert proposed_payload is not None  # _has_meaningful_diff guarantees this
 
@@ -189,7 +200,7 @@ def summarize(
             "diff_narrator cache_hit protocol_id=%s clinician_id=%s",
             protocol_id, clinician_id,
         )
-        return _CACHE[cache_key]
+        return _CACHE[cache_key], "ok"
 
     api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
@@ -198,17 +209,19 @@ def summarize(
             "protocol_id=%s clinician_id=%s",
             protocol_id, clinician_id,
         )
-        return None
+        return None, "no_api_key"
 
     try:
         import anthropic
     except ImportError as exc:
+        # SDK missing is functionally an "sdk_error" — the model couldn't
+        # be reached. Surface it the same way so the UI offers retry.
         logger.warning(
             "diff_narrator skipped: anthropic SDK missing: %s "
             "protocol_id=%s clinician_id=%s",
             exc, protocol_id, clinician_id,
         )
-        return None
+        return None, "sdk_error"
 
     client = anthropic.Anthropic(api_key=api_key)
     user_prompt = _build_user_prompt(
@@ -229,16 +242,16 @@ def summarize(
         )
     except Exception as exc:
         # Anthropic SDK raises a hierarchy: APIError, RateLimitError,
-        # APIConnectionError, etc. We don't care to discriminate here —
-        # the surface behavior is the same: fall back, log the error
-        # without leaking PHI.
+        # APIConnectionError, etc. We don't discriminate here — the
+        # surface behavior is "transient, may succeed on retry", which
+        # is what the UI's Retry pill tests.
         elapsed_ms = int((time.monotonic() - started) * 1000)
         logger.warning(
             "diff_narrator anthropic call failed in %dms: %s "
             "protocol_id=%s clinician_id=%s",
             elapsed_ms, exc, protocol_id, clinician_id,
         )
-        return None
+        return None, "sdk_error"
 
     elapsed_ms = int((time.monotonic() - started) * 1000)
 
@@ -257,16 +270,18 @@ def summarize(
             "protocol_id=%s clinician_id=%s",
             elapsed_ms, protocol_id, clinician_id,
         )
-        return None
+        return None, "empty_response"
 
     if len(text) > _MAX_CHARS:
         # Don't truncate — clinicians shouldn't see a sentence cut in half.
+        # An overlong response is a model failure mode in the same family
+        # as empty: usable narration was not produced.
         logger.warning(
             "diff_narrator overlong response (%d chars) in %dms "
             "protocol_id=%s clinician_id=%s",
             len(text), elapsed_ms, protocol_id, clinician_id,
         )
-        return None
+        return None, "empty_response"
 
     if cache_key[1]:
         _CACHE[cache_key] = text
@@ -280,4 +295,4 @@ def summarize(
         "protocol_id=%s clinician_id=%s",
         elapsed_ms, in_tokens, out_tokens, protocol_id, clinician_id,
     )
-    return text
+    return text, "ok"
