@@ -153,6 +153,36 @@ def _build_user_prompt(
     return "\n\n".join(parts)
 
 
+def _summarize_symptom(result: dict[str, Any]) -> dict[str, Any]:
+    """PHI-safe summary: severity + matched category + flags only.
+    NEVER the raw chat utterance — that's the whole reason this
+    classifier exists, and logging it would be the worst PHI leak in
+    the system."""
+    if not isinstance(result, dict):
+        return {"_unknown_shape": str(type(result))}
+    return {
+        "severity": result.get("severity"),
+        "category": result.get("category"),
+        "needs_clinician_review": bool(result.get("needs_clinician_review")),
+        "red_flags": (result.get("red_flags") or [])[:5],
+    }
+
+
+def _decision_from_symptom(result: dict[str, Any]) -> str | None:
+    if not isinstance(result, dict):
+        return None
+    return result.get("severity")
+
+
+from observability import trace_sync
+
+
+@trace_sync(
+    "symptom_classifier",
+    model="claude-haiku-4-5",
+    summarize=_summarize_symptom,
+    decision_from=_decision_from_symptom,
+)
 def classify(
     message: str,
     wearables: dict[str, Any] | None = None,

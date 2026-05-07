@@ -11,8 +11,17 @@
   <header class="clinician-header">
     <div class="clinician-header-title">
       <span class="clinician-badge">Clinician</span>
-      <h1>Pending review</h1>
+      <span class="admin-badge" id="adminBadge" hidden>Admin</span>
+      <h1 id="clinicianHeaderTitle">Pending review</h1>
     </div>
+
+    <!-- A4: segmented control. Only rendered for admins (server-side
+         /admin/me confirms role). Plain clinicians never see this. -->
+    <nav class="admin-mode-switch" id="adminModeSwitch" hidden role="tablist" aria-label="Dashboard mode">
+      <button type="button" class="admin-mode-btn active" data-mode="review" role="tab" aria-selected="true">Review queue</button>
+      <button type="button" class="admin-mode-btn" data-mode="debug" role="tab" aria-selected="false">Pipeline debug</button>
+    </nav>
+
     <div class="clinician-header-meta">
       <span class="clinician-email" id="clinicianEmail"></span>
       <button type="button" class="clinician-as-patient" id="clinicianAsPatient">
@@ -21,6 +30,13 @@
       <button type="button" class="clinician-signout" id="clinicianSignout">Sign out</button>
     </div>
   </header>
+
+  <!-- A4: ADMIN MODE strip — only visible when Pipeline debug is the active
+       mode. Makes the "you are not in clinician flow right now" signal
+       impossible to miss in screenshots. PHI redacted by default. -->
+  <div class="admin-mode-strip" id="adminModeStrip" hidden>
+    ADMIN MODE — PHI redacted by default
+  </div>
 
   <main class="clinician-main">
     <aside class="clinician-queue">
@@ -172,7 +188,56 @@
     </section>
   </main>
 
+  <!-- A4: Pipeline debug pane. Hidden by default; shown when admin
+       toggles the segmented control. Same shape (sidebar + detail) as
+       the Review queue layout above so muscle memory transfers. -->
+  <main class="clinician-main admin-main" id="adminMain" hidden>
+    <aside class="clinician-queue admin-runs">
+      <div class="clinician-queue-header admin-runs-header">
+        <select id="adminFilterAgent" class="admin-filter">
+          <option value="">all agents</option>
+          <option value="researcher">researcher</option>
+          <option value="evaluator">evaluator</option>
+          <option value="planner">planner</option>
+          <option value="safety_reviewer">safety_reviewer</option>
+          <option value="diff_narrator">diff_narrator</option>
+          <option value="symptom_classifier">symptom_classifier</option>
+          <option value="trend_analyst">trend_analyst</option>
+        </select>
+        <select id="adminFilterErrored" class="admin-filter">
+          <option value="">all status</option>
+          <option value="true">errored</option>
+          <option value="false">ok only</option>
+        </select>
+        <button type="button" class="clinician-refresh" id="adminRefreshBtn">↻</button>
+      </div>
+      <div class="admin-metrics-roll" id="adminMetricsRoll"></div>
+      <ol class="clinician-queue-list admin-runs-list" id="adminRunsList"></ol>
+      <div class="clinician-queue-empty" id="adminRunsEmpty" hidden>
+        No runs yet. Trigger a chat or /patient/interact to populate.
+      </div>
+    </aside>
+
+    <section class="clinician-detail admin-run-detail" id="adminRunDetail">
+      <div class="clinician-detail-empty" id="adminRunEmpty">
+        Select a run to inspect the agent-by-agent timeline.
+      </div>
+      <article class="clinician-detail-body admin-run-body" id="adminRunBody" hidden>
+        <header class="clinician-detail-header">
+          <div>
+            <h2 id="adminRunHeader">Run</h2>
+            <div class="clinician-detail-sub" id="adminRunSub"></div>
+          </div>
+        </header>
+        <section class="admin-decision-trace" id="adminDecisionTrace"></section>
+        <section class="admin-timeline" id="adminTimeline"></section>
+        <section class="admin-agent-cards" id="adminAgentCards"></section>
+      </article>
+    </section>
+  </main>
+
   <script src="/static/auth.js"></script>
   <script src="/static/clinician.js"></script>
+  <script src="/static/clinician_admin.js"></script>
 </body>
 </html>

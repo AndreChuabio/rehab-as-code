@@ -142,7 +142,9 @@ async function maybeRedirectToClinician() {
     const res = await authedFetch(`${API_BASE}/me/role`);
     if (!res.ok) return;
     const data = await res.json();
-    if (data.role === "clinician") {
+    // Admin is a strict superset of clinician — both belong on /clinician
+    // (admins additionally see the Pipeline debug segmented control there).
+    if (data.role === "clinician" || data.role === "admin") {
       window.location.replace("/clinician");
     }
   } catch (e) {
@@ -159,7 +161,7 @@ async function maybeRenderBackToDashboard() {
     const res = await authedFetch(`${API_BASE}/me/role`);
     if (!res.ok) return;
     const data = await res.json();
-    if (data.role !== "clinician") {
+    if (data.role !== "clinician" && data.role !== "admin") {
       sessionStorage.removeItem("asPatient");
       return;
     }
@@ -204,6 +206,7 @@ async function bootstrapAuth() {
   let pillMode = "hidden";
   function setPill(mode, user) {
     pillMode = mode;
+    const dashLink = document.getElementById("clinicianDashLink");
     if (!pill) return;
     if (mode === "signed-in") {
       pillEm.textContent = user?.email || "signed in";
@@ -212,6 +215,12 @@ async function bootstrapAuth() {
       if (pillDot) pillDot.className = "auth-pill-dot auth-pill-dot-ok";
       if (setPwBtn) setPwBtn.hidden = false;
       pill.hidden = false;
+      // Header nav: show the clinician dashboard link to any signed-in
+      // user. The server gates real access (require_clinician_id 403s
+      // patients). During productionization Andre and Nikki need a
+      // guaranteed nav path that doesn't depend on staff_users being
+      // seeded on the current Supabase branch.
+      if (dashLink) dashLink.hidden = false;
     } else if (mode === "demo") {
       pillEm.textContent = "Demo mode";
       action.textContent = "Sign in";
@@ -219,9 +228,11 @@ async function bootstrapAuth() {
       if (pillDot) pillDot.className = "auth-pill-dot auth-pill-dot-demo";
       if (setPwBtn) setPwBtn.hidden = true;
       pill.hidden = false;
+      if (dashLink) dashLink.hidden = true;
     } else {
       if (setPwBtn) setPwBtn.hidden = true;
       pill.hidden = true;
+      if (dashLink) dashLink.hidden = true;
     }
   }
   function showPill(user) { setPill(user ? "signed-in" : (localStorage.getItem(AUTH_SKIP_KEY) === "1" ? "demo" : "hidden"), user); }
@@ -1027,11 +1038,9 @@ async function loadProtocol() {
     const res = await authedFetch(`${API_BASE}/protocol`);
     const data = await res.json();
     renderProtocol(data);
-    const link = document.getElementById("repoLink");
-    if (link) {
-      link.href = `https://github.com/${data.repo}/tree/main/protocols`;
-      link.textContent = data.repo;
-    }
+    // Legacy GitHub repo link is gone (PR-bus retired); the existing
+    // maybeRedirectToClinician + maybeRenderBackToDashboard helpers
+    // surface the dashboard affordance for staff users.
   } catch (e) {
     console.error("Failed to load protocol:", e);
   }

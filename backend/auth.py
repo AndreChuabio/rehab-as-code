@@ -189,43 +189,80 @@ async def optional_user_id(
 # DB table rather than a JWT custom claim — see migration
 # 20260506220000_clinicians_table.sql for the rationale.
 
-def is_clinician(user_id: str | None) -> bool:
-    """Return True if `user_id` has a row in the `clinicians` table.
+def _role_for(user_id: str | None) -> str | None:
+    """Resolve the staff role ('clinician' | 'admin') for a user, or None.
 
-    Returns False (not raises) on missing DATABASE_URL or DB error so
-    public endpoints stay reachable when Postgres is down — the caller
-    decides whether the absence of a clinician role should be a 401/403.
+    Single read against staff_users (migration 20260507180000_staff_roles.sql).
+    Returns None on missing DATABASE_URL or DB error — public endpoints stay
+    reachable; the caller decides whether None means 401/403.
     """
     if not user_id:
-        return False
+        return None
     try:
         from db import DbConfigError, get_conn
     except ImportError:
-        return False
+        return None
     try:
         with get_conn(autocommit=True) as conn, conn.cursor() as cur:
-            cur.execute("SELECT 1 FROM clinicians WHERE user_id = %s LIMIT 1",
-                        (user_id,))
-            return cur.fetchone() is not None
+            cur.execute(
+                "SELECT role FROM staff_users WHERE user_id = %s LIMIT 1",
+                (user_id,),
+            )
+            row = cur.fetchone()
+            return row[0] if row else None
     except DbConfigError:
-        return False
+        return None
     except Exception as exc:
-        logger.warning("is_clinician check failed: %s", exc)
-        return False
+        logger.warning("staff role lookup failed: %s", exc)
+        return None
+
+
+def is_clinician(user_id: str | None) -> bool:
+    """True when the user has staff access (clinician OR admin).
+
+    admin is a strict superset of clinician — both can approve protocols.
+    Backwards-compatible: every existing call site sees the same behaviour
+    after the staff_users rename migration.
+    """
+    return _role_for(user_id) in ("clinician", "admin")
+
+
+def is_admin(user_id: str | None) -> bool:
+    """True only when role='admin'. Used by /admin/* observability surface."""
+    return _role_for(user_id) == "admin"
 
 
 async def require_clinician_id(
     authorization: str | None = Header(None),
 ) -> str:
-    """
-    Required-clinician dependency. Returns auth.uid() if the JWT is valid
-    AND the user is in the `clinicians` table. Raises 401 on missing/invalid
-    JWT, 403 on authenticated-but-not-clinician.
+    """Required-clinician dependency.
+
+    Returns auth.uid() if the JWT is valid AND the user has staff access
+    (clinician or admin). Raises 401 on missing/invalid JWT, 403 on
+    authenticated-but-not-staff.
     """
     user_id = await current_user_id(authorization)
     if not is_clinician(user_id):
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
             detail="clinician role required",
+        )
+    return user_id
+
+
+async def require_admin_id(
+    authorization: str | None = Header(None),
+) -> str:
+    """Required-admin dependency for /admin/* endpoints.
+
+    Stricter than require_clinician_id — only role='admin' passes. Plain
+    clinicians get 403, identical to a non-staff user, so URL-pasting a
+    /admin/* link to a clinician's tab degrades cleanly.
+    """
+    user_id = await current_user_id(authorization)
+    if not is_admin(user_id):
+        raise HTTPException(
+            status.HTTP_403_FORBIDDEN,
+            detail="admin role required",
         )
     return user_id

@@ -15,9 +15,16 @@
         <span class="logo-tag">protocols as code, gated by clinician review</span>
       </div>
       <div class="header-right">
-        <a class="repo-link" id="repoLink" target="_blank"
-           href="https://github.com/AndreChuabio/rehab-as-code/tree/main/protocols">
-          AndreChuabio/rehab-as-code
+        <!-- Always-visible clinician dashboard link. Visible to any
+             signed-in user; the server gates actual access via
+             require_clinician_id (403 for plain patients). During
+             productionization Andre + Nikki are both clinicians/admins
+             and need a guaranteed nav path that doesn't depend on the
+             staff_users table being seeded on the current Supabase
+             branch. Hidden when signed-out / demo state via JS. -->
+        <a class="clinician-link" id="clinicianDashLink"
+           href="/clinician" hidden>
+          Clinician dashboard →
         </a>
         <span class="date-display" id="dateDisplay"></span>
       </div>

@@ -40,11 +40,12 @@ os.environ.setdefault("SUPABASE_JWT_SECRET", "test-secret-not-used")
 from fastapi.testclient import TestClient  # noqa: E402
 
 import main  # noqa: E402
-from auth import current_user_id, require_clinician_id  # noqa: E402
+from auth import current_user_id, require_admin_id, require_clinician_id  # noqa: E402
 
 
 _FAKE_USER_ID = "11111111-1111-1111-1111-111111111111"
 _FAKE_CLINICIAN_ID = "22222222-2222-2222-2222-222222222222"
+_FAKE_ADMIN_ID = "33333333-3333-3333-3333-333333333333"
 
 
 @pytest.fixture
@@ -92,6 +93,29 @@ def authed_clinician_client(monkeypatch):
     finally:
         main.app.dependency_overrides.pop(current_user_id, None)
         main.app.dependency_overrides.pop(require_clinician_id, None)
+
+
+@pytest.fixture
+def fake_admin_id() -> str:
+    return _FAKE_ADMIN_ID
+
+
+@pytest.fixture
+def authed_admin_client(monkeypatch):  # noqa: ARG001
+    """TestClient with current_user_id + require_admin_id forced to pass."""
+    async def _user_override():
+        return _FAKE_ADMIN_ID
+
+    async def _admin_override():
+        return _FAKE_ADMIN_ID
+
+    main.app.dependency_overrides[current_user_id] = _user_override
+    main.app.dependency_overrides[require_admin_id] = _admin_override
+    try:
+        yield TestClient(main.app)
+    finally:
+        main.app.dependency_overrides.pop(current_user_id, None)
+        main.app.dependency_overrides.pop(require_admin_id, None)
 
 
 @pytest.fixture

@@ -141,6 +141,33 @@ def _build_user_prompt(
     return "\n\n".join(parts)
 
 
+def _summarize_review(result: dict[str, Any]) -> dict[str, Any]:
+    """PHI-safe summary: severity + rule codes only. Never the patient
+    narrative; safety_concerns can echo back symptom descriptions."""
+    if not isinstance(result, dict):
+        return {"_unknown_shape": str(type(result))}
+    concerns = result.get("safety_concerns", []) or []
+    return {
+        "verdict": result.get("verdict"),
+        "n_concerns": len(concerns),
+        "severities": [c.get("severity") for c in concerns if isinstance(c, dict)][:6],
+        "rules": [c.get("rule") for c in concerns if isinstance(c, dict) and c.get("rule")][:6],
+    }
+
+
+def _decision_from_review(result: dict[str, Any]) -> str | None:
+    return (result or {}).get("verdict") if isinstance(result, dict) else None
+
+
+from observability import trace_sync
+
+
+@trace_sync(
+    "safety_reviewer",
+    model="claude-sonnet-4-6",
+    summarize=_summarize_review,
+    decision_from=_decision_from_review,
+)
 def review(
     draft: dict[str, Any],
     intake: dict[str, Any] | None,

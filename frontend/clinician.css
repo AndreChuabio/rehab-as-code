@@ -888,3 +888,281 @@
   font-style: italic;
   margin-left: 6px;
 }
+
+/* ── Admin / Pipeline debug surface (A4) ──────────────────────────────────
+ * Honors Clinical Twilight tokens. Admin chrome uses a desaturated indigo
+ * (--ai-bg / --ai-text) so it can never be confused with the safety-
+ * critical accent (--accent) used by Approve / Reject. */
+
+.admin-badge {
+  background: rgba(120, 130, 200, 0.18);
+  color: var(--ai-text, #b8b8d8);
+  border: 1px solid rgba(140, 150, 220, 0.35);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 3px 8px;
+  border-radius: 4px;
+  text-transform: uppercase;
+  margin-left: 6px;
+}
+
+.admin-mode-switch {
+  display: inline-flex;
+  gap: 0;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 0 16px;
+}
+.admin-mode-btn {
+  background: transparent;
+  border: 0;
+  color: var(--muted, #9aa3b2);
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.admin-mode-btn.active {
+  background: rgba(120, 130, 200, 0.22);
+  color: var(--ai-text, #d2d6f0);
+}
+.admin-mode-btn:not(.active):hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+/* "ADMIN MODE" strip — impossible to miss in screenshots. */
+.admin-mode-strip {
+  background: rgba(120, 130, 200, 0.18);
+  border-top: 2px solid rgba(140, 150, 220, 0.5);
+  border-bottom: 1px solid rgba(140, 150, 220, 0.25);
+  color: var(--ai-text, #d2d6f0);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 6px 16px;
+  text-transform: uppercase;
+}
+
+/* Run feed sidebar */
+.admin-runs-header {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.admin-filter {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text, #e2e6ee);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.admin-metrics-roll {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.metrics-pill {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.metrics-pill-name { font-weight: 700; color: var(--ai-text, #d2d6f0); }
+.metrics-pill-val { color: var(--muted, #9aa3b2); }
+.metrics-pill-val.err { color: var(--danger, #d97070); }
+.metrics-empty { font-size: 11px; color: var(--muted); padding: 4px 8px; }
+
+.run-item {
+  list-style: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  padding: 8px 12px;
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--text, #e2e6ee);
+}
+.run-item:hover { background: rgba(255, 255, 255, 0.03); }
+.run-item.active { background: rgba(120, 130, 200, 0.12); }
+.run-item-row1 { display: flex; gap: 8px; align-items: baseline; }
+.run-item-row2 { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
+.run-item-time { color: var(--muted, #9aa3b2); width: 32px; }
+.run-item-patient { font-weight: 600; }
+.run-item-status { margin-left: auto; }
+.run-item-decision {
+  margin-left: auto;
+  font-size: 10px;
+  color: var(--muted, #9aa3b2);
+}
+
+.agent-chip {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.agent-chip-ok { background: rgba(80, 180, 130, 0.15); color: #8edcb1; }
+.agent-chip-err { background: rgba(210, 90, 90, 0.18); color: #e89a9a; }
+
+/* Run detail */
+.admin-run-body { padding: 16px; }
+
+.admin-decision-trace {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.trace-chip {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 100px;
+}
+.trace-chip-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+.trace-chip-value { font-size: 14px; font-weight: 700; color: var(--text); }
+.trace-chip[data-status="error"] { border-color: rgba(210, 90, 90, 0.4); }
+.trace-chip[data-status="error"] .trace-chip-value { color: #e89a9a; }
+.trace-chip[data-status="missing"] { opacity: 0.5; }
+
+.admin-timeline {
+  margin: 16px 0;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 6px;
+  padding: 12px;
+}
+.timeline-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.timeline-label {
+  width: 130px;
+  font-size: 11px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted);
+  text-align: right;
+}
+.timeline-track {
+  flex: 1;
+  height: 14px;
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 3px;
+  position: relative;
+}
+.timeline-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  border-radius: 3px;
+}
+.timeline-bar.bar-ok { background: rgba(80, 180, 130, 0.65); }
+.timeline-bar.bar-err { background: rgba(210, 90, 90, 0.7); }
+
+.admin-agent-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.agent-card {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.agent-card.card-err { border-color: rgba(210, 90, 90, 0.4); }
+.agent-card-head {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  padding: 8px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.agent-card-name { font-weight: 700; }
+.agent-card-status { color: var(--muted); }
+.agent-card.card-err .agent-card-status { color: #e89a9a; }
+.agent-card-time, .agent-card-tokens { color: var(--muted); }
+.agent-card-toggle {
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--muted);
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.agent-card-body { display: none; padding: 0 12px 10px 12px; }
+.agent-card.expanded .agent-card-body { display: block; }
+.agent-card-summary {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.25);
+  padding: 8px;
+  border-radius: 4px;
+  white-space: pre-wrap;
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+}
+.agent-card-summary-empty {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: italic;
+}
+.agent-card-err {
+  background: rgba(210, 90, 90, 0.12);
+  color: #e89a9a;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  padding: 6px 12px;
+  border-top: 1px solid rgba(210, 90, 90, 0.25);
+}
+
+/* PHI reveal affordance (A5) */
+.phi-field {
+  display: inline-flex;
+  gap: 4px;
+  align-items: baseline;
+}
+.phi-value-hashed {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--muted);
+}
+.phi-value-hashed.phi-revealed {
+  color: var(--text);
+  background: rgba(120, 130, 200, 0.12);
+  padding: 1px 4px;
+  border-radius: 3px;
+  border-left: 2px solid rgba(140, 150, 220, 0.5);
+}
+.phi-reveal-btn {
+  background: rgba(120, 130, 200, 0.15);
+  border: 1px solid rgba(140, 150, 220, 0.35);
+  color: var(--ai-text, #d2d6f0);
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 3px;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.phi-reveal-btn:hover { background: rgba(120, 130, 200, 0.25); }
+.phi-reveal-btn:disabled { opacity: 0.5; cursor: not-allowed; }

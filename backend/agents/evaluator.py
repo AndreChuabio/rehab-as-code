@@ -132,6 +132,31 @@ def _build_user_prompt(
     return "\n\n".join(parts)
 
 
+def _summarize_decision(result: dict[str, Any]) -> dict[str, Any]:
+    """PHI-safe summary: decision verb + rule firings only. Never the
+    free-text reasons (which can echo back patient symptom narrative)."""
+    if not isinstance(result, dict):
+        return {"_unknown_shape": str(type(result))}
+    return {
+        "decision": result.get("decision"),
+        "rules_fired": (result.get("rules_fired") or [])[:10],
+        "n_reasons": len(result.get("reasons", []) or []),
+    }
+
+
+def _decision_from_signal(result: dict[str, Any]) -> str | None:
+    return (result or {}).get("decision") if isinstance(result, dict) else None
+
+
+from observability import trace_sync
+
+
+@trace_sync(
+    "evaluator",
+    model="claude-sonnet-4-6",
+    summarize=_summarize_decision,
+    decision_from=_decision_from_signal,
+)
 def signal(
     intake: dict[str, Any] | None,
     health: dict[str, Any] | None,
