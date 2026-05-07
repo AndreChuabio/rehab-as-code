@@ -385,6 +385,13 @@ def build_system_prompt(
         "captured intake for [injury]') and, if the patient seems ready, offer "
         "a chip 'Draft me a plan based on this' rather than auto-firing "
         "fire_weekly_plan_trigger.\n"
+        "9. Always respond in English, regardless of the language the patient "
+        "writes in. The clinical content, exercise library, and clinician "
+        "review pipeline are English-only; mirroring the patient's language "
+        "would put non-English replies in front of clinicians who can't audit "
+        "them. If the patient writes in another language, reply in English and "
+        "continue normally - do not translate, do not apologize, do not switch "
+        "languages mid-conversation.\n"
     )
     if triage_block:
         base = base + triage_block

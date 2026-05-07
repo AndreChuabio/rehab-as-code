@@ -10,9 +10,17 @@ approval flips the row to `active`.
 Built at Slop Con NYC 2026-05-02 on a GitHub-PR-as-message-bus architecture.
 Migrated to direct Supabase writes post-hackathon (PR #53 introduced the
 write path; PR #62 hardened it with RLS lockdown; the cleanup that retired
-the cursor / ag2 / cached_replay PR-bus shipped right after). Now in
-production: deployed on Vercel, backed by Supabase Postgres + Supabase Auth
-(HS256 JWT, magic-link sign-in) for the patient-scoped surfaces. Live at
+the cursor / ag2 / cached_replay PR-bus shipped right after).
+
+The 2026-05-07 productionization sprint replaced the single-LLM drafter
+with a deterministic multi-agent pipeline (researcher + trend_analyst in
+parallel → evaluator → planner → safety_reviewer), added a `DiffNarrator`
+and `SymptomClassifier` for the trust loop, made today's-session a
+DB-backed training log, added a `start_intake_tool` so Maya can run intake
+conversationally, hardened Tavus video calls with auth + persistence, and
+swapped the dull palette for the Clinical Twilight color system. Now in
+production: deployed on Vercel, backed by Supabase Postgres + Supabase
+Auth (HS256 / ES256 JWT, magic-link or email+password sign-in). Live at
 https://rehab-as-code-five.vercel.app.
 
 ## How it works
@@ -22,47 +30,120 @@ https://rehab-as-code-five.vercel.app.
      │
      ▼
   Coach Maya chat (OpenAI gpt-4o-mini, /chat SSE)
-     │  fire_symptom_trigger / fire_checkin_trigger /
-     │  fire_weekly_plan_trigger
+     │  pre-flight: symptom_classifier (Haiku 4.5) when pain keywords
+     │  tools: start_intake_tool, fire_symptom_trigger,
+     │         fire_checkin_trigger, fire_weekly_plan_trigger,
+     │         fire_intake_trigger (admin), recommend_exercise,
+     │         list_phase_exercises
      ▼
-  chat_protocol_drafter (Anthropic claude-sonnet-4-6)
-     │  produces a JSON-validated protocol revision
-     ▼
-  protocol_repo.save_pending(token, payload, "chat:<flow>")
-     │  INSERT into `protocols` table, status=pending_review
-     ▼                       ┌──────────────────────────────┐
-  pending_review row ──────► │ /clinician dashboard          │
-                             │ diff vs active                │
-                             │ POST /protocols/{id}/approve  │
-                             └──────────────┬───────────────┘
+  Plan generation pipeline (deterministic orchestration):
+     │
+     │   ┌─────────────────────┐    ┌─────────────────────┐
+     │   │ researcher          │    │ trend_analyst       │
+     │   │ (Sonnet 4.6)        │    │ (Sonnet 4.6)        │
+     │   │ candidates from KB  │    │ multi-week patterns │
+     │   └──────────┬──────────┘    └──────────┬──────────┘
+     │              │   asyncio.gather         │
+     │              └────────────┬─────────────┘
+     │                           ▼
+     │              ┌─────────────────────────┐
+     │              │ evaluator (Sonnet 4.6)  │
+     │              │ progress | hold | regress
+     │              └────────────┬────────────┘
+     │                           ▼
+     │              ┌─────────────────────────┐
+     │              │ planner (Sonnet 4.6)    │
+     │              │ composes protocol YAML  │
+     │              └────────────┬────────────┘
+     │                           ▼
+     │              ┌─────────────────────────┐
+     │              │ safety_reviewer         │
+     │              │ (Sonnet 4.6)            │
+     │              │ pain ceiling / contra-  │
+     │              │ indication / hold rules │
+     │              └────────────┬────────────┘
+     ▼                           ▼
+  protocol_repo.save_pending(token, payload, source_metadata,
+                             status=pending_review|needs_clinician_review,
+                             safety_concerns=[...])
+     │
+     ▼                       ┌──────────────────────────────────┐
+  Clinician dashboard ─────► │ DiffNarrator (Haiku 4.5)         │
+                             │ 2-3 sentence plain-English diff   │
+                             │ Patient-at-a-glance card          │
+                             │ Safety concerns banner (red)      │
+                             │ Region-mismatch banner (amber)    │
+                             │ Last-7-days adherence panel       │
+                             │ POST /protocols/{id}/approve      │
+                             └──────────────┬───────────────────┘
                                             ▼
                                   status=active (transactional;
                                   prior active becomes superseded)
+                                            │
+                                            ▼
+                             Patient sees review_status pill flip
+                             from pending → approved + "Start
+                             today's session" CTA appears
 ```
 
 The Supabase `protocols` table is the message bus. Every protocol revision
 is auditable (token, parent_id, created_by_agent, reviewed_by, reviewed_at,
-review_notes) and the `(token) WHERE status='active'` partial unique index
-keeps "active" singular.
+review_notes, safety_concerns) and the `(token) WHERE status='active'`
+partial unique index keeps "active" singular per patient.
+
+**Supabase is the canonical source of truth.** Patient name, intake fields,
+protocol exercises, sessions, checkins, and Tavus conversations all live
+in Postgres tables with RLS. The frontend never reads patient identity
+from denormalized JSON; it resolves through `get_display_name(token)` which
+walks `intake_records → auth.users.full_name → email local-part → "the
+patient"`.
 
 ## The four-flow workflow chain
 
-| Trigger button | Endpoint | What happens | UI artifact |
+| Trigger | Endpoint | What happens | UI artifact |
 |---|---|---|---|
-| `1 intake` | `POST /patient/interact` (auth) | `IntakeAgent` collects the 7-field structured intake; on completion auto-fires `PlanGenerationAgent`, which writes a `pending_review` row | Intake modal → plan-gen modal → pending-review approve card linking to `/clinician` |
-| `2 weekly plan` | `POST /chat` tool `fire_weekly_plan_trigger` (auth) | LLM drafts next week's progression from the active protocol; saves as `pending_review` | "weekly plan → review queue" card with Approve button |
-| `3 check-in` | `POST /chat` tool `fire_checkin_trigger` (auth) | LLM drafts a load/volume tweak (or returns the active protocol unchanged with a "no edit needed" summary) | "check-in → review queue" card |
-| `4 symptom` | `POST /chat` tool `fire_symptom_trigger` (auth) | LLM drafts a regression / substitution and quotes the patient's words verbatim in the summary | "symptom → review queue" card |
+| Start intake | `POST /chat` tool `start_intake_tool` (auth) — or modal-driven `POST /patient/interact` for new patients | Maya runs the 7-field intake conversationally; on completion the multi-agent plan pipeline fires, writing a `pending_review` row | "intake → captured" card → review queue card linking to `/clinician` |
+| Draft next week | `POST /chat` tool `fire_weekly_plan_trigger` (auth) | Multi-agent pipeline drafts next week's progression from the active protocol; safety_reviewer attaches concerns; saves as `pending_review` (or `needs_clinician_review` on high severity) | "weekly plan → review queue" card |
+| Log a check-in | `POST /chat` tool `fire_checkin_trigger` (auth) | Multi-agent pipeline drafts a load/volume tweak (or returns the active protocol unchanged with a "no edit needed" summary) | "check-in → review queue" card |
+| Report a symptom | `POST /chat` tool `fire_symptom_trigger` (auth) — or pre-flight `symptom_classifier` (Haiku 4.5) when patient mentions pain keywords | LLM drafts a regression / substitution and quotes the patient's words verbatim. High-severity classifier output writes a `needs_clinician_review` row directly. | "symptom → review queue" card; high severity gets red banner on clinician queue |
+
+Pre-flight `symptom_classifier` runs before Maya generates her response
+whenever the patient's message contains pain keywords. It reads the
+patient's message + last 24h of wearables + current protocol + last
+session's pose metrics, and emits one of `minor | hold-load |
+clinician-attention`. `clinician-attention` writes a `needs_clinician_review`
+row and Maya tells the patient she has flagged it for review.
 
 The chain state propagates through Supabase: each `approve` supersedes the
-prior active row in a single transaction, and the next flow's drafter reads
-the new active protocol as its starting point.
+prior active row in a single transaction, the next flow's pipeline reads
+the new active protocol as its starting point, and the patient surface
+flips its `review_status` pill from `pending` → `approved` and surfaces a
+"Start today's session" CTA.
 
 The frontend asks `GET /patient/me/intake-status` on auth-ready and routes
 to the right modal based on server-derived state (`needs_intake` →
-intake modal, `needs_plan` → plan-gen modal, `ready` → main UI). The
-`intake_records` row + `protocol_state.last_pr_url` are the source of truth;
-no localStorage flag drives the gating for authed users.
+intake modal or conversational intake via Maya, `needs_plan` → plan-gen
+modal, `ready` → main UI). The endpoint also returns `display_name`,
+`last_active`, and `review_status` so the header pill and Maya's greeting
+stay in sync. The `intake_records` row + `protocol_state.last_pr_url` are
+the source of truth; no localStorage flag drives the gating for authed
+users.
+
+### State-aware Maya greeting
+
+On auth-resolve, Maya's opening line is selected from four branches keyed
+on `intake_status.state`:
+
+- `needs_intake` (new patient) → "Hi, I'm Maya. I'll ask a few quick
+  questions to set up your plan…"
+- `needs_plan` (intake done, awaiting plan) → "Welcome back. Let me draft
+  your first week…"
+- `ready & last_active < 48h` → "Good to see you again. Anything new
+  since yesterday?"
+- `ready & last_active ≥ 48h` → "Welcome back — it's been a few days.
+  How's the recovery going?"
+
+This is computed server-side and rendered before the patient types.
 
 Flows 2-4 can also be fired through chat (Coach Maya parses natural
 language and routes via `fire_*_trigger` tools). `fire_intake_trigger` is now
@@ -73,30 +154,50 @@ asks to restart their intake.
 ## Stack
 
 - **Hosting**: Vercel serverless (`api/index.py` re-exports `backend/main.py`)
-- **Database**: Supabase Postgres in production; SQLite locally; flat-file
-  legacy. Selected via `STORAGE_BACKEND` env var. Schema lives in
-  `supabase/migrations/` and auto-applies on push to main via Supabase's
-  GitHub integration
-- **Auth**: Supabase Auth on the chat surface — HS256 JWT verified in
-  `backend/auth.py`, `auth.uid()` becomes the patient identifier server-side
+- **Database**: Supabase Postgres in production with RLS on every public
+  table; SQLite locally; flat-file legacy. Selected via `STORAGE_BACKEND`
+  env var. Schema lives in `supabase/migrations/` (append-only) and
+  auto-applies on push to main via Supabase's GitHub integration
+- **Auth**: Supabase Auth on every patient-scoped surface — HS256 + ES256
+  JWT verified via JWKS in `backend/auth.py`, `auth.uid()` becomes the
+  patient identifier server-side. Magic-link and email+password sign-in
+  are both supported; self-service sign-up + password set are wired
 - **Backend**: FastAPI (Python 3.11+), serves both API and frontend
-- **Patient agents**: Anthropic Claude Sonnet 4.6 — `IntakeAgent`
-  (structured 7-field intake) and `PlanGenerationAgent` (loads intake +
-  wearables + KB, drafts a protocol, saves as `pending_review`). Wired
-  to the frontend through `POST /patient/interact` and the intake +
-  plan-gen modals
-- **Chat coach**: OpenAI `gpt-4o-mini` via the `coach_chat` module — covers
-  ongoing coaching after the plan exists. Fires `fire_symptom_trigger`,
-  `fire_checkin_trigger`, `fire_weekly_plan_trigger`, and the
-  intake-restart admin escape hatch `fire_intake_trigger`. Each fire_*_trigger
-  routes through `chat_protocol_drafter` (Anthropic) → `protocol_repo.save_pending`
+- **Plan generation pipeline** (Anthropic Claude Sonnet 4.6 throughout):
+  `researcher` → reads `protocols/protocol-library/` and pulls
+  evidence-based candidates with citations; `trend_analyst` → looks at the
+  last 4-8 weeks of checkins / sessions / wearables and emits
+  `plateau | breakthrough | regression | steady`; `evaluator` → consumes
+  both fans and emits `progress | hold | regress` with confidence;
+  `planner` → composes the protocol YAML; `safety_reviewer` → enforces
+  pain ceilings, contraindication, hold rules, frequency limits.
+  Orchestrated deterministically via `asyncio.gather` + sequential
+  composition. Never LLM-routed.
+- **Chat coach**: OpenAI `gpt-4o-mini` via the `coach_chat` module. Tools:
+  `start_intake_tool` (conversational intake), `fire_symptom_trigger`,
+  `fire_checkin_trigger`, `fire_weekly_plan_trigger`,
+  `fire_intake_trigger` (admin escape hatch), `recommend_exercise`,
+  `list_phase_exercises`. Pre-flight `symptom_classifier` (Haiku 4.5)
+  fires when the patient mentions pain keywords
+- **DiffNarrator** (Anthropic Haiku 4.5): generates a 2-3 sentence
+  plain-English summary of pending protocol diffs for clinicians,
+  returned via `narrator_status` enum (`ok | no_diff | no_api_key |
+  sdk_error | empty_response`) so the UI can distinguish "summary
+  unavailable" failure modes
+- **Body-region anchoring**: `clinical_taxonomy.resolve_body_region(injury_type)`
+  + `exercise_kb.body_region_for(exercise_id)` ensure drafter and planner
+  refuse cross-region exercises. Post-LLM validator catches stragglers.
 - **Form-check (in-browser)**: MediaPipe Pose Landmarker + custom rep
-  counter; per-set summaries POST to `/pose/session` (one row per set)
-- **Video coach (optional)**: Tavus CVI iframe — narrative layer only,
-  not an intake/checkin agent
+  counter; per-set summaries POST to `/pose/session` (one row per set).
+  Guided exercise mode (PR-J) speaks set / rep cues and real-time form
+  corrections via the Web Speech API
+- **Video coach (Tavus)**: Tavus CVI iframe with `Depends(current_user_id)`
+  on `/start-session`, sessions persisted in `tavus_sessions` table
 - **Wearables**: Apple Health via iOS Shortcut → `/health-sync`, with Open
   Wearables as an optional read-only source
-- **Frontend**: Vanilla JS, no build step
+- **Frontend**: Vanilla JS, no build step. Clinical Twilight palette
+  (cool navy-slate dark mode, teal CTA, sage success, warm tan AI-accent).
+  See `frontend/DESIGN_SYSTEM.md`.
 
 ## Why no PR-bus anymore
 
@@ -130,24 +231,40 @@ rehab-as-code/
       base.py                      ABC + dataclasses (PatientAgent,
                                    PatientRequest, PatientResponse)
       intake_agent.py              PatientAgent — structured 7-field intake
-                                   chat surfaced through /patient/interact
-      plan_generation_agent.py     PatientAgent — loads intake + wearables +
-                                   KB, drafts a protocol, saves as
-                                   pending_review via protocol_repo.save_pending
-    chat_protocol_drafter.py       LLM-driven drafter for chat-tool fires
-                                   (Anthropic claude-sonnet-4-6); writes
-                                   pending_review rows
-    protocol_repo.py               read/write helpers for the `protocols`
-                                   table (save_pending, approve, reject,
-                                   get_active, list_pending)
+      plan_generation_agent.py     thin orchestrator: gathers researcher +
+                                   trend_analyst, runs evaluator, planner,
+                                   safety_reviewer; writes via protocol_repo
+      researcher.py                Sonnet 4.6 — KB-grounded candidate exercises
+      trend_analyst.py             Sonnet 4.6 — 4-8 week pattern detection
+      evaluator.py                 Sonnet 4.6 — progress | hold | regress
+      planner.py                   Sonnet 4.6 — composes protocol YAML
+      safety_reviewer.py           Sonnet 4.6 — pain / contraindication /
+                                   hold rules; sets needs_clinician_review
+      symptom_classifier.py        Haiku 4.5 — pre-flight pain triage on /chat
+    chat_protocol_drafter.py       legacy single-call drafter for chat-tool
+                                   fires; preserved for fire_checkin_trigger /
+                                   fire_symptom_trigger short paths
+    diff_narrator.py               Haiku 4.5 — 2-3 sentence plain-English
+                                   protocol diff summary for clinicians;
+                                   returns narrator_status enum
+    clinical_taxonomy.py           resolve_body_region(injury_type) + region
+                                   guards used by drafter / planner
+    exercise_kb.py                 exercise library lookup; body_region_for()
+    protocol_repo.py               read/write helpers for `protocols` table
+                                   (save_pending, approve, reject, get_active,
+                                   list_pending, attach_safety_concerns)
     protocol_loader.py             fetches active protocol from Supabase
-                                   (PROTOCOL_SOURCE=supabase) or GitHub fallback
-    coach_chat.py                  OpenAI chat with fire_*_trigger tools
+    session_repo.py                read/write helpers for `sessions` (training
+                                   log) — plan / start / complete an exercise
+    tavus_repo.py                  read/write helpers for `tavus_sessions`
+    coach_chat.py                  OpenAI chat with start_intake_tool +
+                                   fire_*_trigger tools + state-aware greeting
     health_mock.py                 wearable data + Apple Health ingest
     open_wearables_client.py       optional read-only Open Wearables source
-    user_store.py                  per-user records (3-way pluggable:
-                                   flatfile / sqlite / postgres)
-    auth.py                        Supabase JWT verification (HS256)
+    user_store.py                  per-user records (3-way pluggable);
+                                   owns get_display_name(token) resolver
+    auth.py                        Supabase JWT verification (HS256 + ES256
+                                   via JWKS) → current_user_id, is_clinician
     shortcut_template.py           iOS Shortcut binary plist generator
     calendar_fetch.py              Google Calendar
     context_builder.py             Tavus persona context
@@ -155,24 +272,30 @@ rehab-as-code/
   protocols/
     protocol.yaml                  patient's current program (starts empty)
     protocol-library/              evidence-based progressions (read-only)
-    .cursorrules                   clinical guardrails for the agent
     schema.json                    protocol.yaml schema
-    .demo-snapshots/               snapshots for demo reset
-    log.yaml                       check-in log (agent appends)
+    log.yaml                       check-in log
+  knowledge/
+    exercise-library.json          full exercise library (publicly readable)
   frontend/
     index.html                     dashboard + intake modal + plan-gen modal
                                    + auth overlay
-    app.js                         SSE consumer + tool calls + Approve/Reset +
-                                   patient state machine (refreshPatientState,
-                                   showIntakeModal, showPlanGenModal)
-    style.css                      dark theme + modal styles
-    pose.js                        in-browser MediaPipe form-check
-    clinician.html / .js / .css    /clinician dashboard (pending queue + diff)
+    app.js                         SSE consumer + tool calls + Approve +
+                                   patient state machine + sessions integration
+                                   + state-aware Maya greeting render
+    style.css                      Clinical Twilight palette + components
+    pose.js                        in-browser MediaPipe form-check; guided
+                                   exercise mode with spoken cues / corrections
+    clinician.html / .js / .css    /clinician dashboard (pending queue + diff
+                                   + narrator summary + safety banner +
+                                   region-mismatch banner + adherence panel)
+    DESIGN_SYSTEM.md               token + component + Figma → code rules
   api/
     index.py                       Vercel entrypoint (re-exports backend/main.py)
   supabase/
-    migrations/                    SQL files auto-applied on push to main
-                                   via Supabase GitHub integration
+    migrations/                    SQL files auto-applied on push to main via
+                                   Supabase GitHub integration. 10 applied as
+                                   of 2026-05-07 (init_user_store →
+                                   tavus_sessions)
   vercel.json                      Vercel build/route config
   requirements.txt                 Vercel installs from THIS file (root)
   backend/requirements.txt         local dev installs from this one — keep in sync
@@ -231,22 +354,30 @@ Production: https://rehab-as-code-five.vercel.app
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/protocol` | Active protocol for the auth'd patient (Supabase row WHERE status=active), with GitHub fallback |
+| GET | `/protocol` | Active protocol for the auth'd patient (Supabase row WHERE status=active) |
 | GET | `/health-data` | Today's wearable metrics |
 | GET | `/calendar` | Today's calendar events |
-| POST | `/chat` | OpenAI tool-calling chat; fires `fire_*_trigger` tools that draft pending_review rows. **Requires `Authorization: Bearer <supabase_jwt>`** |
-| POST | `/patient/interact` | Auth-gated. Drives the IntakeAgent → PlanGenerationAgent flow that backs the intake + plan-gen modals. `metadata.force = "plan_generation"` re-runs plan generation |
-| GET | `/patient/me/intake-status` | Auth-gated. Returns `state ∈ {needs_intake, needs_plan, ready}` so the frontend can route to the right modal |
-| GET | `/protocols/pending` | Auth-gated (clinician). Pending-review queue for the dashboard |
-| GET | `/protocols/{id}` | Auth-gated (clinician). One protocol with the patient's currently-active row alongside, for diff rendering |
-| POST | `/protocols/{id}/approve` | Auth-gated. Promotes a pending_review row to active in a single transaction (supersedes prior active) |
-| POST | `/protocols/{id}/reject` | Auth-gated. Marks a pending_review row as rejected; notes required for the audit trail |
-| ~~POST `/agent/invoke`~~ ~~GET `/agent/stream/{id}`~~ ~~POST `/pr/apply`~~ ~~POST `/demo/reset`~~ | removed 2026-05-06 | Replaced by `/chat` + `chat_protocol_drafter` + `/protocols/*/approve` |
-| POST | `/start-session` | Create Tavus CVI session with Coach Maya persona |
+| GET | `/exercises` | Public exercise library (full catalog, optional `?phase=` filter) |
+| POST | `/chat` | OpenAI tool-calling chat; pre-flight `symptom_classifier`; fires `start_intake_tool`, `fire_*_trigger` tools that draft pending_review rows. State-aware greeting based on intake-status. **Auth required.** |
+| POST | `/patient/interact` | Auth-gated. Drives the IntakeAgent → multi-agent plan pipeline that backs the intake + plan-gen modals. `metadata.force = "plan_generation"` re-runs plan generation |
+| GET | `/patient/me/intake-status` | Auth-gated. Returns `{state, display_name, last_active, review_status, has_intake, has_protocol, ...}` so the frontend can route to the right modal and render the header pill + state-aware greeting |
+| GET | `/protocols/pending` | Auth-gated (clinician). Pending-review queue, sorted with `needs_clinician_review` first |
+| GET | `/protocols/{id}` | Auth-gated (clinician). One protocol + active alongside + `narrator_summary` (DiffNarrator output) + `narrator_status` enum + `safety_concerns` |
+| POST | `/protocols/{id}/approve` | Auth-gated. Promotes a pending_review row to active transactionally |
+| POST | `/protocols/{id}/reject` | Auth-gated. Marks a pending_review row as rejected; notes required |
+| GET | `/sessions/today` | Auth-gated (patient). Today's planned + completed exercises |
+| POST | `/sessions` | Auth-gated. Plan an exercise into today |
+| PATCH | `/sessions/{id}` | Auth-gated. Mark completed, attach pose_metrics |
+| GET | `/sessions/last7?token=...` | Auth-gated (clinician). Adherence panel data |
+| POST | `/pose/session` | Auth-gated. One row per set into `checkins` and (if attached to a planned session) updates `sessions` |
+| POST | `/checkins` | Auth-gated. Manual narrative check-ins (auto-fired card after pose session) |
+| POST | `/start-session` | Auth-gated. Create Tavus CVI session with Coach Maya persona; persists to `tavus_sessions` |
+| GET | `/tavus/sessions` | Auth-gated. Patient's Tavus session history |
 | POST | `/health-sync` | Ingest Apple Watch metrics from iOS Shortcut |
 | POST | `/connect/apple-health` | Generate per-user token + onboard URL (QR flow) |
 | GET | `/onboard/{token}` | Mobile HTML onboarding page |
 | GET | `/shortcut/{token}` | Serve `.shortcut` file for iOS import |
+| ~~POST `/agent/invoke`~~ ~~GET `/agent/stream/{id}`~~ ~~POST `/pr/apply`~~ ~~POST `/demo/reset`~~ ~~POST `/triggers/*`~~ | removed 2026-05-06 | Replaced by `/chat` + multi-agent pipeline + `/protocols/*/approve` |
 
 ## Open Wearables (optional read-only source)
 
@@ -269,6 +400,7 @@ both are local. Verify via `GET /health-data`: `source` will be
 
 ## Sub-docs
 
-- `protocols/README.md` — what the (now-retired) coding agents used to read and write
+- `frontend/DESIGN_SYSTEM.md` — Clinical Twilight palette, components, Figma → code translation rules
 - `AGENTS.md` — instructions for AI coding agents pair-programming on the repo
-- `PLAN.md` — historical planning doc from the hackathon (cursor cloud agent path C)
+- `protocols/README.md` — historical context on the (retired) PR-bus
+- `PLAN.md` — historical planning doc from the hackathon

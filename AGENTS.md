@@ -2,97 +2,124 @@
 
 Two audiences:
 
-1. **AI coding agents** (Cursor, Copilot, Claude, Codex) pair programming on
-   this repo. The cloud agent's clinical guardrails live in
-   `protocols/.cursorrules`; this file is for harness-level concerns.
+1. **AI coding agents** (Cursor, Copilot, Claude, Codex) pair programming
+   on this repo.
 2. **Human collaborators returning to the repo** — read the "What changed
-   since PR #34" section below before diving into the agents/ directory.
+   since PR #62" section before diving into `backend/agents/`.
+
+## Productionization sprint update (2026-05-07)
+
+The night of 2026-05-06 → 2026-05-07 shipped 19 PRs that moved the app
+from hackathon-stage to productionized. The single-LLM `chat_protocol_drafter`
+that handled plan generation was replaced with a deterministic multi-agent
+pipeline; trust loop closed in both directions; today's-session became
+DB-backed; Tavus video hardened; palette swapped.
+
+Current write path:
+
+- **Plan generation** runs through `backend/agents/plan_generation_agent.py`,
+  which is now a thin orchestrator:
+  ```
+  asyncio.gather(
+      researcher.candidates(intake, history),     # KB-grounded candidates
+      trend_analyst.analyze(checkins, sessions)   # 4-8wk pattern
+  )
+    → evaluator.signal(intake, health, trend)     # progress | hold | regress
+    → planner.compose(candidates, signal, intake) # protocol YAML
+    → safety_reviewer.check(payload, intake)      # pain / contra / hold rules
+    → protocol_repo.save_pending(token, payload, source_metadata,
+                                  status, safety_concerns)
+  ```
+  All five agents are Anthropic Sonnet 4.6. Orchestration is deterministic
+  (asyncio.gather + sequential composition). Never LLM-routed.
+- **`safety_reviewer`** can flip status to `needs_clinician_review` with a
+  `safety_concerns` JSONB array when severity is high. Clinician dashboard
+  surfaces these to the top of the queue with a red banner.
+- **`symptom_classifier`** (Anthropic Haiku 4.5) runs as a pre-flight on
+  `/chat` whenever the patient mentions pain keywords, before Maya
+  generates her response. `clinician-attention` severity writes a
+  `needs_clinician_review` row directly. `hold-load` injects a regression
+  suggestion into Maya's system prompt. `minor` is acknowledged inline.
+- **`diff_narrator`** (Anthropic Haiku 4.5) generates a 2-3 sentence
+  plain-English summary of pending protocol diffs for clinicians, returned
+  on `GET /protocols/{id}` via `narrator_status` enum (`ok | no_diff |
+  no_api_key | sdk_error | empty_response`).
+- **`start_intake_tool`** is now a chat tool — Maya runs intake
+  conversationally instead of bouncing the patient to the modal. The modal
+  is preserved for new-patient first-time flows.
+- **Body-region anchoring** is enforced by `clinical_taxonomy.resolve_body_region(injury_type)`
+  + `exercise_kb.body_region_for(exercise_id)`. Drafter and planner refuse
+  cross-region exercises. Post-LLM validator catches stragglers.
+- **Today's-session** is now a DB-backed training log (`sessions` table).
+  `frontend/app.js` reads/writes via `/sessions/today`, `POST /sessions`,
+  `PATCH /sessions/{id}`. Adherence rolls up onto the clinician detail
+  pane.
+- **Tavus video calls** were unauthenticated (PR-O audit found). PR-P
+  added `Depends(current_user_id)` on `/start-session`, persistence to
+  `tavus_sessions` table, identity passthrough so Maya knows the patient.
+- **Clinical Twilight palette** (PR #83) replaced the dull palette. See
+  `frontend/DESIGN_SYSTEM.md` for tokens + semantic rules.
 
 ## Post-PR-bus update (2026-05-06)
 
 The cursor / ag2 / cached_replay PR-bus surface (`/agent/invoke`,
 `/agent/stream`, `_invoke_with_fallback`, `CodingAgent`, `cached_runs/`,
-the orchestrator/ Node sidecar) was retired right after PR #62. Lower
-sections of this file still describe `AGENT_PROVIDER` selection — read
-them as historical context, not a current contract.
+the orchestrator/ Node sidecar, `AGENT_PROVIDER`, `DEMO_LIVE_AGENT`,
+`CURSOR_API_KEY`) was retired right after PR #62. None of those env vars
+are read anymore. None of those modules exist anymore.
 
-Current write path:
+Current write path (still accurate as of 2026-05-07):
 
-- Chat tool fires (`fire_symptom_trigger` / `fire_checkin_trigger` /
-  `fire_weekly_plan_trigger`) call `chat_protocol_drafter.draft_and_save_pending`
-  (Anthropic claude-sonnet-4-6) which produces a structured protocol
-  revision and writes it as a `pending_review` row via
-  `protocol_repo.save_pending`.
-- `/patient/interact` runs `IntakeAgent` → `PlanGenerationAgent`. The
-  plan generator also calls `protocol_repo.save_pending` directly.
+- Chat tool fires call into `chat_protocol_drafter` (legacy single-call
+  drafter, preserved for symptom + check-in short paths) or the multi-agent
+  plan pipeline (weekly plan + post-intake), both writing `pending_review`
+  rows via `protocol_repo.save_pending`.
+- `/patient/interact` runs `IntakeAgent` → multi-agent plan pipeline.
 - Clinicians approve drafts on `/clinician`, which hits
   `POST /protocols/{id}/approve` to flip the row to `active`
   transactionally.
 - No GitHub PR is opened anywhere in the runtime path.
 
-## What changed since PR #34 (for Nikki)
+## What changed since PR #62 (for Nikki)
 
-PR #34 (`fdb636a`) introduced a five-agent patient pipeline:
-`SessionManagerAgent` → `IntakeAgent` → `PlanGenerationAgent` →
-`GuidedVideoAgent` → `CheckInAgent`, all routed through `/patient/interact`
-behind a `slack_user_id` / `token` body field.
+PR #62 left a single-LLM drafter (`chat_protocol_drafter`) handling all
+plan generation. The 2026-05-07 sprint replaced that for the heavy
+plan-gen path with a five-agent pipeline. Things you'll notice:
 
-Three of the five agents are gone, and the routing changed:
+| Was | Now |
+|---|---|
+| `PlanGenerationAgent.run()` made one Anthropic call | Calls `researcher` + `trend_analyst` in parallel, then `evaluator`, `planner`, `safety_reviewer`. Same public signature, callers unchanged |
+| Symptom messages went straight to Maya | Pre-flight `symptom_classifier` (Haiku) classifies severity; high severity writes a `needs_clinician_review` row directly |
+| Clinician saw raw JSON diff | `DiffNarrator` (Haiku) writes a 2-3 sentence plain-English summary; clinician sees patient-at-a-glance card + summary + diff |
+| Today's-session was localStorage | DB-backed `sessions` table with RLS; survives refresh; clinician sees adherence |
+| Tavus video had no auth | `Depends(current_user_id)` on `/start-session` + `tavus_sessions` persistence |
+| Patient saw no review state | `review_status` pill in header + state-aware Maya greeting + "Start today's session" CTA after approval |
+| Single-injury assumption | `clinical_taxonomy.resolve_body_region()` + region guards (multi-injury still deferred — see PR-L) |
 
-| Removed | Why | Replacement |
-|---|---|---|
-| `SessionManagerAgent` | Hand-rolled token issuance is now redundant — Supabase Auth issues a JWT and `auth.uid()` becomes the patient token everywhere. `current_user_id` (in `backend/auth.py`) is the only entry point | `Depends(current_user_id)` on every patient-facing endpoint |
-| `GuidedVideoAgent` | Pose form-check moved fully in-browser via MediaPipe; the agent had nothing to add over the live overlay + voice cues | `frontend/pose.js` + `POST /pose/session` (one row per set) |
-| `CheckInAgent` | The form-check pipeline already writes a `set_completion` checkin row per set, and Coach Maya lifts the most recent one into her system prompt | `/pose/session` writes + `coach_chat.fire_checkin_trigger` for explicit narrative check-ins |
+Public function signatures preserved for `IntakeAgent`,
+`PlanGenerationAgent`, `protocol_repo.save_pending`, `coach_chat.chat_stream`.
+You can pick up cold without rewiring callers.
 
-`IntakeAgent` and `PlanGenerationAgent` survived but were rewired:
-
-- **Driven by a structured modal**, not an ad-hoc chat fallback. The
-  intake modal (`#intakeModal` in `frontend/index.html`) and the plan-gen
-  modal (`#planGenModal`) are the only authed-mode entry surfaces. The
-  legacy `triggerIntake()` chat flow in `app.js` is now demo-mode-only.
-- **Server-derived state.** `GET /patient/me/intake-status` returns
-  `state ∈ {needs_intake, needs_plan, ready}` from the
-  `intake_records` row + `protocol_state.last_pr_url`. The frontend asks
-  this on auth-ready and after every modal close. No `localStorage` flag
-  for authed users.
-- **Two-state router on `/patient/interact`.** No intake row →
-  `IntakeAgent`. `metadata.force == "plan_generation"` → re-run
-  `PlanGenerationAgent`. Anything else → 409 (use `/chat`).
-- **`PatientInteractionRequest`** dropped `slack_user_id` and `token`
-  (auth identifies the patient) and added `history: list[ChatTurn]` so
-  the modal stays the only stateful component on the client.
-- **`coach_chat.fire_intake_trigger`** is now a narrow admin escape
-  hatch: it deletes the intake row via `user_store.delete_intake(token)`
-  so the next status check returns `needs_intake` and the modal opens
-  again on reload. Used only when the patient explicitly asks to restart.
-- **`PlanGenerationAgent.handle()`** has a fallback path
-  (`_fallback_direct_pr`) for when `ANTHROPIC_API_KEY` is missing — it
-  skips the planner LLM and hands the intake straight to the CodingAgent.
-  Keeps the demo workable on Vercel even if planner credentials are
-  unset (the CodingAgent itself may still be `cached_replay`).
-- **`PlanGenerationAgent` import fix.** `from main import write_context_files`
-  was a circular import. It now reads from `protocol_loader` directly.
-
-If you wrote tests against `PatientInteractionRequest.token` or against
-`get_patient_agent("session_manager"|"guided_video"|"checkin")`, those
-will fail — the registry now only has `"intake"` and `"plan_generation"`.
+`PatientInteractionRequest` still drops `slack_user_id` and `token` (auth
+identifies the patient). `coach_chat.fire_intake_trigger` is still the
+admin escape hatch (deletes the intake row to re-open the modal).
+`coach_chat.start_intake_tool` is the new conversational intake entry
+point — Maya runs the 7 intake questions inline.
 
 ## What this project is
 
-A FastAPI app where a Cursor cloud agent updates `protocols/protocol.yaml`
-each time the patient hits a trigger (intake / weekly plan / check-in /
-symptom). The agent reads wearables + library + the current protocol, opens
-a draft PR with reasoning + cited library entries, and a clinician approves
-it from the UI.
+A FastAPI app where Coach Maya (OpenAI gpt-4o-mini, tool-calling) runs
+the patient experience and a deterministic multi-agent pipeline drafts
+protocol revisions. Every revision is a `pending_review` row in Supabase
+that a clinician approves through `/clinician`. Approval supersedes the
+prior active row in a single transaction.
 
-The repo IS the message bus. Don't add side channels.
-
-**Stack**: FastAPI · AG2 (multi-agent pipeline, default coding-agent path,
-Anthropic Claude Sonnet 4.6) · `@cursor/sdk` (TypeScript, wrapped by a Node
-helper, alternate live path) · OpenAI gpt-4o-mini (chat) · Supabase Postgres
-+ Supabase Auth (HS256 JWT, magic-link sign-in) · Tavus CVI (optional video)
-· vanilla JS frontend · Vercel hosting.
+**Stack**: FastAPI · Anthropic Claude Sonnet 4.6 (researcher / evaluator /
+planner / safety_reviewer / trend_analyst) · Anthropic Haiku 4.5
+(symptom_classifier / diff_narrator) · OpenAI gpt-4o-mini (Maya) · Supabase
+Postgres + Supabase Auth (HS256 + ES256 JWT, magic-link or password) ·
+Tavus CVI (auth + persisted) · MediaPipe BlazePose (in-browser) · vanilla
+JS frontend · Vercel hosting.
 
 ## Repo layout
 
@@ -100,43 +127,52 @@ See the root `README.md` for the full tree. Quick orientation:
 
 ```
 backend/
-  main.py                   FastAPI app: trigger endpoints + /pr/apply +
-                            /patient/interact + /patient/me/intake-status +
-                            /chat (auth) + /pose/session (auth)
+  main.py                    FastAPI app — all endpoints
   agents/
-    __init__.py             AGENT_PROVIDER factory (CodingAgent) +
-                            patient agent registry (PatientAgent)
-    base.py                 ABCs + dataclasses shared by both registries
-    ag2_agent.py            default live coding-agent path (Anthropic + AG2)
-    cursor_sdk.py           alternate live path; orchestrator/ subprocess
-    cached_replay.py        replays JSON traces (silent demo fallback)
-    intake_agent.py         IntakeAgent (structured 7-field intake)
-    plan_generation_agent.py PlanGenerationAgent (intake + KB + wearables →
-                                                   CodingAgent → PR)
-  cached_runs/              JSON traces for cached_replay fallback
-  coach_chat.py             OpenAI chat. Tools: recommend_exercise,
-                            list_phase_exercises, fire_symptom_trigger,
-                            fire_checkin_trigger, fire_weekly_plan_trigger,
-                            fire_intake_trigger (admin restart escape hatch)
-  protocol_loader.py        fetches protocol.yaml via GitHub API (no CDN cache);
-                            also owns write_context_files
-  user_store.py             3-way pluggable (flat/sqlite/postgres) — owns
-                            save_intake / get_intake / delete_intake
-  auth.py                   Supabase HS256 JWT verification → current_user_id
-orchestrator/
-  src/orchestrator.ts       @cursor/sdk wrapper (only used when
-                            AGENT_PROVIDER=cursor_sdk)
-  configs/care-plan.yaml    parent prompt + sub-agent roster
+    __init__.py              PatientAgent registry (intake, plan_generation)
+    base.py                  ABCs + dataclasses
+    intake_agent.py          structured 7-field intake
+    plan_generation_agent.py thin orchestrator (5-agent pipeline)
+    researcher.py            Sonnet — KB candidates with citations
+    trend_analyst.py         Sonnet — multi-week pattern detection
+    evaluator.py             Sonnet — progress | hold | regress
+    planner.py               Sonnet — composes protocol YAML
+    safety_reviewer.py       Sonnet — pain / contraindication / hold rules
+    symptom_classifier.py    Haiku — pain triage pre-flight on /chat
+  diff_narrator.py           Haiku — plain-English diff summary
+  chat_protocol_drafter.py   legacy single-call drafter (still used for
+                             symptom + check-in short paths)
+  clinical_taxonomy.py       resolve_body_region + region guards
+  exercise_kb.py             exercise library + body_region_for()
+  protocol_repo.py           save_pending / approve / reject / list_pending
+  protocol_loader.py         fetch active protocol from Supabase
+  session_repo.py            sessions training-log read/write
+  tavus_repo.py              tavus_sessions read/write
+  coach_chat.py              OpenAI chat — start_intake_tool, fire_*_trigger,
+                             recommend_exercise, list_phase_exercises;
+                             state-aware greeting render
+  user_store.py              owns get_display_name(token) resolver
+  auth.py                    HS256 + ES256 JWT (JWKS) → current_user_id,
+                             is_clinician
 protocols/
-  protocol.yaml             the patient's current program
-  protocol-library/         evidence base (read-only for the agent)
-  .cursorrules              clinical guardrails
+  protocol.yaml              patient's current program (starts empty)
+  protocol-library/          evidence base (read-only for the agent)
+  schema.json                protocol.yaml schema
+knowledge/
+  exercise-library.json      full library (publicly readable via /exercises)
 frontend/
-  index.html                dashboard + #intakeModal + #planGenModal
-  app.js                    state machine: refreshPatientState +
-                            showIntakeModal + showPlanGenModal +
-                            streamPlanGenTrace, plus the legacy demo flows
-  pose.js                   in-browser MediaPipe form-check
+  index.html                 dashboard + #intakeModal + #planGenModal +
+                             review_status pill in header
+  app.js                     state machine: refreshPatientState +
+                             showIntakeModal + showPlanGenModal +
+                             sessions integration + state-aware greeting
+  pose.js                    MediaPipe form-check; guided exercise mode
+                             (spoken cues / corrections)
+  clinician.html / .js / .css  /clinician dashboard
+  style.css                  Clinical Twilight palette
+  DESIGN_SYSTEM.md           token + component spec
+supabase/
+  migrations/                10 applied as of 2026-05-07
 ```
 
 ## Running the backend
@@ -146,141 +182,127 @@ cd backend && uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Backend serves both API and frontend (mounted at `/static`, `/` returns
-`frontend/index.html`). No separate frontend build or dev server needed.
+`frontend/index.html`). No separate frontend build or dev server.
 
-## Provider configuration
+## Required env vars
 
-`AGENT_PROVIDER` selects the live path; `DEMO_LIVE_AGENT=1` arms it. When
-the live path raises, `_invoke_with_fallback()` (`backend/main.py:220-267`)
-swaps in `cached_replay` silently — the response's `provider` field
-reflects which one actually ran.
+```
+OPENAI_API_KEY=sk-...        # Coach Maya
+ANTHROPIC_API_KEY=sk-ant-... # plan pipeline + diff_narrator + symptom_classifier
+SUPABASE_JWT_SECRET=...      # Settings → API → JWT Secret (HS256)
+SUPABASE_URL=https://...     # JWKS lookup for ES256 (PR #58)
+DATABASE_URL=postgresql://...transaction-pooler-on-6543...
+PROTOCOL_SOURCE=supabase
+STORAGE_BACKEND=postgres     # postgres in prod; sqlite locally
+```
 
-| Provider | Notes |
-|---|---|
-| `ag2` | Default live path. AG2 multi-agent pipeline (repo_reader → protocol_editor → git_publisher) backed by Anthropic Claude Sonnet 4.6. Requires `ANTHROPIC_API_KEY`. |
-| `cursor_sdk` | Alternate live path. Spawns `tsx orchestrator/src/orchestrator.ts` via subprocess. Requires `CURSOR_API_KEY` and `cd orchestrator && npm install`. |
-| `cached_replay` | Replays JSON from `backend/cached_runs/{flow}.json`. Default fallback when env is unset and the silent safety net inside `_invoke_with_fallback()`. |
-| `cursor_github` | `@cursor` GitHub mention via gh CLI. Backup path. |
-| `mock` | Scripted fake, no network. Dev / unit tests. |
+`AGENT_PROVIDER`, `DEMO_LIVE_AGENT`, `CURSOR_API_KEY` are no longer read.
 
 ## Workflow chain (intake → weekly_plan → check-in → symptom)
 
-Each flow opens a PR. State only advances on `main` after the clinician
-clicks "Approve and apply" in the UI (which calls `POST /pr/apply` →
-`gh pr ready` then `gh pr merge --squash`). The next flow's agent reads
-the freshly-merged `main` via `protocol_loader.fetch_protocol()` (which
-uses the GitHub contents API — never `raw.githubusercontent.com`, that
-has a CDN cache).
+Each flow writes a `pending_review` row in `protocols`. State only
+advances on approval:
 
-Do not bypass this. Direct commits to `protocols/protocol.yaml` will
-break the audit story. Only the Reset demo button is allowed to write
-`protocol.yaml` directly (it nukes back to `pending_intake`).
+1. Clinician opens `/clinician`, sees the queue with `needs_clinician_review`
+   rows pinned to the top with a red banner.
+2. Detail pane renders the DiffNarrator summary, patient-at-a-glance card,
+   safety concerns banner (red), region-mismatch banner (amber), last-7-days
+   adherence panel, and the JSON diff.
+3. `POST /protocols/{id}/approve` flips the row to `active` in a single
+   transaction; prior active becomes `superseded`.
+4. The next flow's pipeline reads the new active protocol as its starting
+   point. Patient surface flips `review_status` pill from `pending` to
+   `approved` and surfaces a "Start today's session" CTA.
 
-## .env setup gotcha
-
-`.env.example` ships with placeholder values like `your_anthropic_key_here`.
-These are truthy — code paths that check `if os.getenv("X")` will attempt
-real API calls and fail with 401. When running without real keys, clear the
-placeholder values to empty strings so mock fallbacks activate.
-
-For the live `cursor_sdk` path you need at minimum:
-```
-CURSOR_API_KEY=crsr_...
-AGENT_PROVIDER=cursor_sdk
-DEMO_LIVE_AGENT=1
-OPENAI_API_KEY=sk-...        # for chat
-ANTHROPIC_API_KEY=sk-ant-... # for Tavus context generation
-```
-
-## Agent smoke tests
-
-```bash
-cd backend && python3 -m scripts.smoke_test_agents
-```
-
-Exercises mock, cached_replay, and cursor_sdk providers. The cached_replay
-provider paces trace events in real-time by default (~30s+); the
-cursor_sdk provider hangs without `CURSOR_API_KEY` and the orchestrator
-installed. For quick validation, test mock and cached_replay individually
-or pass a high speed multiplier (`CachedReplayAgent(speed=100.0)`).
-
-## PyJWT conflict
-
-The base VM image ships with a system-managed `PyJWT 2.7.0` that pip
-cannot uninstall. Run `pip install --ignore-installed pyjwt` before
-`pip install -r requirements.txt` to work around this.
+Do not bypass this. The audit trail (`token, parent_id, created_by_agent,
+reviewed_by, reviewed_at, review_notes, safety_concerns`) is the
+clinician's defense in a chart review. Never write a status='active' row
+from a runtime path other than `/protocols/{id}/approve`.
 
 ## Key endpoints for testing
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/protocol` | Always works (falls back to local stub if API unreachable) |
-| GET | `/health-data` | Always works (mock data if no Apple Watch sync) |
+| GET | `/protocol` | Active protocol; falls back gracefully if Supabase is unreachable |
+| GET | `/health-data` | Mock data if no Apple Watch sync |
 | GET | `/calendar` | Mock fallback if Google creds missing |
-| POST | `/agent/invoke` | Live or cached based on env flags above |
-| GET | `/agent/stream/{id}` | SSE; pair with the `invocation_id` from invoke |
-| POST | `/pr/apply` | Body: `{"pr_url": "..."}` or `{"pr_number": N}` |
-| POST | `/demo/reset` | Wipes protocol.yaml back to `pending_intake` on main |
-| POST | `/patient/interact` | **Auth.** Two-state router: no intake → IntakeAgent, `metadata.force=plan_generation` → PlanGenerationAgent. Body: `{message, history[], metadata}`. No `token` field — auth resolves it |
-| GET | `/patient/me/intake-status` | **Auth.** Returns `{state, has_intake, has_protocol, last_pr_url, ...}` for the frontend state machine |
-| POST | `/chat` | **Auth.** SSE; `coach_chat.chat_stream` with `user_token` threaded so `fire_intake_trigger` can call `user_store.delete_intake` |
-| POST | `/pose/session` | **Auth.** One row per set into `checkins` with `payload.kind = "set_completion"` |
-| POST | `/start-session` | Tavus CVI session create |
+| GET | `/exercises` | Public library (no auth required) |
+| POST | `/chat` | **Auth.** SSE; pre-flight symptom_classifier; tool calls write to Supabase |
+| POST | `/patient/interact` | **Auth.** Two-state router. No intake → IntakeAgent. `metadata.force=plan_generation` → multi-agent pipeline. No `token` in body |
+| GET | `/patient/me/intake-status` | **Auth.** Returns `{state, display_name, last_active, review_status, has_intake, has_protocol, ...}` |
+| GET | `/protocols/pending` | **Auth (clinician).** Sorted with `needs_clinician_review` first |
+| GET | `/protocols/{id}` | **Auth (clinician).** Includes `narrator_summary`, `narrator_status`, `safety_concerns` |
+| POST | `/protocols/{id}/approve` | **Auth.** Transactional active swap |
+| POST | `/protocols/{id}/reject` | **Auth.** Notes required |
+| GET | `/sessions/today` | **Auth (patient).** Today's planned + completed |
+| POST | `/sessions` | **Auth.** Plan an exercise into today |
+| PATCH | `/sessions/{id}` | **Auth.** Mark completed + attach pose_metrics |
+| GET | `/sessions/last7?token=...` | **Auth (clinician).** Adherence panel |
+| POST | `/pose/session` | **Auth.** One row per set; updates linked session |
+| POST | `/checkins` | **Auth.** Manual narrative check-ins |
+| POST | `/start-session` | **Auth.** Tavus CVI; persisted to `tavus_sessions` |
+| GET | `/tavus/sessions` | **Auth.** Patient's Tavus history |
 | GET | `/docs` | Swagger UI |
-| GET | `/debug-env` | All env vars surfaced (values masked) |
+| GET | `/debug-env` | Env vars surfaced (values masked) |
 
 ## Coding guidelines
 
 - Python 3.11+, type hints preferred
 - No secrets in code — all keys via `.env` / `os.getenv()`
-- Graceful degradation — every external API call falls back to mock when
-  keys are missing
-- Don't break the mock fallbacks — demo must work without any API keys
-- Don't write to `protocols/protocol.yaml` directly except via the
-  agent's PR flow or the demo reset
+- No silent fallbacks masking real errors. `cached_replay` is gone for a
+  reason. Surface 500s; toast 401s
+- **Migrations are append-only.** New SQL file under
+  `supabase/migrations/<YYYYMMDDHHMMSS>_name.sql`. Never edit a shipped
+  migration
+- **Tests are required for backend changes that mutate patient state**:
+  pytest covering the happy path + the auth-rejected path. ~250 tests
+  pass as of merge of PR #83
+- Don't write to `protocols/protocol.yaml` directly. The runtime is
+  Supabase-canonical
 - Don't add emojis to docs / commits / code
-- Frontend is vanilla JS — no framework, no build step
+- Frontend is vanilla JS — no framework, no build step, no new dependencies
+  without discussion
 - Run `uvicorn` from the repo root with `--app-dir backend`, not from
   inside `backend/`
 
 ## Pair programming tips
 
-- New endpoint: add to `backend/main.py`, match existing pattern. If the
-  endpoint is patient-scoped, gate with `Depends(current_user_id)` and
-  pass the `user_id` to anything downstream — never trust a `token` from
-  the request body
-- New trigger flow: add config in `orchestrator/configs/care-plan.yaml`,
-  new `_build_agent_prompt` branch in `main.py`, new `/triggers/X`
-  endpoint that funnels through `_invoke_with_fallback`
-- New CodingAgent provider: add a class implementing `CodingAgent` (see
-  `agents/base.py`) and register in `agents/__init__.py:get_agent`
-- New PatientAgent: subclass `PatientAgent`, decorate with
-  `@register_patient_agent`, and add a route in `/patient/interact`
-  that resolves which one to invoke. Don't reintroduce a router agent —
-  the dispatch is intentionally explicit in `main.py` so the state machine
-  stays readable
-- New chat tool: add in `coach_chat.py` tool registry; if it mutates
+- **New endpoint**: add to `backend/main.py`. If patient-scoped, gate with
+  `Depends(current_user_id)` and pass the `user_id` to anything downstream.
+  Never trust a `token` from the request body
+- **New plan-pipeline agent**: drop a module in `backend/agents/`, accept
+  structured inputs, return a Pydantic model. Wire it into
+  `plan_generation_agent.py` orchestration. Don't introduce LLM-routed
+  orchestration where if/elif suffices
+- **New chat tool**: add in `coach_chat.py` tool registry; if it mutates
   patient state, accept `user_token` via `_dispatch_tool(... user_token=...)`
-  and reach into `user_store` directly instead of POSTing to a
-  `/triggers/...` endpoint
-- Touching the trace UI: `streamTrace` in `frontend/app.js` consumes the
-  SSE stream and renders inline as a chat bubble; `streamPlanGenTrace`
-  does the same thing for the plan-gen modal
+  and reach into the right repo (`protocol_repo`, `session_repo`,
+  `user_store`) directly
+- **New PatientAgent**: subclass `PatientAgent`, decorate with
+  `@register_patient_agent`, add a route in `/patient/interact` that
+  resolves which one to invoke. Don't reintroduce a router agent — the
+  dispatch is intentionally explicit so the state machine stays readable
+- **Schema change**: write the migration, run it locally with `supabase db
+  push`, verify in Supabase Studio, then commit. The Supabase Preview
+  branch CI marks migrations as applied without running DDL on prod —
+  always verify via `supabase migration list --db-url $DATABASE_URL` after
+  merge
+- **Color / component changes**: read `frontend/DESIGN_SYSTEM.md` first.
+  Use the semantic tokens (`--accent`, `--success`, `--ai-accent`); don't
+  introduce raw hex mid-stylesheet
 
 ## Origin and current posture
 
-- Built at Slop Con NYC 2026-05-02 (single day). Two-person team (Andre + Nikki Hu).
-- **Hackathon mode is over.** The repo is now in production posture: real
-  Supabase auth, real Postgres, real patients in scope. Priority order is
-  now patient safety > production reliability > velocity. Tests are
-  required for backend changes that mutate patient state. Migrations are
-  append-only. No silent fallbacks masking real bugs. See the project
-  CLAUDE.md for the full operating manual.
-- `ag2` is the default live coding-agent path; `cursor_sdk` is an alternate;
-  `cached_replay` is the silent safety net that catches anything that
-  breaks live. `cached_replay` should not be used to mask production bugs
-  — surface errors instead.
-- The Approve and apply button is the clinician safety gate. AG2 opens a
-  draft PR; Cursor cloud agents auto-merge their own PRs in seconds, so
-  the Approve handler treats "already merged" as success on the cursor
-  path. Don't add an auto-merge for clinical content.
+- Built at Slop Con NYC 2026-05-02 (single day). Two-person team
+  (Andre + Nikki Hu). Won the hackathon.
+- **Hackathon mode is over.** Repo is in production posture: real Supabase
+  auth, real Postgres, real patients in scope. Priority: patient safety >
+  production reliability > velocity. See the project CLAUDE.md for the
+  full operating manual.
+- The Approve handler is the clinician safety gate. Don't add an
+  auto-merge for clinical content. Don't introduce a path that writes
+  `status='active'` from anywhere other than `/protocols/{id}/approve`.
+- Multi-injury support (PR-L) is deferred. Decision pending: one protocol
+  per body_region with `(token, body_region) WHERE status='active'` partial
+  unique index, or single active protocol with multi-region exercises.
+  Needs Nikki's clinical input.
