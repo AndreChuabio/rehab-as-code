@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RehabAsCode -- Pose reference recorder</title>
+  <link rel="stylesheet" href="/static/style.css" />
+  <style>
+    .recorder {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 16px;
+      padding: 16px;
+      max-width: 1100px;
+      margin: 0 auto;
+    }
+    .recorder-stage {
+      position: relative;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      aspect-ratio: 4 / 3;
+    }
+    .recorder-stage video,
+    .recorder-stage canvas {
+      position: absolute; top: 0; left: 0;
+      width: 100%; height: 100%;
+      object-fit: cover;
+    }
+    .recorder-side {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .recorder-row { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+    .recorder-row label { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em; }
+    .recorder-row input { background: var(--surface2); border: 1px solid var(--border); color: var(--text); padding: 8px; border-radius: 8px; }
+    .recorder-status {
+      background: var(--surface2);
+      padding: 10px;
+      border-radius: 8px;
+      font-size: 12px;
+      color: var(--muted);
+      font-family: ui-monospace, monospace;
+      white-space: pre-line;
+    }
+    .recorder-actions { display: flex; gap: 8px; }
+    .btn-record, .btn-save, .btn-discard {
+      flex: 1;
+      padding: 10px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .btn-record { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+    .btn-record[disabled] { opacity: 0.5; cursor: not-allowed; }
+    .btn-save { background: var(--success); border-color: var(--success); color: var(--bg); }
+    .btn-save[disabled] { opacity: 0.5; cursor: not-allowed; }
+    .recorder-hint { font-size: 11px; color: var(--muted); line-height: 1.4; }
+    .recorder-banner {
+      background: var(--warn-bg);
+      border: 1px solid var(--warn);
+      color: var(--warn);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="recorder">
+    <div class="recorder-stage">
+      <video id="recordVideo" muted playsinline></video>
+      <canvas id="recordCanvas"></canvas>
+    </div>
+    <aside class="recorder-side">
+      <div class="recorder-banner">
+        Internal tool. Records pose keypoints to disk for the KNN reference set.
+        Not for patient use.
+      </div>
+
+      <div class="recorder-row">
+        <label for="recExerciseId">Exercise id</label>
+        <input id="recExerciseId" type="text" placeholder="mini_squat" />
+      </div>
+      <div class="recorder-row">
+        <label for="recLabel">Label</label>
+        <input id="recLabel" type="text" placeholder="good" />
+      </div>
+      <div class="recorder-row">
+        <label for="recRecorder">Recorder</label>
+        <input id="recRecorder" type="text" placeholder="andre" />
+      </div>
+
+      <div class="recorder-status" id="recStatus">Idle. Fill fields and click Start.</div>
+
+      <div class="recorder-actions">
+        <button class="btn-record" id="recStartBtn">Start</button>
+        <button class="btn-save" id="recSaveBtn" disabled>Save</button>
+      </div>
+      <button class="btn-discard" id="recDiscardBtn" hidden>Discard &amp; restart</button>
+
+      <div class="recorder-hint">
+        Stand fully in frame, click <strong>Start</strong>, perform <strong>one</strong> clean rep at the right cadence,
+        then click <strong>Save</strong>. The downloaded JSON belongs in <code>frontend/pose_refs/raw/</code>.
+        See <code>frontend/pose_refs/README.md</code> for naming conventions.
+      </div>
+    </aside>
+  </div>
+
+  <script src="/static/pose_record.js" type="module"></script>
+</body>
+</html>
