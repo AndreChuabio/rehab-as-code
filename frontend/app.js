@@ -142,7 +142,9 @@ async function maybeRedirectToClinician() {
     const res = await authedFetch(`${API_BASE}/me/role`);
     if (!res.ok) return;
     const data = await res.json();
-    if (data.role === "clinician") {
+    // Admin is a strict superset of clinician — both belong on /clinician
+    // (admins additionally see the Pipeline debug segmented control there).
+    if (data.role === "clinician" || data.role === "admin") {
       window.location.replace("/clinician");
     }
   } catch (e) {
@@ -159,7 +161,7 @@ async function maybeRenderBackToDashboard() {
     const res = await authedFetch(`${API_BASE}/me/role`);
     if (!res.ok) return;
     const data = await res.json();
-    if (data.role !== "clinician") {
+    if (data.role !== "clinician" && data.role !== "admin") {
       sessionStorage.removeItem("asPatient");
       return;
     }
@@ -1027,11 +1029,9 @@ async function loadProtocol() {
     const res = await authedFetch(`${API_BASE}/protocol`);
     const data = await res.json();
     renderProtocol(data);
-    const link = document.getElementById("repoLink");
-    if (link) {
-      link.href = `https://github.com/${data.repo}/tree/main/protocols`;
-      link.textContent = data.repo;
-    }
+    // Legacy GitHub repo link is gone (PR-bus retired); the existing
+    // maybeRedirectToClinician + maybeRenderBackToDashboard helpers
+    // surface the dashboard affordance for staff users.
   } catch (e) {
     console.error("Failed to load protocol:", e);
   }
