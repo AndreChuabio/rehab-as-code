@@ -851,7 +851,7 @@ body {
 }
 
 .header-right { display: flex; align-items: center; gap: 16px; }
-.repo-link {
+.repo-link, .clinician-link {
   font-size: 12px;
   color: var(--accent2);
   text-decoration: none;
@@ -861,7 +861,7 @@ body {
   border: 1px solid var(--border);
   background: var(--surface2);
 }
-.repo-link:hover { border-color: var(--accent2); }
+.repo-link:hover, .clinician-link:hover { border-color: var(--accent2); }
 
 /* Status card (replaces the bulky orchestrator panel) */
 .status-card .agent-status {

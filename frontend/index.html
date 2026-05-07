@@ -15,12 +15,17 @@
         <span class="logo-tag">protocols as code, gated by clinician review</span>
       </div>
       <div class="header-right">
-        <!-- The legacy "AndreChuabio/rehab-as-code" GitHub link lived
-             here and pointed at the retired PR-bus protocol surface.
-             Removed: the protocols-as-code surface is now /clinician,
-             reachable via maybeRedirectToClinician on sign-in or via
-             the "Back to clinician dashboard" chip when staff users hit
-             View as patient. -->
+        <!-- Always-visible clinician dashboard link. Visible to any
+             signed-in user; the server gates actual access via
+             require_clinician_id (403 for plain patients). During
+             productionization Andre + Nikki are both clinicians/admins
+             and need a guaranteed nav path that doesn't depend on the
+             staff_users table being seeded on the current Supabase
+             branch. Hidden when signed-out / demo state via JS. -->
+        <a class="clinician-link" id="clinicianDashLink"
+           href="/clinician" hidden>
+          Clinician dashboard →
+        </a>
         <span class="date-display" id="dateDisplay"></span>
       </div>
     </header>

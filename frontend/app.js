@@ -206,6 +206,7 @@ async function bootstrapAuth() {
   let pillMode = "hidden";
   function setPill(mode, user) {
     pillMode = mode;
+    const dashLink = document.getElementById("clinicianDashLink");
     if (!pill) return;
     if (mode === "signed-in") {
       pillEm.textContent = user?.email || "signed in";
@@ -214,6 +215,12 @@ async function bootstrapAuth() {
       if (pillDot) pillDot.className = "auth-pill-dot auth-pill-dot-ok";
       if (setPwBtn) setPwBtn.hidden = false;
       pill.hidden = false;
+      // Header nav: show the clinician dashboard link to any signed-in
+      // user. The server gates real access (require_clinician_id 403s
+      // patients). During productionization Andre and Nikki need a
+      // guaranteed nav path that doesn't depend on staff_users being
+      // seeded on the current Supabase branch.
+      if (dashLink) dashLink.hidden = false;
     } else if (mode === "demo") {
       pillEm.textContent = "Demo mode";
       action.textContent = "Sign in";
@@ -221,9 +228,11 @@ async function bootstrapAuth() {
       if (pillDot) pillDot.className = "auth-pill-dot auth-pill-dot-demo";
       if (setPwBtn) setPwBtn.hidden = true;
       pill.hidden = false;
+      if (dashLink) dashLink.hidden = true;
     } else {
       if (setPwBtn) setPwBtn.hidden = true;
       pill.hidden = true;
+      if (dashLink) dashLink.hidden = true;
     }
   }
   function showPill(user) { setPill(user ? "signed-in" : (localStorage.getItem(AUTH_SKIP_KEY) === "1" ? "demo" : "hidden"), user); }
