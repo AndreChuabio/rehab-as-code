@@ -124,6 +124,21 @@ def clinician_root():
     raise HTTPException(status_code=404, detail="clinician dashboard not built")
 
 
+@app.get("/pose_record")
+def pose_record_root():
+    """Serve the offline pose-clip recorder for the KNN reference set.
+
+    Internal tool used by Andre + Nikki to build frontend/pose_refs/raw/.
+    Not linked from any patient or clinician surface; you reach it via
+    /pose_record?exercise=mini_squat&label=good. See
+    frontend/pose_refs/README.md for the workflow.
+    """
+    page = FRONTEND_DIR / "pose_record.html"
+    if page.exists():
+        return FileResponse(str(page))
+    raise HTTPException(status_code=404, detail="pose recorder not built")
+
+
 @app.get("/me/role")
 def me_role(user_id: str | None = Depends(optional_user_id)):
     """Return the caller's role for client-side routing.
