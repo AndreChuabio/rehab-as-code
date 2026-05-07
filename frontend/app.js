@@ -261,7 +261,13 @@ async function bootstrapAuth() {
       maybeRenderBackToDashboard();
       // Server-driven state machine: ask the backend whether this patient
       // needs intake / plan-gen / nothing, and route to the right modal.
-      refreshPatientState().catch((e) => console.warn("state refresh failed", e));
+      // PR-R: chain renderStateAwareGreeting so the chat greets the
+      // patient by name + state once patientState resolves. Idempotent —
+      // guarded by _stateAwareGreetingShown so a second onChange (token
+      // refresh) doesn't double-render.
+      refreshPatientState()
+        .then(() => renderStateAwareGreeting())
+        .catch((e) => console.warn("state refresh failed", e));
       // Pull today's session log so the sidebar reflects what's already
       // logged on the server (persists across refresh, unlike the prior
       // in-memory array). Best-effort; swallowed errors above on /sessions/today.
@@ -275,6 +281,8 @@ async function bootstrapAuth() {
       renderTodaySession();
       // Clear the trust pill on sign-out so it doesn't leak across sessions.
       renderReviewPill(null);
+      // PR-R: reset greeting guard so a fresh sign-in re-greets.
+      _stateAwareGreetingShown = false;
       // Re-show the overlay if it isn't a deliberate skip and user has no
       // session — but never on the magic-link redirect, which fires onChange
       // with a fresh session right after.
@@ -3417,6 +3425,233 @@ function buildPickerItems(exercises) {
 
 if (typeof window !== "undefined") {
   window.__flowHelpers = { nextExerciseAfter, buildPickerItems };
+}
+
+// ---------------------------------------------------------------------------
+// PR-R: state-aware Maya greeting
+//
+// On auth-resolve, before the patient types anything, render a greeting
+// bubble in the chat log that reflects the patient's server-derived state
+// (needs_intake / needs_plan / ready) and review_status (pending_review /
+// recently_approved / recently_rejected). Returning patients are addressed
+// by display_name and prompted with a check-in question; new patients see
+// a clear intake CTA.
+//
+// The selector below is pure (no DOM, no fetch) so it round-trips cleanly
+// in the Node test under frontend/tests/state_aware_greeting.test.js.
+// renderStateAwareGreeting wraps the selector + the actual DOM write.
+// ---------------------------------------------------------------------------
+
+// Module-scope guard so the greeting renders ONCE per page session even if
+// onChange fires multiple times (e.g. token refresh).
+let _stateAwareGreetingShown = false;
+
+// Threshold for the "Good to see you again — N days" prepend. 24h matches
+// the spec; we explicitly do NOT prepend for sub-24h returns to avoid
+// pestering same-day users.
+const GREETING_DAYS_GAP_MS = 24 * 60 * 60 * 1000;
+
+// LocalStorage key for the last time chat was opened — backend last_active
+// is the authoritative source, but we also persist client-side as a fallback
+// when the user is in demo mode or the backend field is null.
+const GREETING_LAST_CHAT_AT_KEY = "rehab_last_chat_at";
+
+/**
+ * Return the time since lastActiveIso in whole days, or null when the
+ * input is missing/unparseable or the gap is under 24h. Pure helper.
+ *
+ * @param {string|null|undefined} lastActiveIso
+ * @param {number} [nowMs]  override for tests
+ * @returns {number|null}
+ */
+function daysSinceLastActive(lastActiveIso, nowMs) {
+  if (!lastActiveIso) return null;
+  const ts = Date.parse(lastActiveIso);
+  if (Number.isNaN(ts)) return null;
+  const now = typeof nowMs === "number" ? nowMs : Date.now();
+  const deltaMs = now - ts;
+  if (deltaMs < GREETING_DAYS_GAP_MS) return null;
+  return Math.floor(deltaMs / (24 * 60 * 60 * 1000));
+}
+
+/**
+ * Sanitize a display name. Returns null for empty/whitespace/non-string.
+ * Trims and caps at 60 chars to defend against pathological intake input.
+ *
+ * @param {*} raw
+ * @returns {string|null}
+ */
+function sanitizeDisplayName(raw) {
+  if (typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  return trimmed.length > 60 ? trimmed.slice(0, 60) : trimmed;
+}
+
+/**
+ * Build the greeting copy for the given patient state. Pure — no DOM, no
+ * fetch, deterministic given (status, options).
+ *
+ * State matrix:
+ *   needs_intake -> intake CTA (no welcome-back, no days-away prepend)
+ *   needs_plan + pending_review/needs_clinician_review -> "plan with PT"
+ *   needs_plan otherwise -> "intake done, want a draft?"
+ *   ready + recently_approved -> "PT just approved, start session?"
+ *   ready + recently_rejected -> "PT had notes, see chat"
+ *   ready otherwise -> generic returning welcome
+ *
+ * If daysAway (>=1) is provided, prepends the "Good to see you again"
+ * line — but ONLY for non-needs_intake states (a new patient hasn't been
+ * "away," they're new).
+ *
+ * @param {object} status  /patient/me/intake-status response
+ * @param {object} [opts]
+ * @param {number|null} [opts.daysAway]
+ * @returns {string}
+ */
+function selectGreetingCopy(status, opts) {
+  const o = opts || {};
+  const daysAway = typeof o.daysAway === "number" && o.daysAway >= 1
+    ? o.daysAway
+    : null;
+
+  const state = status && status.state;
+  const reviewState = (status && status.review_status && status.review_status.state) || null;
+  const name = sanitizeDisplayName(status && status.display_name);
+  // "Welcome back, Andre." vs "Welcome back." when name is null.
+  const welcomeBack = name ? `Welcome back, ${name}.` : "Welcome back.";
+
+  let body;
+  if (state === "needs_intake") {
+    // Brand-new patient — no "welcome back" and no days-away prepend.
+    return (
+      "Hi, I'm Coach Maya — your AI rehab partner. To build your plan, "
+      + "I'll ask a few quick questions about your injury. Tap Start "
+      + "intake below, or just tell me about your injury here in chat. "
+      + "I work with knee, ankle, hip, low-back, shoulder, and elbow rehab."
+    );
+  } else if (state === "needs_plan") {
+    if (
+      reviewState === "pending_review"
+      || reviewState === "needs_clinician_review"
+    ) {
+      body = (
+        `${welcomeBack} Your draft plan is with your PT for review — `
+        + "they'll have eyes on it shortly. While we wait, anything new "
+        + "today? Pain, swelling, sleep changes, or did anything aggravate "
+        + "the injury?"
+      );
+    } else {
+      body = (
+        `${welcomeBack} Your intake is in. Want me to draft your first `
+        + "weekly plan? Tap Draft next week or just say so here."
+      );
+    }
+  } else if (state === "ready") {
+    if (reviewState === "recently_approved") {
+      body = (
+        `${welcomeBack} Your PT just approved your plan. Want to start `
+        + "today's session, log a check-in, or talk about how this week's "
+        + "going?"
+      );
+    } else if (reviewState === "recently_rejected") {
+      body = (
+        `${welcomeBack} Your PT had some notes on your last draft — see `
+        + "the chat for details. We can revisit when you're ready."
+      );
+    } else {
+      body = (
+        `${welcomeBack} How are you doing? Want to log a check-in, browse `
+        + "exercises, or talk about progress?"
+      );
+    }
+  } else {
+    // Unknown state — defensive fallback that doesn't fake a state.
+    body = "Hi, I'm Coach Maya. How can I help you today?";
+  }
+
+  if (daysAway && state !== "needs_intake") {
+    const dayWord = daysAway === 1 ? "day" : "days";
+    return `Good to see you again — it's been ${daysAway} ${dayWord}. ${body}`;
+  }
+  return body;
+}
+
+if (typeof window !== "undefined") {
+  window.__greetingHelpers = {
+    daysSinceLastActive,
+    sanitizeDisplayName,
+    selectGreetingCopy,
+  };
+}
+
+/**
+ * Render the state-aware Maya greeting once per page session.
+ *
+ * Pulls the latest /patient/me/intake-status (already cached in
+ * patientState by refreshPatientState), picks the copy via
+ * selectGreetingCopy, and appends a coach bubble. Idempotent — guarded
+ * by _stateAwareGreetingShown.
+ *
+ * No silent fallbacks: if patientState is missing (anon / fetch error),
+ * we log + skip; the existing chat-empty surface stays as-is so the
+ * patient still has a usable chat input.
+ */
+function renderStateAwareGreeting() {
+  if (_stateAwareGreetingShown) return;
+  if (!window.RehabAuth || !window.RehabAuth.getJwt || !window.RehabAuth.getJwt()) {
+    // Anon / demo mode — keep the legacy empty state.
+    return;
+  }
+  if (!patientState || !patientState.state) {
+    console.warn("state-aware greeting skipped: no patientState");
+    return;
+  }
+
+  // Compute days-away. Prefer backend last_active (authoritative); fall
+  // back to localStorage when backend returns null (e.g. flat-file or
+  // sqlite dev backend on the very first auth-status call).
+  let daysAway = daysSinceLastActive(patientState.last_active);
+  if (daysAway === null) {
+    daysAway = daysSinceLastActive(
+      localStorage.getItem(GREETING_LAST_CHAT_AT_KEY),
+    );
+  }
+
+  const copy = selectGreetingCopy(patientState, { daysAway });
+
+  // PHI hygiene: log state enum + review_state only. Never log copy or
+  // display_name.
+  console.info(
+    "state-aware greeting state=%s review_state=%s days_away=%s",
+    patientState.state,
+    (patientState.review_status && patientState.review_status.state) || "none",
+    daysAway === null ? "n/a" : String(daysAway),
+  );
+
+  // Replace the static empty-state node so the greeting reads as the
+  // first message rather than appearing below an empty-state placeholder.
+  const empty = document.getElementById("chatEmpty");
+  if (empty) empty.remove();
+
+  appendChatBubble("coach", copy);
+  _stateAwareGreetingShown = true;
+
+  // Stamp localStorage so the next session can compute daysAway even if
+  // the backend last_active is unavailable.
+  try {
+    localStorage.setItem(
+      GREETING_LAST_CHAT_AT_KEY,
+      new Date().toISOString(),
+    );
+  } catch (_) {
+    // Private mode / quota exceeded — non-fatal.
+  }
+}
+
+if (typeof window !== "undefined") {
+  // Expose for manual repro / e2e harness.
+  window.renderStateAwareGreeting = renderStateAwareGreeting;
 }
 
 // Refresh the "Start today's session" CTA. Decides visibility from

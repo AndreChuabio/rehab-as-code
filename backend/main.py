@@ -1744,7 +1744,24 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
     just approved/rejected, or has nothing in flight. None when the helper
     errors — frontend renders no pill in that case (no silent fallback to a
     fake state).
+
+    PR-R additions for the state-aware Maya greeting:
+      - `display_name` (str | None): resolved via user_store.get_display_name
+        (intake.payload.name -> auth.users.full_name -> email local-part).
+        Frontend uses this to address returning patients by name. None when
+        no source resolves; the greeting elides the name in that case.
+      - `last_active` (str | None): ISO timestamp of the *prior* visit,
+        captured before ensure_user mutates it to "now". Frontend uses this
+        to compute the "Good to see you again — N days" prepend on the
+        greeting. None for first-time visitors.
     """
+    # Capture prior last_active BEFORE ensure_user updates it to now.
+    # For first-time visitors prior is None; for returning users this is
+    # their last session's timestamp, which the frontend renders as
+    # "Good to see you again — N days" on the greeting.
+    prior = user_store.load_user(user_id) or {}
+    prior_last_active = prior.get("last_active")
+
     ensure_user(user_id)
     user = user_store.load_user(user_id) or {}
     intake = user.get("intake")
@@ -1782,9 +1799,26 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
         logger.exception("review_status fetch failed token=%s: %s", user_id, exc)
         review_status = None
 
+    # PR-R: resolve display_name via PR-A's helper. Best-effort — failures
+    # log + return None; the greeting elides the name in that case rather
+    # than 5xx'ing intake-status.
+    #
+    # PHI hygiene: log only that resolution succeeded/failed, never the
+    # display_name itself.
+    display_name = None
+    try:
+        display_name = user_store.get_display_name(user_id)
+    except Exception as exc:
+        logger.warning(
+            "display_name resolve failed token=%s reason=%s", user_id, exc,
+        )
+        display_name = None
+
     return {
         "state": state,
         "patient_name": user.get("patient_name"),
+        "display_name": display_name,
+        "last_active": prior_last_active,
         "has_intake": has_intake,
         "has_protocol": has_pr,
         "current_phase": ps.get("current_phase"),
