@@ -71,6 +71,69 @@ function visibleEnough(...pts) {
   return pts.every((p) => p && (p.visibility ?? 1) >= VIS_THRESHOLD);
 }
 
+// PR-U9: framing config. Each exercise declares which body region needs to be
+// visible; the preflight overlay uses this to give the patient EXERCISE-
+// SPECIFIC camera guidance ("sit and point camera at your ankles") instead
+// of the generic "step into frame," which is wrong half the time. Required
+// landmarks are scored against MediaPipe's per-keypoint visibility.
+const FRAMING_CONFIG = {
+  full_body: {
+    label: "head to feet",
+    required: [L.LEFT_SHOULDER, L.RIGHT_SHOULDER, L.LEFT_HIP, L.RIGHT_HIP,
+               L.LEFT_KNEE, L.RIGHT_KNEE, L.LEFT_ANKLE, L.RIGHT_ANKLE],
+    hint: "Step back — we need to see your whole body, head to feet.",
+    cameraTip: "Camera at chest height, about 6 feet away.",
+  },
+  lower_body: {
+    label: "hips to ankles",
+    required: [L.LEFT_HIP, L.RIGHT_HIP, L.LEFT_KNEE, L.RIGHT_KNEE,
+               L.LEFT_ANKLE, L.RIGHT_ANKLE],
+    hint: "We need to see from your hips to your ankles.",
+    cameraTip: "Lower the camera or step back so your legs are in frame.",
+  },
+  feet_seated: {
+    label: "knees + ankles",
+    required: [L.LEFT_KNEE, L.RIGHT_KNEE, L.LEFT_ANKLE, L.RIGHT_ANKLE],
+    hint: "Sit in a chair and point the camera at your feet and ankles.",
+    cameraTip: "Set your phone or laptop on the floor, 3-4 feet in front of you.",
+  },
+  arms_torso: {
+    label: "shoulders + arms",
+    required: [L.LEFT_SHOULDER, L.RIGHT_SHOULDER, L.LEFT_ELBOW, L.RIGHT_ELBOW,
+               L.LEFT_WRIST, L.RIGHT_WRIST],
+    hint: "We need to see your shoulders and both arms.",
+    cameraTip: "Camera at chest height, about 4 feet away.",
+  },
+};
+
+// Returns { framing, visible, required, ready, missingLabel, hint, cameraTip }.
+// `ready` is true when at least 75% of the required landmarks pass the
+// visibility threshold — partial framing still lets pose.js publish per-
+// exercise checks; the wrapper UI uses `ready` for the green-light state.
+function assessFraming(lms, framing) {
+  const cfg = FRAMING_CONFIG[framing];
+  if (!cfg || !lms) {
+    return { framing, visible: 0, required: 0, ready: false,
+             missingLabel: "", hint: "", cameraTip: "" };
+  }
+  let visible = 0;
+  for (const idx of cfg.required) {
+    const p = lms[idx];
+    if (p && (p.visibility ?? 1) >= VIS_THRESHOLD) visible++;
+  }
+  const required = cfg.required.length;
+  const ready = visible >= Math.ceil(required * 0.75);
+  return {
+    framing,
+    visible,
+    required,
+    ready,
+    missingLabel: cfg.label,
+    hint: cfg.hint,
+    cameraTip: cfg.cameraTip,
+  };
+}
+
 function statusFromPercent(percent, mode) {
   if (percent == null) return "idle";
   if (mode === "min") {
@@ -420,6 +483,7 @@ const EXERCISES = {
   // Mini squat: shallow, 0-45° flexion → 180-135° knee angle. Target 135°.
   mini_squat: {
     primary: "L_knee_depth", target: 135, mode: "max",
+    framing: "full_body",
     checks: ["L_knee_depth", "R_knee_depth", "L_knee_valgus", "R_knee_valgus", "trunk_lean"],
     corrections: {
       knee_valgus: "Knees out, track over toes",
@@ -429,6 +493,7 @@ const EXERCISES = {
   },
   single_leg_squat: {
     primary: "L_knee_depth", target: 75, mode: "max",
+    framing: "full_body",
     checks: ["L_knee_depth", "R_knee_depth", "L_knee_valgus", "R_knee_valgus", "trunk_lean"],
     corrections: {
       knee_valgus: "Knee out, track over toes",
@@ -438,6 +503,7 @@ const EXERCISES = {
   },
   wall_sit: {
     primary: "L_knee_depth", target: 90, mode: "max",
+    framing: "full_body",
     checks: ["L_knee_depth", "R_knee_depth", "L_knee_valgus", "R_knee_valgus", "trunk_lean"],
     corrections: {
       knee_valgus: "Knees out, press into the wall",
@@ -447,21 +513,25 @@ const EXERCISES = {
   },
   heel_slides: {
     primary: "L_knee_depth", target: 100, mode: "max",
+    framing: "lower_body",
     checks: ["L_knee_depth", "R_knee_depth"],
     corrections: { knee_depth: "Pull your heel a little closer" },
   },
   stationary_bike: {
     primary: "L_knee_depth", target: 90, mode: "max",
+    framing: "lower_body",
     checks: ["L_knee_depth", "R_knee_depth"],
     corrections: { knee_depth: "Full pedal stroke, knee through ninety" },
   },
   terminal_knee_extension: {
     primary: "L_knee_depth", target: 0, mode: "min",
+    framing: "lower_body",
     checks: ["L_knee_depth", "R_knee_depth"],
     corrections: { knee_depth: "Lock the knee straight, squeeze the quad" },
   },
   quad_sets: {
     primary: "L_knee_depth", target: 0, mode: "min",
+    framing: "lower_body",
     checks: ["L_knee_depth", "R_knee_depth"],
     corrections: { knee_depth: "Tighten the quad, push the knee down" },
   },
@@ -469,6 +539,7 @@ const EXERCISES = {
   // ── Hip extension (glute / hamstring) ───────────────────────────────
   glute_bridge: {
     primary: "L_hip_angle", target: 170, mode: "max_extension",
+    framing: "full_body",
     checks: ["L_hip_angle", "R_hip_angle", "hip_symmetry"],
     corrections: {
       hip_angle:    "Drive hips higher, squeeze the glutes",
@@ -482,6 +553,7 @@ const EXERCISES = {
   //    alternates legs across reps. ─────────────────────────────────────
   ham_walking_lunge: {
     primary: "L_knee_depth", target: 90, mode: "max",
+    framing: "full_body",
     checks: ["L_knee_depth", "R_knee_depth", "trunk_lean"],
     corrections: {
       knee_depth: "Drop the back knee, ninety up front",
@@ -494,6 +566,7 @@ const EXERCISES = {
   //    sees if their hips drop / spine sags during the hold. ─────────────
   lb_bird_dog: {
     primary: "trunk_lean", target: null, mode: "hold",
+    framing: "full_body",
     checks: ["trunk_lean", "hip_symmetry", "hip_drop"],
     corrections: {
       trunk_lean:   "Keep your back flat",
@@ -508,6 +581,7 @@ const EXERCISES = {
   //    catches the patient cheating with a forward sway. ─────────────────
   ankle_calf_raises_double_leg: {
     primary: "calf_rise", target: null, mode: "rise",
+    framing: "full_body",
     checks: ["calf_rise", "trunk_lean"],
     corrections: {
       calf_rise:  "Up onto your toes",
@@ -519,6 +593,7 @@ const EXERCISES = {
   // a wall and leans into it instead of holding their balance.
   ankle_calf_raises_single_leg: {
     primary: "calf_rise", target: null, mode: "rise",
+    framing: "full_body",
     checks: ["calf_rise", "trunk_lean", "sway"],
     corrections: {
       calf_rise:  "Up onto your toe",
@@ -540,6 +615,7 @@ const EXERCISES = {
   //    deliver. See checkPresence in runChecks. ──────────────────────────
   ankle_single_leg_balance: {
     primary: "sway", target: null, mode: "hold",
+    framing: "full_body",
     checks: ["sway", "trunk_lean", "hip_drop"],
     corrections: {
       sway:       "Find your center",
@@ -549,28 +625,33 @@ const EXERCISES = {
   },
   ankle_alphabet: {
     primary: "presence", target: null, mode: "presence",
+    framing: "feet_seated",
     checks: ["presence"],
-    corrections: { presence: "Stay in frame so I can track you" },
+    corrections: { presence: "Sit and point the camera at your feet" },
   },
   ankle_towel_calf_stretch: {
     primary: "presence", target: null, mode: "presence",
+    framing: "feet_seated",
     checks: ["presence"],
-    corrections: { presence: "Stay in frame so I can track you" },
+    corrections: { presence: "Sit and point the camera at your feet" },
   },
   ankle_dorsiflexion_band: {
     primary: "presence", target: null, mode: "presence",
+    framing: "feet_seated",
     checks: ["presence"],
-    corrections: { presence: "Stay in frame so I can track you" },
+    corrections: { presence: "Sit and point the camera at your feet" },
   },
   ankle_eversion_band: {
     primary: "presence", target: null, mode: "presence",
+    framing: "feet_seated",
     checks: ["presence"],
-    corrections: { presence: "Stay in frame so I can track you" },
+    corrections: { presence: "Sit and point the camera at your feet" },
   },
   ankle_lateral_hops: {
     primary: "presence", target: null, mode: "presence",
+    framing: "full_body",
     checks: ["presence"],
-    corrections: { presence: "Stay in frame so I can track you" },
+    corrections: { presence: "Stay in frame, head to feet" },
   },
 
   // ── Shoulder. Wall slides — track shoulder abduction (shoulder-hip-elbow
@@ -579,6 +660,7 @@ const EXERCISES = {
   //    tempo + symmetric motion make the depth-cycle state machine unstable. ─
   shoulder_wall_slides: {
     primary: "L_shoulder_abduction", target: 160, mode: "max",
+    framing: "arms_torso",
     checks: ["L_shoulder_abduction", "R_shoulder_abduction", "L_elbow_angle", "R_elbow_angle"],
     corrections: {
       shoulder_abduction: "Reach overhead along the wall",
@@ -1130,6 +1212,13 @@ function loop() {
           (t) => t.state === "descending" || t.state === "ascending",
         );
         const exDef = EXERCISES[activeExId] || DEFAULT_EX;
+        // PR-U9: framing assessment per frame so the wrapper UI can
+        // render exercise-specific guidance ("point camera at your
+        // ankles" vs "step into frame, head to feet"). Falls back
+        // gracefully when the exercise didn't declare a framing.
+        const framingStatus = exDef.framing
+          ? assessFraming(lms, exDef.framing)
+          : null;
         onPayloadCb({
           primary,
           metrics,
@@ -1141,6 +1230,7 @@ function loop() {
           checkTransitions,
           corrections: exDef.corrections || {},
           inRep,
+          framingStatus,
         });
       }
     } else if (ctx) {
@@ -1201,4 +1291,4 @@ function stop() {
   targetReps  = null;
 }
 
-window.PoseFormCheck = { init, start, stop, EXERCISES };
+window.PoseFormCheck = { init, start, stop, EXERCISES, FRAMING_CONFIG, assessFraming };

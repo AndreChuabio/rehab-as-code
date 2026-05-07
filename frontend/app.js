@@ -2230,6 +2230,18 @@ if (typeof window !== "undefined") {
   };
 }
 
+// PR-U9: build the preflight help line from the exercise's framing config
+// so the patient sees camera-position guidance specific to THIS exercise
+// (sit + camera at floor for ankle alphabet, vs full-body framing for a
+// squat). Falls back to the generic full-body line when framing is unset
+// or when pose.js hasn't loaded yet.
+function _preflightHelpText(ex) {
+  const exDef = window.PoseFormCheck?.EXERCISES?.[ex.library_id || ex.id];
+  const cfg = exDef?.framing && window.PoseFormCheck?.FRAMING_CONFIG?.[exDef.framing];
+  if (cfg) return `${cfg.cameraTip} ${cfg.hint}`;
+  return "Position your camera waist-high, about 8 feet away. Make sure your full body is visible inside the outline.";
+}
+
 // Required-landmarks gate for the preflight overlay. Maps each check id
 // back to the joints it needs visible so we can disable/enable Start
 // based on what's actually trackable for THIS exercise.
@@ -2333,7 +2345,14 @@ function renderPoseMetrics(container, payload, exercise) {
       </span>` : ""}`
     : "";
   if (!metrics.length && !repPill) {
-    container.innerHTML = `<span class="metric-pill idle">no body in frame</span>`;
+    // PR-U9: the generic "no body in frame" pill is misleading for seated
+    // exercises (the patient IS in frame, just not from the head down).
+    // When framingStatus is present, surface the missing region instead.
+    const fs = payload.framingStatus;
+    const label = (fs && fs.required > 0 && fs.visible < fs.required)
+      ? `need to see your ${fs.missingLabel}`
+      : "no body in frame";
+    container.innerHTML = `<span class="metric-pill idle">${escapeHtml(label)}</span>`;
     return;
   }
   const pills = metrics.map((m) => {
@@ -2508,7 +2527,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
                   <ul>${(item.ex.cues || []).slice(0, 3).map((c) => `<li>${escapeHtml(c)}</li>`).join("")}</ul>
                 </div>
                 <div class="pose-preflight-help">
-                  Position your camera waist-high, about 8 feet away. Make sure your full body is visible inside the outline.
+                  ${escapeHtml(_preflightHelpText(item.ex))}
                 </div>
                 <div class="pose-preflight-status" id="posePreflightStatus">Waiting for camera...</div>
                 <button class="pose-preflight-go" id="posePreflightGoBtn" type="button">Start</button>
@@ -2787,21 +2806,39 @@ async function togglePoseFormCheck(wrap, item, btn) {
   doneClose.onclick = () => { btn.click(); };
 
   function handlePreflight(payload) {
-    // PR-U5: the Start button is no longer gated on detection. The
-    // patient often has to step *back* from the camera to be visible
-    // (webcam-style setups: laptop on a table, patient standing 6+ feet
-    // away), which means they can't reach the keyboard to click Start
-    // while the gate is open. Andre hit this — the gate created a
-    // step-in-step-out chicken-and-egg.
-    //
-    // Now: status text updates with live tracking count + position
-    // hint, but the button stays clickable from the moment the panel
-    // mounts. Patient clicks Start when ready, then has time to walk
-    // into frame before the rep / hold runs.
+    // PR-U5: Start button stays clickable so the patient can step away
+    // from the keyboard before the rep loop starts.
+    // PR-U9: messaging is now exercise-specific. payload.framingStatus
+    // (from pose.js, scored against MediaPipe landmark.visibility) tells
+    // us EXACTLY which body region we need to see for THIS exercise. So
+    // a "Seated Heel Raise" with no body in frame says "sit and point
+    // camera at your ankles" instead of the generic "step into frame"
+    // (which is wrong for seated exercises).
+    const fs = payload.framingStatus;
     const exDef = window.PoseFormCheck.EXERCISES?.[item.ex.id];
     const expected = (exDef?.checks || []).length;
     const got = (payload.metrics || []).length;
     const trackingChip = `Tracking ${got}/${expected} ${expected === 1 ? "marker" : "markers"}`;
+
+    if (fs && fs.required > 0) {
+      const visChip = `Camera sees ${fs.visible}/${fs.required} of ${fs.missingLabel}`;
+      if (fs.visible === 0) {
+        preflightSt.textContent = `${visChip}. ${fs.hint} ${fs.cameraTip}`;
+      } else if (!fs.ready) {
+        preflightSt.textContent = `${visChip} — ${fs.hint}`;
+      } else {
+        preflightSt.textContent = `${trackingChip} · ${visChip} — ready. Tap Start.`;
+      }
+      if (fs.ready) {
+        preflightGo.classList.add("ready");
+      } else {
+        preflightGo.classList.remove("ready");
+      }
+      return;
+    }
+
+    // Fallback for exercises without a framing declaration (legacy entries
+    // not yet annotated). Same behavior as before PR-U9.
     if (got === 0) {
       preflightSt.textContent = `${trackingChip} — step into frame, then tap Start.`;
     } else if (got < expected) {
@@ -2809,8 +2846,6 @@ async function togglePoseFormCheck(wrap, item, btn) {
     } else {
       preflightSt.textContent = `${trackingChip} — ready. Tap Start.`;
     }
-    // Visual readiness cue (the "ready" class adds the soft glow). It's
-    // purely cosmetic now since the button is always clickable.
     if (got >= 1) {
       preflightGo.classList.add("ready");
     } else {
