@@ -638,17 +638,30 @@ def protocol_exercises(user_id: str | None = Depends(optional_user_id)):
             exercises_raw = demo.get("exercises", [])
             p = demo
 
+    # PR-U8: planner generates regression IDs (seated_heel_raise,
+    # active_assisted_ankle_eversion, ...) that aren't in the library, so
+    # find_by_id misses and the gallery renders black thumbnails. Use the
+    # fuzzy resolver scoped to the active body_region so My plan exercises
+    # surface a sensible library video + cues, and the frontend can use
+    # `library_id` to look up the pose.js EXERCISES entry for form-check.
+    body_region = (p.get("body_region") or "").lower() or None
     enriched = []
     for ex in exercises_raw:
         ex_id = ex.get("id") or ex.get("name", "")
-        kb = exercise_kb.find_by_id(ex_id) or exercise_kb.find_by_id(ex_id.replace(" ", "_").lower())
+        kb = exercise_kb.resolve_to_library(
+            exercise_id=ex_id,
+            name=ex.get("name"),
+            body_region=body_region,
+        )
         card = exercise_kb.to_card(kb) if kb else {}
+        library_id = (kb or {}).get("id") or None
         spec = (
             f"{ex.get('sets', '')}×{ex.get('reps', '')} {ex.get('load', '')}".strip(" ×")
             or ex.get("sets_reps") or ex.get("spec") or ""
         )
         enriched.append({
             "id": ex_id,
+            "library_id": library_id,
             "name": ex.get("name") or ex_id,
             "spec": spec,
             "youtube_id": card.get("youtube_id", ""),
@@ -658,7 +671,6 @@ def protocol_exercises(user_id: str | None = Depends(optional_user_id)):
             "generated_video_url": card.get("generated_video_url") or None,
             "cues": card.get("cues", []),
             "default_dose": card.get("default_dose", spec),
-            "generated_video_url": card.get("generated_video_url"),
             "video_source": card.get("video_source"),
         })
     return {

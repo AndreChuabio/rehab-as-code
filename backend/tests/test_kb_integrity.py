@@ -267,3 +267,67 @@ def test_planner_validator_skips_when_region_unknown():
 
     payload = {"exercises": [{"id": "wall_sit"}]}
     _validate_region(payload, expected_region=None, token="test")
+
+
+# ---------------------------------------------------------------------------
+# PR-U8: exercise_kb.resolve_to_library — fuzzy resolution path
+# ---------------------------------------------------------------------------
+
+def test_resolve_to_library_exact_id_match():
+    """An exercise id that IS in the library returns the same entry as
+    find_by_id — no fuzzy fallback path runs."""
+    res = exercise_kb.resolve_to_library("ankle_alphabet")
+    assert res is not None
+    assert res["id"] == "ankle_alphabet"
+
+
+def test_resolve_to_library_slug_normalization():
+    """Human-style ids ('Ankle Alphabet', 'Wall-Sit') resolve to library
+    entries via slug normalization before falling back to keyword search."""
+    res = exercise_kb.resolve_to_library("Ankle Alphabet")
+    assert res is not None
+    assert res["id"] == "ankle_alphabet"
+
+    res = exercise_kb.resolve_to_library("Wall-Sit")
+    assert res is not None
+    assert res["id"] == "wall_sit"
+
+
+def test_resolve_to_library_fuzzy_to_canonical_within_region():
+    """Planner-generated regression ids that aren't in the library should
+    resolve to the closest canonical library entry within the same body
+    region. This is the My-plan-thumbnail bug fix in PR-U8."""
+    res = exercise_kb.resolve_to_library(
+        exercise_id="active_assisted_ankle_eversion",
+        name="Active-Assisted Ankle Eversion",
+        body_region="ankle",
+    )
+    assert res is not None
+    assert res.get("body_region") == "ankle"
+    # The eversion-keyword match should land on the canonical band exercise.
+    assert res["id"] == "ankle_eversion_band"
+
+
+def test_resolve_to_library_returns_none_when_no_overlap():
+    """If the planner emits something with no library overlap (e.g. a
+    typo'd id with no name), the resolver returns None rather than
+    surfacing a wrong match."""
+    res = exercise_kb.resolve_to_library(
+        exercise_id="zzz",
+        name=None,
+        body_region="ankle",
+    )
+    assert res is None
+
+
+def test_resolve_to_library_respects_body_region_scope():
+    """A keyword that matches multiple regions ('balance' is in ankle and
+    elsewhere) should resolve to the active region's entry, not bleed
+    cross-region."""
+    res = exercise_kb.resolve_to_library(
+        exercise_id="single_leg_balance_drill",
+        name="Single Leg Balance",
+        body_region="ankle",
+    )
+    assert res is not None
+    assert res.get("body_region") == "ankle"
