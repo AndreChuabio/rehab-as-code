@@ -1,17 +1,5 @@
 const API_BASE = "";
 
-const TRACE_GLYPH = {
-  agent_started:   "[start]",
-  file_read:       "[read]",
-  file_edit:       "[edit]",
-  tool_call:       "[tool]",
-  branch_created:  "[branch]",
-  commit_created:  "[commit]",
-  pr_opened:       "[pr]",
-  agent_completed: "[done]",
-  agent_failed:    "[fail]",
-};
-
 let intakeComplete = localStorage.getItem("rehab_intake_complete") === "1";
 let approvedPlanExercises = []; // exercises the user added in step 2
 
@@ -485,7 +473,6 @@ async function bootstrapAuth() {
 
 let patientState = null; // { state, has_intake, has_protocol, last_pr_url, ... }
 let intakeHistory = [];  // [{role, content}] for the intake modal conversation
-let planGenStreamES = null; // EventSource for the live plan-gen trace
 
 async function refreshPatientState({ openModalIfNeeded = true } = {}) {
   // Only meaningful when authed; demo mode falls back to local flags.
@@ -643,14 +630,11 @@ async function submitIntakeTurn(userText) {
 
     if (payload.intake_complete) {
       // IntakeAgent saved + already kicked plan_generation. Close intake,
-      // open plan-gen modal, surface whichever artifact we have:
-      //   pending_protocol_id (PROTOCOL_WRITE_TARGET=supabase) → approve via DB
-      //   pr_url              (legacy github path)             → approve via /pr/apply
+      // open plan-gen modal with the pending_protocol_id so the patient
+      // can self-approve (or hand off to a clinician).
       closeIntakeModal();
-      const inv = payload.data?.invocation_id || null;
-      const pr = payload.data?.pr_url || null;
       const pending = payload.data?.pending_protocol_id || null;
-      showPlanGenModal({ invocation_id: inv, pr_url: pr, pending_protocol_id: pending });
+      showPlanGenModal({ pending_protocol_id: pending });
     }
   } catch (err) {
     console.error("intake turn failed:", err);
@@ -665,7 +649,7 @@ async function submitIntakeTurn(userText) {
   }
 }
 
-async function showPlanGenModal({ invocation_id = null, pr_url = null, pending_protocol_id = null, kickoff = false } = {}) {
+async function showPlanGenModal({ pending_protocol_id = null } = {}) {
   const modal = document.getElementById("planGenModal");
   const trace = document.getElementById("planGenTrace");
   const prCard = document.getElementById("planGenPrCard");
@@ -676,10 +660,10 @@ async function showPlanGenModal({ invocation_id = null, pr_url = null, pending_p
   if (prCard) { prCard.hidden = true; prCard.innerHTML = ""; }
   if (cont) cont.hidden = true;
 
-  appendPlanGenLine("[start]", "Calling plan generator…");
+  appendPlanGenLine("[start]", "Drafting your protocol…");
 
-  // If we don't already have an invocation or a finished artifact, force one now.
-  if (!invocation_id && !pr_url && !pending_protocol_id) {
+  // If we don't already have a pending row, force plan generation now.
+  if (!pending_protocol_id) {
     try {
       const body = {
         message: "Generate my rehab plan.",
@@ -693,32 +677,19 @@ async function showPlanGenModal({ invocation_id = null, pr_url = null, pending_p
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const payload = await res.json();
-      invocation_id = payload.data?.invocation_id || null;
-      pr_url = payload.data?.pr_url || pr_url;
-      pending_protocol_id = payload.data?.pending_protocol_id || pending_protocol_id;
+      pending_protocol_id = payload.data?.pending_protocol_id || null;
       if (payload.message) appendPlanGenLine("[plan]", payload.message);
     } catch (err) {
       appendPlanGenLine("[fail]", `Plan generation failed: ${err.message || err}`, true);
     }
   }
 
-  if (invocation_id) {
-    streamPlanGenTrace(invocation_id, () => {
-      if (pr_url) renderPlanGenPr(pr_url);
-      if (pending_protocol_id) renderPlanGenPending(pending_protocol_id);
-      if (cont) cont.hidden = false;
-    });
-  } else if (pr_url) {
-    // Cached_replay returns pr_url directly with no streamable invocation.
-    renderPlanGenPr(pr_url);
-    if (cont) cont.hidden = false;
-  } else if (pending_protocol_id) {
-    // Supabase write path: no streamable trace, the row is already pending.
+  if (pending_protocol_id) {
     renderPlanGenPending(pending_protocol_id);
-    if (cont) cont.hidden = false;
   } else {
-    if (cont) cont.hidden = false;
+    appendPlanGenLine("[fail]", "No pending protocol was created. Try again or contact your clinician.", true);
   }
+  if (cont) cont.hidden = false;
 }
 
 function appendPlanGenLine(glyph, text, isFail = false) {
@@ -731,17 +702,11 @@ function appendPlanGenLine(glyph, text, isFail = false) {
   trace.scrollTop = trace.scrollHeight;
 }
 
-function renderPlanGenPr(prUrl) {
-  const prCard = document.getElementById("planGenPrCard");
-  if (!prCard) return;
-  prCard.hidden = false;
-  prCard.innerHTML = `<span>PR opened →</span> <a href="${prUrl}" target="_blank" rel="noopener">${prUrl}</a>`;
-}
-
-// Supabase write-path equivalent of renderPlanGenPr: a pending_review row in
-// the protocols table. Approve hits POST /protocols/{id}/approve which flips
-// the row to active in a transaction. Same UX shape as the GitHub Approve
-// button so the modal looks identical to today.
+// Render the pending_review row from chat_protocol_drafter or PlanGenerationAgent.
+// Approve hits POST /protocols/{id}/approve which flips the row to active in
+// a single transaction. The clinician dashboard at /clinician shows the same
+// row from the reviewer side; this in-app card is the patient's view of
+// "draft is queued and awaiting clinician review".
 function renderPlanGenPending(protocolId) {
   const prCard = document.getElementById("planGenPrCard");
   if (!prCard) return;
@@ -787,51 +752,9 @@ async function approvePendingProtocol(protocolId, btn) {
   }
 }
 
-function streamPlanGenTrace(invocationId, onDone) {
-  if (planGenStreamES) {
-    try { planGenStreamES.close(); } catch (_) {}
-    planGenStreamES = null;
-  }
-  const url = `${API_BASE}/agent/stream/${encodeURIComponent(invocationId)}`;
-  try {
-    planGenStreamES = new EventSource(url);
-  } catch (e) {
-    appendPlanGenLine("[fail]", `Couldn't open trace stream: ${e.message}`, true);
-    if (onDone) onDone();
-    return;
-  }
-  planGenStreamES.onmessage = (ev) => {
-    try {
-      const data = JSON.parse(ev.data);
-      const glyph = TRACE_GLYPH[data.type] || `[${data.type}]`;
-      const text = data.message || data.detail || JSON.stringify(data.payload || {});
-      appendPlanGenLine(glyph, text, data.type === "agent_failed");
-      if (data.type === "pr_opened" && data.payload?.url) {
-        renderPlanGenPr(data.payload.url);
-      }
-    } catch (_) {
-      appendPlanGenLine("[trace]", ev.data);
-    }
-  };
-  planGenStreamES.addEventListener("done", () => {
-    try { planGenStreamES.close(); } catch (_) {}
-    planGenStreamES = null;
-    if (onDone) onDone();
-  });
-  planGenStreamES.onerror = () => {
-    try { planGenStreamES.close(); } catch (_) {}
-    planGenStreamES = null;
-    if (onDone) onDone();
-  };
-}
-
 function closePlanGenModal() {
   const modal = document.getElementById("planGenModal");
   if (modal) modal.hidden = true;
-  if (planGenStreamES) {
-    try { planGenStreamES.close(); } catch (_) {}
-    planGenStreamES = null;
-  }
 }
 
 function escapeHtml(s) {
@@ -903,20 +826,6 @@ function switchStage(mode) {
     }
     document.getElementById("chatInput")?.focus();
   }
-}
-
-// ---------------------------------------------------------------------------
-// Agent status chip (left rail)
-// ---------------------------------------------------------------------------
-
-function setAgentStatus(state, label) {
-  const chip = document.querySelector(".agent-status");
-  const dot  = document.getElementById("agentStatusDot");
-  const txt  = document.getElementById("agentStatusLabel");
-  if (!chip || !txt) return;
-  chip.classList.remove("working", "done", "error");
-  if (state) chip.classList.add(state);
-  txt.textContent = label || state || "idle";
 }
 
 // ---------------------------------------------------------------------------
@@ -1001,34 +910,6 @@ async function loadProtocol() {
     }
   } catch (e) {
     console.error("Failed to load protocol:", e);
-  }
-}
-
-async function demoReset() {
-  const btn = document.getElementById("demoResetBtn");
-  if (!confirm("Reset protocol.yaml on main to pending_intake? Wipes whatever the last demo run populated.")) {
-    return;
-  }
-  if (btn) {
-    btn.disabled = true;
-    btn.textContent = "Resetting...";
-  }
-  try {
-    const res = await fetch(`${API_BASE}/demo/reset`, { method: "POST" });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `reset failed: ${res.status}`);
-    }
-    showToast?.("Demo reset — protocol back to pending_intake", "info");
-    loadProtocol();
-  } catch (e) {
-    console.error("demo reset failed", e);
-    showToast?.(`Reset failed: ${e.message}`, "error");
-  } finally {
-    if (btn) {
-      btn.disabled = false;
-      btn.textContent = "Reset demo";
-    }
   }
 }
 
@@ -1142,176 +1023,57 @@ function renderFocus(items) {
 }
 
 // ---------------------------------------------------------------------------
-// Cloud agent invocation + SSE trace stream
+// Pending-protocol render — replaces the dead PR-bus surface
 // ---------------------------------------------------------------------------
+//
+// Coach Maya's chat tools (fire_symptom_trigger / fire_checkin_trigger /
+// fire_weekly_plan_trigger) save a draft protocol revision as a
+// `pending_review` row in the `protocols` table. The patient sees this card;
+// the clinician sees the same row from /clinician. Approving here hits
+// POST /protocols/{id}/approve which transactionally promotes the row to
+// `active` and supersedes the prior active version.
 
-async function invokeAgent(flow, body = {}) {
-  // Make sure the trace shows up where the user is looking.
-  switchStage("chat");
-  resetAgentTeam();
-  activateTeamNode("parent");
-  setAgentStatus("working", `coordinator (${flow})`);
-  setAgentButtonsDisabled(true);
-
-  try {
-    const payload = { flow, ...body };
-    const res = await fetch(`${API_BASE}/agent/invoke`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    if (!res.ok) throw new Error(`invoke failed: ${res.status}`);
-    const { invocation_id, pr_url, branch, provider } = await res.json();
-    const providerEl = document.getElementById("providerName");
-    if (providerEl) providerEl.textContent = provider;
-
-    streamTrace(invocation_id, async () => {
-      setAgentButtonsDisabled(false);
-      setAgentStatus("done", "ready");
-      refreshProtocol();
-      if (flow === "intake") {
-        // After intake, drop straight into the plan builder (days + exercises)
-        appendChatBubble("coach", "Intake complete! Now set your training days and add exercises below.");
-        await renderPlanBuilder();
-      }
-    });
-  } catch (e) {
-    console.error(e);
-    showToast(`Agent invoke failed: ${e.message}`, "error");
-    setAgentButtonsDisabled(false);
-    setAgentStatus("error", "failed");
-  }
-}
-
-// streamTrace renders trace events as a single inline chat bubble. Each
-// invocation gets its own bubble; events stream into its <ol>. This
-// preserves the chat-as-single-surface UX — no peer panels.
-function streamTrace(invocationId, onDone) {
-  const log = document.getElementById("chatLog");
-  if (!log) return;
-
-  const bubble = document.createElement("div");
-  bubble.className = "chat-bubble agent-trace";
-  bubble.innerHTML = `
-    <div class="trace-header">cloud agent / ${escapeHtml(invocationId.slice(0, 8))}</div>
-    <ol class="trace-list"></ol>
-  `;
-  log.appendChild(bubble);
-  scrollChatLog?.();
-  const traceList = bubble.querySelector(".trace-list");
-
-  const url = `${API_BASE}/agent/stream/${encodeURIComponent(invocationId)}`;
-  const source = new EventSource(url);
-  let activeSubagent = null;
-
-  source.onmessage = (e) => {
-    try {
-      const event = JSON.parse(e.data);
-
-      const subagent = event?.payload?.subagent;
-      if (subagent) {
-        activateTeamNode(subagent);
-        activeSubagent = subagent;
-        setAgentStatus("working", `${subagent} working`);
-      } else if (event.type === "pr_opened" || event.type === "agent_completed") {
-        activeSubagent = null;
-      }
-
-      const li = document.createElement("li");
-      li.className = `trace-event trace-${event.type}`;
-      if (activeSubagent && !subagent) {
-        li.classList.add("trace-child");
-        li.dataset.subagent = activeSubagent;
-      }
-      const glyph = TRACE_GLYPH[event.type] || "[event]";
-      const subBadge = subagent
-        ? `<span class="trace-subagent">${escapeHtml(subagent)}</span>`
-        : "";
-      li.innerHTML = `
-        <span class="trace-glyph">${glyph}</span>
-        <span class="trace-ts">${event.timestamp.toFixed(1)}s</span>
-        ${subBadge}
-        <span class="trace-label">${escapeHtml(event.label)}</span>
-      `;
-      traceList.appendChild(li);
-      scrollChatLog?.();
-    } catch (err) {
-      console.error("trace parse error", err);
-    }
-  };
-
-  source.addEventListener("done", () => {
-    source.close();
-    onDone?.();
-  });
-
-  source.onerror = (err) => {
-    console.warn("SSE closed", err);
-    source.close();
-    onDone?.();
-  };
-}
-
-function resetAgentTeam() {
-  document.querySelectorAll(".team-mini-node").forEach((n) => {
-    n.classList.remove("active");
-  });
-}
-
-function activateTeamNode(role) {
-  const node = document.querySelector(`.team-mini-node[data-role="${role}"]`);
-  if (node) node.classList.add("active");
-}
-
-// PR result also lives inline in chat. The clinician approves each PR
-// explicitly via the Approve button — that's the audit story for judges:
-// agent suggests, human applies. Click-through to GitHub for the diff.
-function renderPullRequest(prUrl, branch) {
+function renderPendingProtocolCard(protocolId, summary, flowLabel) {
   const log = document.getElementById("chatLog");
   if (!log) return;
   const bubble = document.createElement("div");
-  bubble.className = "chat-bubble pr-result";
-  const safeUrl = escapeHtml(prUrl);
+  bubble.className = "chat-bubble pr-result pending-protocol";
+  const safeId = escapeHtml(protocolId);
+  const safeSummary = escapeHtml(summary || "Protocol revision queued for clinician review.");
+  const safeFlow = escapeHtml(flowLabel || "draft");
   bubble.innerHTML = `
-    <div class="pr-result-header">pull request opened — awaiting approval</div>
-    ${branch ? `<div class="pr-result-branch">branch: ${escapeHtml(branch)}</div>` : ""}
+    <div class="pr-result-header">${safeFlow} drafted — awaiting clinician review</div>
+    <div class="pr-result-summary">${safeSummary}</div>
     <div class="pr-result-actions">
-      <button class="pr-approve-btn" data-pr-url="${safeUrl}">Approve and apply</button>
-      <a class="pr-result-cta" href="${safeUrl}" target="_blank" rel="noopener">View on GitHub</a>
+      <button class="pr-approve-btn" data-protocol-id="${safeId}">Approve and apply</button>
+      <a class="pr-result-cta" href="/clinician" target="_blank" rel="noopener">View in clinician dashboard</a>
     </div>
-    <a class="pr-result-link" href="${safeUrl}" target="_blank" rel="noopener">${safeUrl}</a>
   `;
-  bubble.querySelector(".pr-approve-btn").addEventListener("click", (e) => {
-    applyPullRequest(prUrl, e.currentTarget);
-  });
+  const btn = bubble.querySelector(".pr-approve-btn");
+  if (btn) {
+    btn.addEventListener("click", () => approvePendingProtocol(protocolId, btn));
+  }
   log.appendChild(bubble);
   scrollChatLog?.();
 }
 
-async function applyPullRequest(prUrl, btn) {
-  btn.disabled = true;
-  btn.textContent = "Applying...";
-  try {
-    const res = await fetch(`${API_BASE}/pr/apply`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pr_url: prUrl }),
-    });
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `apply failed: ${res.status}`);
-    }
-    const { pr_number } = await res.json();
-    btn.textContent = `Applied to main (PR #${pr_number})`;
-    btn.classList.add("applied");
-    // Refresh Current Protocol card so the new state appears in the sidebar
-    loadProtocol();
-  } catch (e) {
-    console.error("apply failed", e);
-    btn.disabled = false;
-    btn.textContent = "Approve and apply";
-    showToast?.(`Apply failed: ${e.message}`, "error");
-  }
+// Inline error card surfaced when chat_protocol_drafter / save_pending fails.
+// We intentionally don't fake success when the LLM is unreachable — the
+// patient sees the failure, can retry, and the clinician isn't queueing a
+// silent zero-output draft.
+function renderPendingProtocolError(message, flowLabel) {
+  const log = document.getElementById("chatLog");
+  if (!log) return;
+  const bubble = document.createElement("div");
+  bubble.className = "chat-bubble error pending-protocol-error";
+  const safeMsg = escapeHtml(message || "Couldn't draft a protocol revision. Please try again in a moment.");
+  const safeFlow = escapeHtml(flowLabel || "draft");
+  bubble.innerHTML = `
+    <div class="pr-result-header">${safeFlow} draft failed</div>
+    <div class="pr-result-summary">${safeMsg}</div>
+  `;
+  log.appendChild(bubble);
+  scrollChatLog?.();
 }
 
 function reportSymptom() {
@@ -1466,26 +1228,29 @@ function handleFlowAnswer(text) {
   resetInputPlaceholder();
 
   if (type === "intake") {
-    const intake_text =
-      `${a.name}, ${a.age} years old. Injury: ${a.injury}, ${a.timing}. ` +
-      `Pain level ${a.pain}/10. Symptoms: ${a.symptoms}`;
-    appendChatBubble("coach", "Got it! Generating your personalized protocol...");
-    invokeAgent("intake", { intake_text });
+    // Legacy chat-style intake survives only as a demo-mode walkthrough for
+    // unauthed users. Authed users reach the structured intake modal via
+    // navigateToIntake(). For demo, we just acknowledge and unlock the next
+    // step locally; the real protocol draft requires auth.
+    appendChatBubble(
+      "coach",
+      "Got it. Sign in to save this intake and queue a protocol for clinician review.",
+    );
     onIntakeComplete();
 
   } else if (type === "symptom") {
     const symptom_text =
       `${a.location} — ${a.type}, level ${a.level}/10. ` +
       `Occurs ${a.trigger}. Duration: ${a.duration}`;
-    appendChatBubble("coach", "Logged. Adjusting your protocol...");
-    invokeAgent("symptom_adjustment", { symptom_text });
+    appendChatBubble("coach", "Logged. Drafting an adjustment for clinician review...");
+    sendChat(`I have a symptom to log: ${symptom_text}`, { skipUserBubble: true });
 
   } else if (type === "checkin") {
     const checkin_text =
       `Session rating ${a.rating}/10. Completed: ${a.completed}. ` +
       `Strong: ${a.strong}. Difficult: ${a.difficult}`;
-    appendChatBubble("coach", "Check-in logged! Starting your video session with Coach Maya...");
-    invokeAgent("checkin", { checkin_text });
+    appendChatBubble("coach", "Check-in logged. Drafting a tweak for clinician review...");
+    sendChat(`Session check-in: ${checkin_text}`, { skipUserBubble: true });
     // Auto-switch to video call after check-in
     setTimeout(() => switchStage("video"), 1800);
   }
@@ -1505,13 +1270,6 @@ function triggerCheckin() {
     CHECKIN_QUESTIONS[0].q
   );
   setTimeout(prefillFlowInput, 50);
-}
-
-function setAgentButtonsDisabled(disabled) {
-  ["generatePlanBtn", "triggerIntakeBtn", "triggerCheckinBtn", "exerciseBtn"].forEach((id) => {
-    const btn = document.getElementById(id);
-    if (btn) btn.disabled = disabled;
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1640,9 +1398,12 @@ function confirmFrequencyAndGenerate() {
   const ordered = DAYS.filter(d => selectedDays.has(d));
   const freqNote = `Training days: ${ordered.join(", ")} (${ordered.length}/week). Exercises: ${approvedPlanExercises.map(e => e.name).join(", ")}.`;
 
-  appendChatBubble("coach", `Scheduled reminder set for ${ordered.join(", ")}. Generating your protocol...`);
+  appendChatBubble("coach", `Scheduled reminder set for ${ordered.join(", ")}. Drafting next week's protocol for clinician review...`);
   onPlanApproved();
-  invokeAgent("weekly_plan", { intake_text: freqNote });
+  // Fire the chat-driven weekly plan tool. The model picks fire_weekly_plan_trigger
+  // and the backend writes a pending_review row; renderPendingProtocolCard
+  // shows the patient an Approve button + clinician dashboard link.
+  sendChat(`Plan next week for me. ${freqNote}`, { skipUserBubble: true });
   setTimeout(() => triggerExercise(), 2400);
 }
 
@@ -2202,10 +1963,10 @@ const chatHistory = [];
 const CHAT_TOOL_GLYPH = {
   recommend_exercise:        "video",
   list_phase_exercises:      "library",
-  fire_symptom_trigger:      "symptom \u2192 PR",
-  fire_intake_trigger:       "intake \u2192 PR",
-  fire_checkin_trigger:      "check-in \u2192 PR",
-  fire_weekly_plan_trigger:  "weekly plan \u2192 PR",
+  fire_symptom_trigger:      "symptom \u2192 review queue",
+  fire_intake_trigger:       "intake reset",
+  fire_checkin_trigger:      "check-in \u2192 review queue",
+  fire_weekly_plan_trigger:  "weekly plan \u2192 review queue",
 };
 
 function onChatSubmit(event) {
@@ -2324,31 +2085,22 @@ function handleChatEvent(event, coachBubble, appendDelta) {
 
     case "tool_call":
       renderToolLine(event);
-      // Light up the team-mini strip the moment chat fires an agent so the
-      // audience sees the chat-to-orchestrator link without a panel switch.
-      if (String(event.name || "").startsWith("fire_")) {
-        resetAgentTeam();
-        activateTeamNode("parent");
-        setAgentStatus("working", "coordinator (chat)");
-      }
       break;
 
     case "tool_result":
-      // Real fire_*_trigger results carry an invocation_id; stream the trace
-      // inline as a chat bubble. Library lookup tools have no invocation_id;
-      // they render as the existing tool-result line only.
-      if (event.result?.invocation_id) {
-        renderToolResultLine(event);
-        streamTrace(event.result.invocation_id, () => {
-          if (event.result.pr_url) {
-            renderPullRequest(event.result.pr_url, event.result.branch);
-          }
-          setAgentStatus("done", "ready");
+      // fire_*_trigger results carry pending_protocol_id (and optionally
+      // an "ok: false" + error string when the drafter or save_pending
+      // failed). Library lookup tools (recommend_exercise / list_phase_exercises)
+      // emit a card event already and don't reach this branch with an id.
+      if (event.result) {
+        const r = event.result;
+        const flowLabel = r.flow ? r.flow.replace(/_/g, " ") : "draft";
+        if (r.pending_protocol_id) {
+          renderToolResultLine(event);
+          renderPendingProtocolCard(r.pending_protocol_id, r.summary, flowLabel);
           refreshProtocol();
-        });
-        const providerEl = document.getElementById("providerName");
-        if (providerEl) {
-          providerEl.textContent = event.result.provider || "cached_replay";
+        } else if (r.ok === false && r.error) {
+          renderPendingProtocolError(r.error, flowLabel);
         }
       }
       break;
@@ -2383,8 +2135,8 @@ function renderToolLine(event) {
   if (args.exercise_id) detail = `${args.exercise_id}`;
   else if (args.phase) detail = `phase: ${args.phase}`;
   else if (args.symptom_text) detail = `"${truncate(args.symptom_text, 50)}"`;
-  else if (args.intake_text) detail = `"${truncate(args.intake_text, 50)}"`;
   else if (args.checkin_text) detail = `"${truncate(args.checkin_text, 50)}"`;
+  else if (args.reason) detail = `"${truncate(args.reason, 50)}"`;
   line.innerHTML = `
     <span class="tool-glyph">[${escapeHtml(label)}]</span>
     <span>${escapeHtml(detail)}</span>
@@ -2398,14 +2150,14 @@ function renderToolResultLine(event) {
   const line = document.createElement("div");
   line.className = "chat-tool-line";
   const result = event.result || {};
-  const provider = result.provider || "agent";
-  const pr = result.pr_url
-    ? `<a href="${escapeHtml(result.pr_url)}" target="_blank">${escapeHtml(result.branch || "PR")}</a>`
-    : `<span>queued</span>`;
+  const phase = result.phase ? `${escapeHtml(result.phase)} wk ${escapeHtml(String(result.week ?? "?"))}` : "queued";
+  const idTail = result.pending_protocol_id
+    ? `<span class="tool-id">#${escapeHtml(String(result.pending_protocol_id).slice(0, 8))}</span>`
+    : "";
   line.innerHTML = `
-    <span class="tool-glyph">[orchestrator]</span>
-    <span>${escapeHtml(provider)}</span>
-    ${pr}
+    <span class="tool-glyph">[draft]</span>
+    <span>${phase}</span>
+    ${idTail}
   `;
   log.appendChild(line);
   scrollChatLog();

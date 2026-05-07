@@ -7,8 +7,28 @@ Two audiences:
    `protocols/.cursorrules`; this file is for harness-level concerns.
 2. **Human collaborators returning to the repo** — read the "What changed
    since PR #34" section below before diving into the agents/ directory.
-   The agent surface area was rewired between PR #34 (commit `fdb636a`) and
-   now; the file map and call paths here are current.
+
+## Post-PR-bus update (2026-05-06)
+
+The cursor / ag2 / cached_replay PR-bus surface (`/agent/invoke`,
+`/agent/stream`, `_invoke_with_fallback`, `CodingAgent`, `cached_runs/`,
+the orchestrator/ Node sidecar) was retired right after PR #62. Lower
+sections of this file still describe `AGENT_PROVIDER` selection — read
+them as historical context, not a current contract.
+
+Current write path:
+
+- Chat tool fires (`fire_symptom_trigger` / `fire_checkin_trigger` /
+  `fire_weekly_plan_trigger`) call `chat_protocol_drafter.draft_and_save_pending`
+  (Anthropic claude-sonnet-4-6) which produces a structured protocol
+  revision and writes it as a `pending_review` row via
+  `protocol_repo.save_pending`.
+- `/patient/interact` runs `IntakeAgent` → `PlanGenerationAgent`. The
+  plan generator also calls `protocol_repo.save_pending` directly.
+- Clinicians approve drafts on `/clinician`, which hits
+  `POST /protocols/{id}/approve` to flip the row to `active`
+  transactionally.
+- No GitHub PR is opened anywhere in the runtime path.
 
 ## What changed since PR #34 (for Nikki)
 

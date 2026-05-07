@@ -1,4 +1,3 @@
-ag2[anthropic]
 fastapi
 uvicorn[standard]
 anthropic

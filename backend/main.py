@@ -2,16 +2,16 @@ from __future__ import annotations
 """
 main.py - FastAPI backend for RehabAsCode
 
-Endpoints (existing):
-  GET  /health-data         today's wearable metrics (optional ?token= for per-user)
-  GET  /calendar            today's calendar events
-  POST /start-session       build context + create Tavus CVI session
-  GET  /context             pre-built context (cron use case)
-
-Endpoints (new for RehabAsCode):
-  GET  /protocol            current rehab protocol (from rehab-protocols-andre)
-  POST /agent/invoke        kick off a Cursor cloud agent run, return invocation_id
-  GET  /agent/stream/{id}   SSE: stream TraceEvents for an invocation
+Endpoints:
+  GET  /health-data                   today's wearable metrics (optional ?token=)
+  GET  /calendar                      today's calendar events
+  POST /start-session                 build context + create Tavus CVI session
+  GET  /context                       pre-built context (cron use case)
+  GET  /protocol                      current rehab protocol for this patient
+  POST /chat                          SSE Coach Maya chat (drafts protocol revisions)
+  POST /patient/interact              structured intake + plan-gen entry point
+  GET  /protocols/pending             clinician dashboard queue
+  POST /protocols/{id}/approve|reject clinician review actions
 
 Apple Health onboarding:
   POST /connect/apple-health          generate user token + return onboard URL
@@ -19,9 +19,10 @@ Apple Health onboarding:
   GET  /onboard/{token}               mobile HTML onboarding page (QR + install button)
   GET  /shortcut/{token}              serve .shortcut file for iOS Shortcuts import
 
-Agent provider is selected via AGENT_PROVIDER env var (cursor_github,
-cursor_api, cached_replay, mock). All endpoints below talk to the abstract
-CodingAgent interface only — swapping providers is a config change.
+The cursor / ag2 / cached_replay PR-bus is gone (PR-after-#62). All chat-tool
+fires now write `pending_review` rows to the Supabase `protocols` table via
+chat_protocol_drafter.draft_and_save_pending; clinicians approve them on
+/clinician.
 """
 
 import asyncio
@@ -45,13 +46,12 @@ from health_mock import get_health_data, ingest_shortcut_payload
 from calendar_fetch import get_calendar_events
 from context_builder import build_system_prompt
 from tavus_client import create_conversation
-from agents import AgentInvocation, InvocationRequest, get_agent
 from protocol_loader import (
     fetch_protocol,
     fetch_protocol_for_user,
-    write_context_files,
     PROTOCOL_REPO,
 )
+import chat_protocol_drafter
 import user_store
 from user_store import (
     create_token,
@@ -71,10 +71,6 @@ import qrcode.image.svg
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="RehabAsCode", version="0.1.0")
-
-# In-memory store of live invocations so /agent/stream/{id} can find them.
-# Keyed by invocation_id, value is the agent that produced it.
-_INVOCATIONS: dict[str, tuple] = {}  # invocation_id -> (agent, AgentInvocation)
 
 app.add_middleware(
     CORSMiddleware,
@@ -158,14 +154,14 @@ def debug_env():
         return f"set ({val[:6]}...)"
     return {
         "ANTHROPIC_API_KEY":   mask(os.getenv("ANTHROPIC_API_KEY")),
+        "ANTHROPIC_MODEL":     os.getenv("ANTHROPIC_MODEL") or "claude-sonnet-4-6",
         "TAVUS_API_KEY":       mask(os.getenv("TAVUS_API_KEY")),
         "TAVUS_REPLICA_ID":    mask(os.getenv("TAVUS_REPLICA_ID")),
         "TAVUS_PERSONA_ID":    mask(os.getenv("TAVUS_PERSONA_ID")),
-        "CURSOR_API_KEY":      mask(os.getenv("CURSOR_API_KEY")),
         "OPENAI_API_KEY":      mask(os.getenv("OPENAI_API_KEY")),
         "OPENAI_MODEL":        os.getenv("OPENAI_MODEL") or "gpt-4o-mini",
-        "AGENT_PROVIDER":      os.getenv("AGENT_PROVIDER") or "cached_replay",
-        "DEMO_LIVE_AGENT":     os.getenv("DEMO_LIVE_AGENT") or "0",
+        "PROTOCOL_SOURCE":     os.getenv("PROTOCOL_SOURCE") or "github",
+        "DATABASE_URL":        "set" if os.getenv("DATABASE_URL") else "MISSING",
     }
 
 
@@ -496,112 +492,21 @@ def protocol_exercises(user_id: str | None = Depends(optional_user_id)):
     }
 
 
-class AgentInvokeRequest(BaseModel):
-    flow: str = "weekly_plan"               # weekly_plan | symptom_adjustment | intake | checkin
-    symptom_text: str = ""                  # used for symptom_adjustment
-    intake_text: str = ""                   # used for intake
-    checkin_text: str = ""                  # used for checkin
-    provider: str | None = None             # override AGENT_PROVIDER per call
-
-
-async def _invoke_with_fallback(
-    req: AgentInvokeRequest,
-) -> tuple[object, "AgentInvocation"]:
-    """Run the agent.
-
-    Provider selection rules:
-      * If req.provider is set, use it verbatim (per-call override, no fallback).
-      * Else if DEMO_LIVE_AGENT=1, use AGENT_PROVIDER (default cached_replay).
-      * Else default to cached_replay (demo / stage runs).
-
-    Fallback rules (intentionally narrow):
-      * If the resolved provider IS cached_replay, the call should not fail —
-        but if it does, raise so the caller sees the underlying problem.
-      * If the resolved provider is anything else (a live provider), failures
-        ARE NOT silently masked by cached_replay anymore. We log + re-raise,
-        and the FastAPI handler (agent_invoke / _chat_trigger_executor /
-        trigger_*) returns 5xx with a friendly detail. The frontend toast
-        layer renders that detail; tests live in
-        backend/tests/test_*.py.
-    """
-    demo_live = os.getenv("DEMO_LIVE_AGENT", "0") == "1"
-    provider = req.provider
-    if provider is None:
-        provider = (
-            os.getenv("AGENT_PROVIDER", "cached_replay") if demo_live else "cached_replay"
-        )
-
-    health = get_health_data()
-    symptom_or_note = req.symptom_text or req.intake_text or req.checkin_text
-    context_files = write_context_files(
-        flow=req.flow,
-        wearables=health,
-        symptom_log=symptom_or_note or "(no patient note attached)",
-    )
-    prompt = _build_agent_prompt(
-        flow=req.flow,
-        health=health,
-        symptom_text=req.symptom_text,
-        intake_text=req.intake_text,
-        checkin_text=req.checkin_text,
-    )
-    invocation_request = InvocationRequest(
-        repo=PROTOCOL_REPO,
-        prompt=prompt,
-        context_files=context_files,
-        flow=req.flow,  # type: ignore[arg-type]
-    )
-
-    agent = get_agent(provider)
-    try:
-        invocation = await agent.invoke(invocation_request)
-        return agent, invocation
-    except Exception as exc:
-        # Live provider failed. We used to silently swap in cached_replay
-        # to keep the demo moving — that's fine for a hackathon stage but
-        # masks real outages once real patients are in the loop. Surface
-        # the failure as a 5xx the frontend toast layer can render.
-        logger.exception(
-            "agent provider %s failed for flow=%s",
-            provider,
-            req.flow,
-        )
-        raise HTTPException(
-            status_code=502,
-            detail=(
-                "Couldn't generate your plan, please try again in a moment."
-            ),
-        )
-
-
-@app.post("/agent/invoke")
-async def agent_invoke(req: AgentInvokeRequest):
-    """Kick off a cloud-agent orchestrated run.
-
-    Provider selection, live/replay gating, and auto-fallback live in
-    _invoke_with_fallback(). Every trigger endpoint below funnels through it.
-    """
-    agent, invocation = await _invoke_with_fallback(req)
-    _INVOCATIONS[invocation.invocation_id] = (agent, invocation)
-    return {
-        "invocation_id": invocation.invocation_id,
-        "pr_url": invocation.pr_url,
-        "branch": invocation.branch,
-        "provider": agent.name,
-    }
-
-
-# Removed: /triggers/intake, /triggers/checkin, /triggers/symptom,
-# /triggers/weekly-cron. These were the hackathon-era unauthenticated
-# trigger endpoints used to demonstrate the "5 buttons -> 1 orchestrator"
-# pattern. Real callers were the four buttons in the patient UI; the
-# patient UI now talks to /patient/interact (intake) and /chat (everything
-# else) which both run as authenticated tool calls through the same
-# _invoke_with_fallback orchestrator. Grep across the repo (frontend, cron,
-# orchestrator, plugin, api) on 2026-05-06 found zero callers, and leaving
-# unauth public POST endpoints around is a foot-gun once real patients
-# are signing in. _chat_trigger_executor below still funnels into the
-# same orchestrator; nothing about the agent surface changed.
+# Removed (post-PR-#62 cleanup, 2026-05-06):
+#   * AgentInvokeRequest, _invoke_with_fallback, /agent/invoke, /agent/stream
+#   * _INVOCATIONS in-memory map and the SSE trace-streaming surface
+#   * _build_agent_prompt and the entire CodingAgent abstraction (cursor_sdk,
+#     cursor_api, cursor_github, ag2, cached_replay, mock)
+#   * /pr/apply and /demo/reset which only existed to merge agent-opened PRs
+#
+# The new write path: chat-tool fires call chat_protocol_drafter.draft_and_save_pending,
+# which writes a pending_review row to the `protocols` table. Clinicians approve
+# them via /clinician → /protocols/{id}/approve. /patient/interact still runs
+# IntakeAgent + PlanGenerationAgent (which themselves hit the same supabase
+# write path under PROTOCOL_WRITE_TARGET=supabase).
+#
+# Grep history: a parallel removal of /triggers/* unauth endpoints landed in
+# PR #57 for the same "real patients now in the loop" reason.
 
 
 # ── Pose form-check session telemetry ────────────────────────────────────────
@@ -687,101 +592,6 @@ async def pose_last_set(
 ):
     """Most recent set_completion for the user, optionally filtered by exercise."""
     return {"set": get_last_set_completion(user_id, exercise_id)}
-
-
-@app.get("/agent/stream/{invocation_id}")
-async def agent_stream(invocation_id: str):
-    """SSE stream of TraceEvents for an invocation."""
-    entry = _INVOCATIONS.get(invocation_id)
-    if entry is None:
-        raise HTTPException(status_code=404, detail="unknown invocation_id")
-    agent, _ = entry
-
-    async def gen():
-        async for event in agent.stream_trace(invocation_id):
-            payload = {
-                "type": event.type,
-                "timestamp": event.timestamp,
-                "label": event.label,
-                "payload": event.payload,
-            }
-            yield f"data: {json.dumps(payload)}\n\n"
-        yield "event: done\ndata: {}\n\n"
-
-    return StreamingResponse(gen(), media_type="text/event-stream")
-
-
-class ApplyPrRequest(BaseModel):
-    pr_url: str | None = None
-    pr_number: int | None = None
-
-
-@app.post("/pr/apply")
-def apply_pr(req: ApplyPrRequest):
-    """Merge a cursor agent PR onto main via GitHub REST API (avoids GraphQL/Projects-classic noise)."""
-    import re
-    import subprocess
-
-    pr_num = req.pr_number
-    if pr_num is None and req.pr_url:
-        m = re.search(r"/pull/(\d+)", req.pr_url)
-        if m:
-            pr_num = int(m.group(1))
-    if pr_num is None:
-        raise HTTPException(status_code=400, detail="pr_number or pr_url required")
-
-    repo = os.getenv("PROTOCOL_REPO", "AndreChuabio/rehab-as-code")
-
-    # Use gh api (REST) to merge — avoids the GraphQL Projects-classic deprecation error
-    # that breaks `gh pr merge` for repos with classic Projects attached.
-    try:
-        result = subprocess.run(
-            ["gh", "api", f"repos/{repo}/pulls/{pr_num}/merge",
-             "-X", "PUT",
-             "-f", "merge_method=merge",
-             "-f", f"commit_title=Apply PR #{pr_num}"],
-            capture_output=True, text=True, timeout=30,
-        )
-    except FileNotFoundError:
-        raise HTTPException(status_code=500, detail="gh CLI not installed")
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="merge timed out")
-
-    if result.returncode != 0:
-        stderr_lower = (result.stderr or "").lower()
-        stdout_lower = (result.stdout or "").lower()
-        combined = stderr_lower + stdout_lower
-        # Treat as success since the visible clinician gesture happened and
-        # either the state already advanced or there's nothing actionable:
-        #   - PR already merged (Cursor cloud agents auto-merge their own PRs)
-        #   - PR is the cached_replay's pinned old PR, no longer cleanly mergeable
-        #   - branch protection requires checks we can't satisfy here
-        # The frontend refetches /protocol after approve, so the user sees
-        # whatever main actually has.
-        success_anyway = any(p in combined for p in (
-            "already merged",
-            "already been merged",
-            "pull request is closed",
-            "not open",
-            "no commits between",
-            "not mergeable",
-            "merge commit cannot be cleanly created",
-            "branch protection",
-            "requirements have been met",
-            "405",  # HTTP 405 = method not allowed (already merged)
-            "409",  # HTTP 409 = conflict
-        ))
-        if success_anyway:
-            logger.info("PR #%s not directly mergeable — treating as applied (cached PR or auto-merged)", pr_num)
-            return {"applied": True, "pr_number": pr_num, "note": "no-op (already applied or stale)"}
-        logger.warning("PR merge %s failed stdout=%s stderr=%s", pr_num, result.stdout[:300], result.stderr[:200])
-        raise HTTPException(
-            status_code=502,
-            detail=f"merge failed: {(result.stdout or result.stderr or 'unknown').splitlines()[-1]}",
-        )
-
-    logger.info("auto-applied PR #%s to main via REST", pr_num)
-    return {"applied": True, "pr_number": pr_num}
 
 
 # ─── Supabase-backed protocol approval (Phase 2) ───────────────────────────
@@ -948,131 +758,6 @@ def reject_protocol(
     }
 
 
-_EMPTY_PROTOCOL_TEMPLATE = """\
-# Awaiting patient intake.
-# Click "1 intake" in the app to begin onboarding. The cursor cloud agent
-# will generate the initial protocol from intake answers by reading the
-# matching protocol-library/ entry, and open a PR for clinician approval.
-
-patient: null
-phase: pending_intake
-week: 0
-generated_by: ""
-last_updated: "2026-05-02"
-
-session_targets:
-  frequency_per_week: 0
-  duration_min: 0
-  max_pain_during_session: 3
-
-exercises: []
-"""
-
-
-@app.post("/demo/reset")
-def demo_reset():
-    """Reset protocols/protocol.yaml on main to the empty pending_intake state.
-    Used between rehearsals so each demo starts from the "patient walks in"
-    blank slate. Atomic update via the GitHub contents API (no git shell).
-    """
-    import base64
-    import subprocess as sp
-    import httpx
-
-    repo = os.getenv("PROTOCOL_REPO", "AndreChuabio/rehab-as-code")
-    branch = os.getenv("PROTOCOL_BRANCH", "main")
-    path = "protocols/protocol.yaml"
-
-    token = os.getenv("GITHUB_TOKEN") or os.getenv("GH_TOKEN")
-    if not token:
-        try:
-            r = sp.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=5)
-            token = r.stdout.strip() if r.returncode == 0 else None
-        except Exception:
-            token = None
-    if not token:
-        raise HTTPException(status_code=500, detail="no GitHub token; set GITHUB_TOKEN or run 'gh auth login'")
-
-    headers = {"Accept": "application/vnd.github+json", "Authorization": f"Bearer {token}"}
-
-    try:
-        # Fetch current sha (required for atomic update)
-        get_url = f"https://api.github.com/repos/{repo}/contents/{path}?ref={branch}"
-        get_resp = httpx.get(get_url, headers=headers, timeout=10)
-        get_resp.raise_for_status()
-        current_sha = get_resp.json()["sha"]
-
-        put_url = f"https://api.github.com/repos/{repo}/contents/{path}"
-        put_resp = httpx.put(
-            put_url,
-            headers=headers,
-            json={
-                "message": "demo: reset protocol to pending_intake",
-                "content": base64.b64encode(_EMPTY_PROTOCOL_TEMPLATE.encode()).decode(),
-                "sha": current_sha,
-                "branch": branch,
-            },
-            timeout=15,
-        )
-        put_resp.raise_for_status()
-    except httpx.HTTPStatusError as e:
-        logger.warning("demo reset failed: %s", e.response.text[:200])
-        raise HTTPException(status_code=502, detail=f"github api: {e.response.status_code}")
-    except Exception as e:
-        logger.warning("demo reset failed: %s", e)
-        raise HTTPException(status_code=500, detail=str(e))
-
-    logger.info("demo reset: protocol.yaml back to pending_intake")
-    return {"reset": True}
-
-
-def _build_agent_prompt(
-    flow: str,
-    health: dict,
-    symptom_text: str = "",
-    intake_text: str = "",
-    checkin_text: str = "",
-) -> str:
-    """Compose the natural-language task addendum for a given flow.
-
-    The orchestrator config's `parent.prompt` + the flow's `addon` already
-    carry the role + objective. This function supplies only the
-    per-invocation context (wearables summary, patient note) that changes
-    between runs.
-    """
-    summary = (
-        f"Wearables snapshot: sleep_score={health.get('sleep_score', 'n/a')}, "
-        f"hrv_ms={health.get('hrv_ms', 'n/a')}, "
-        f"recovery_score={health.get('recovery_score', 'n/a')}."
-    )
-
-    if flow == "symptom_adjustment":
-        return (
-            f"{summary}\n\n"
-            f"Patient symptom report: {symptom_text or '(none)'}\n\n"
-            "Cite a regression entry from protocol-library/regressions/ in the PR body."
-        )
-    if flow == "intake":
-        return (
-            f"{summary}\n\n"
-            f"Intake form: {intake_text or '(none — initialize with phase defaults)'}\n\n"
-            "Initialize protocol.yaml from the matching protocol-library/ entry."
-        )
-    if flow == "checkin":
-        return (
-            f"{summary}\n\n"
-            f"Today's check-in: {checkin_text or '(no note)'}\n\n"
-            "Append to log.yaml. Flag any trend that should trigger a follow-up PR."
-        )
-    # Default: weekly_plan
-    return (
-        f"{summary}\n\n"
-        "Generate the next week's protocol. Evaluate progression criteria on the "
-        "current protocol.yaml and consult protocol-library/ for phase-appropriate "
-        "progressions."
-    )
-
-
 # -------------------------------------------------------------------------
 # Coach chat co-pilot (OpenAI) - /chat SSE endpoint
 # -------------------------------------------------------------------------
@@ -1089,29 +774,41 @@ class ChatRequest(BaseModel):
     history: list[ChatTurn] = []
 
 
-async def _chat_trigger_executor(flow: str, payload: dict) -> dict:
-    """Run a /triggers/* equivalent from inside the chat tool dispatch.
+def _chat_trigger_executor_factory(user_id: str):
+    """Bind a chat-tool trigger executor to the authenticated patient.
 
-    Funnels through the SAME _invoke_with_fallback() as the four buttons,
-    so the trace and PR cards on the frontend behave identically. Registers
-    the invocation in _INVOCATIONS so the existing /agent/stream/{id}
-    consumer can attach.
+    The executor signature `(flow, payload) -> dict` matches what
+    coach_chat.chat_stream expects. We close over `user_id` here so the
+    drafter row is attributed to the JWT-derived patient (never client-
+    provided), mirroring the auth boundary used by /protocols/*/approve.
+
+    Each fire_*_trigger ultimately runs chat_protocol_drafter.draft_and_save_pending,
+    which writes a `pending_review` row to the `protocols` table. Returns
+    {pending_protocol_id, summary, phase, week, flow} on success; raises on
+    failure so coach_chat._dispatch_tool can render an error tool_result.
     """
-    req = AgentInvokeRequest(
-        flow=flow,
-        symptom_text=payload.get("symptom_text", ""),
-        intake_text=payload.get("intake_text", ""),
-        checkin_text=payload.get("checkin_text", ""),
-    )
-    agent, invocation = await _invoke_with_fallback(req)
-    _INVOCATIONS[invocation.invocation_id] = (agent, invocation)
-    return {
-        "invocation_id": invocation.invocation_id,
-        "pr_url": invocation.pr_url,
-        "branch": invocation.branch,
-        "provider": agent.name,
-        "flow": flow,
-    }
+    async def _executor(flow: str, payload: dict) -> dict:
+        prior_protocol = fetch_protocol_for_user(user_id) or None
+        # draft_and_save_pending is sync (blocks on Anthropic + psycopg). Run
+        # in the default executor so the SSE stream stays responsive.
+        loop = asyncio.get_running_loop()
+        result = await loop.run_in_executor(
+            None,
+            chat_protocol_drafter.draft_and_save_pending,
+            user_id,
+            flow,
+            payload,
+            prior_protocol,
+        )
+        return {
+            "pending_protocol_id": result["pending_protocol_id"],
+            "summary": result["summary"],
+            "phase": result.get("phase"),
+            "week": result.get("week"),
+            "flow": flow,
+        }
+
+    return _executor
 
 
 @app.post("/chat")
@@ -1132,13 +829,15 @@ async def chat(req: ChatRequest, user_id: str = Depends(current_user_id)):
     ]
     messages.append({"role": "user", "content": req.message})
 
+    trigger_executor = _chat_trigger_executor_factory(user_id)
+
     async def gen():
         try:
             async for event in coach_chat.chat_stream(
                 messages=messages,
                 health=health,
                 protocol=protocol_payload,
-                trigger_executor=_chat_trigger_executor,
+                trigger_executor=trigger_executor,
                 user_token=user_id,
             ):
                 yield f"data: {json.dumps(event)}\n\n"

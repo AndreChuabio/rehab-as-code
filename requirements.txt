@@ -1,6 +1,5 @@
 # Vercel reads THIS file (next to api/index.py), not backend/requirements.txt.
 # Keep both in sync — local dev installs from backend/, Vercel installs from here.
-ag2[anthropic]
 fastapi
 uvicorn[standard]
 anthropic

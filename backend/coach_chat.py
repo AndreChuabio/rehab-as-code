@@ -1,17 +1,21 @@
 """
 coach_chat.py - OpenAI-powered Coach Maya chat co-pilot.
 
-Stays out of the orchestrator. Recommends grounded exercises from
-exercise_kb and fires existing trigger endpoints via tool calls. The
-"trigger" tools are dispatched through a callable injected by main.py to
-avoid a circular import.
+Recommends grounded exercises from exercise_kb and drafts protocol
+revisions via tool calls. Each `fire_*_trigger` tool runs the LLM-driven
+drafter in chat_protocol_drafter.py, which writes a `pending_review` row
+to the `protocols` Supabase table. Clinicians approve or reject those rows
+from the /clinician dashboard. There is no PR-bus, no GitHub write path.
+
+The drafter is dispatched through a callable injected by main.py so this
+module stays free of FastAPI / repo plumbing.
 
 Event protocol yielded by chat_stream():
 
     {"type": "token",       "delta": str}
     {"type": "card",        "card": dict}                # exercise card
     {"type": "tool_call",   "name": str, "arguments": dict}
-    {"type": "tool_result", "name": str, "result": dict} # includes invocation_id
+    {"type": "tool_result", "name": str, "result": dict} # includes pending_protocol_id
     {"type": "error",       "message": str}
     {"type": "done"}
 """
@@ -99,9 +103,12 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "fire_symptom_trigger",
             "description": (
-                "Fire the orchestrator's symptom_adjustment flow. Use when the patient "
-                "reports new pain, a tweak, swelling, or any in-session warning sign. "
-                "Quote the patient's words verbatim in symptom_text."
+                "Draft a protocol revision in response to a new symptom and queue "
+                "it for clinician review. Use when the patient reports new pain, "
+                "a tweak, swelling, or any in-session warning sign. Quote the "
+                "patient's words verbatim in symptom_text. The draft is saved as "
+                "`pending_review` and surfaced on the /clinician dashboard; it "
+                "does NOT auto-apply."
             ),
             "parameters": {
                 "type": "object",
@@ -141,8 +148,10 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "fire_checkin_trigger",
             "description": (
-                "Fire the orchestrator's checkin flow to log today's session outcome and "
-                "let the evaluator flag any trends."
+                "Draft a small protocol tweak in response to today's session log "
+                "and queue it for clinician review. Use when the patient logs a "
+                "session that suggests a load/volume adjustment is warranted. "
+                "Saved as `pending_review`; clinician approves on /clinician."
             ),
             "parameters": {
                 "type": "object",
@@ -158,9 +167,9 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "fire_weekly_plan_trigger",
             "description": (
-                "Fire the orchestrator's weekly_plan flow to generate next week's progression. "
-                "Use only when the patient explicitly asks to progress or it's a Sunday-style "
-                "weekly review."
+                "Draft next week's progression and queue it for clinician review. "
+                "Use only when the patient explicitly asks to progress or it's a "
+                "Sunday-style weekly review. Saved as `pending_review`."
             ),
             "parameters": {"type": "object", "properties": {}},
         },
@@ -223,8 +232,8 @@ def build_system_prompt(health: dict[str, Any], protocol: dict[str, Any]) -> str
         "something off-library, say you'll flag it for the human therapist and "
         "offer to fire_symptom_trigger with the patient's text.\n"
         "7. After firing a trigger tool, give the patient a one-sentence summary "
-        "of what was just shipped to the orchestrator (e.g., 'symptom logged - the "
-        "team is opening a PR with a regression.').\n"
+        "noting that a draft has been queued for clinician review (e.g., "
+        "'logged - drafted a regression for clinician review on /clinician').\n"
     )
 
 
@@ -234,7 +243,8 @@ def build_system_prompt(health: dict[str, Any], protocol: dict[str, Any]) -> str
 
 
 # A trigger executor takes a flow + payload dict and returns
-# {"invocation_id", "pr_url", "branch", "provider"}.
+# {"pending_protocol_id": str, "summary": str, "phase": str|None, "week": int|None}.
+# On failure it raises; the caller surfaces the error to the patient.
 TriggerExecutor = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
 
 
@@ -269,10 +279,15 @@ async def _dispatch_tool(
         )
 
     if name == "fire_symptom_trigger":
-        result = await trigger_executor(
-            "symptom_adjustment",
-            {"symptom_text": arguments.get("symptom_text", "")},
-        )
+        try:
+            result = await trigger_executor(
+                "symptom_adjustment",
+                {"symptom_text": arguments.get("symptom_text", "")},
+            )
+        except Exception as exc:
+            logger.exception("fire_symptom_trigger executor failed")
+            err = {"ok": False, "error": str(exc), "flow": "symptom_adjustment"}
+            return (err, [{"type": "tool_result", "name": name, "result": err}])
         return (
             {"ok": True, **result},
             [{"type": "tool_result", "name": name, "result": result}],
@@ -307,17 +322,27 @@ async def _dispatch_tool(
         )
 
     if name == "fire_checkin_trigger":
-        result = await trigger_executor(
-            "checkin",
-            {"checkin_text": arguments.get("checkin_text", "")},
-        )
+        try:
+            result = await trigger_executor(
+                "checkin",
+                {"checkin_text": arguments.get("checkin_text", "")},
+            )
+        except Exception as exc:
+            logger.exception("fire_checkin_trigger executor failed")
+            err = {"ok": False, "error": str(exc), "flow": "checkin"}
+            return (err, [{"type": "tool_result", "name": name, "result": err}])
         return (
             {"ok": True, **result},
             [{"type": "tool_result", "name": name, "result": result}],
         )
 
     if name == "fire_weekly_plan_trigger":
-        result = await trigger_executor("weekly_plan", {})
+        try:
+            result = await trigger_executor("weekly_plan", {})
+        except Exception as exc:
+            logger.exception("fire_weekly_plan_trigger executor failed")
+            err = {"ok": False, "error": str(exc), "flow": "weekly_plan"}
+            return (err, [{"type": "tool_result", "name": name, "result": err}])
         return (
             {"ok": True, **result},
             [{"type": "tool_result", "name": name, "result": result}],
