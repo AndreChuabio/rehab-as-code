@@ -189,6 +189,28 @@
       recent_sessions: patient.recent_sessions,
     }, null, 2);
 
+    // AI-generated diff narration. The backend returns:
+    //   * a string when Haiku produced a usable summary
+    //   * null when the model errored / was disabled / had nothing to say
+    //   * the field absent entirely on patient self-fetch (clinician-only)
+    // We treat absent same as null for rendering — the muted fallback is
+    // honest about the AI tool being offline rather than pretending it
+    // ran successfully.
+    const narratorBlock = $("narratorSummary");
+    const narratorBody = $("narratorSummaryBody");
+    if (narratorBlock && narratorBody) {
+      const summary = detail.narrator_summary;
+      if (typeof summary === "string" && summary.trim()) {
+        narratorBody.textContent = summary;
+        narratorBody.classList.remove("narrator-summary-fallback");
+        narratorBlock.hidden = false;
+      } else {
+        narratorBody.textContent = "Summary unavailable, see diff below.";
+        narratorBody.classList.add("narrator-summary-fallback");
+        narratorBlock.hidden = false;
+      }
+    }
+
     $("diffProposed").innerHTML = renderDiffPane(target.payload || {}, active && active.payload, "right");
     $("diffActive").innerHTML = renderDiffPane(active && active.payload, target.payload || {}, "left");
 
