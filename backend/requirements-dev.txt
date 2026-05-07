@@ -1,0 +1,11 @@
+# Development / test dependencies for the FastAPI backend.
+# Production lambda installs `requirements.txt` only.
+#
+# Why pin httpx<0.28: Starlette 0.27 ships with FastAPI 0.104 and uses the
+# legacy httpx Client(app=...) shortcut. httpx 0.28 dropped that shortcut.
+# Newer FastAPI/Starlette would also work, but bumping those is a
+# separate scope from data-eng hardening.
+
+-r requirements.txt
+pytest>=8.0
+httpx<0.28

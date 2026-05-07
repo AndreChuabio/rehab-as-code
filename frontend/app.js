@@ -1900,13 +1900,9 @@ function speakCue(text) {
 
 // ── Pose set telemetry (POST /pose/session) ─────────────────────────────────
 
-function poseAuthHeaders() {
-  // Mirrors the /chat behaviour: include the Supabase JWT if one is in
-  // localStorage (set by the future magic-link login). Until that lands,
-  // the POST will 401 in production — we degrade gracefully (toast + skip).
-  const jwt = localStorage.getItem("supabaseJwt");
-  return jwt ? { Authorization: `Bearer ${jwt}` } : {};
-}
+// Pose set telemetry now uses the shared authedFetch wrapper above — same
+// JWT source as /chat and /protocol. Kept the helper removed so there's no
+// drift between two ways of building the Authorization header.
 
 async function postPoseSession(exercise, repsHistory, warnings, repSummary) {
   const startedAt = new Date(
@@ -1935,9 +1931,9 @@ async function postPoseSession(exercise, repsHistory, warnings, repSummary) {
     client: "web/pose-v1",
   };
   try {
-    const res = await fetch(`${API_BASE}/pose/session`, {
+    const res = await authedFetch(`${API_BASE}/pose/session`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", ...poseAuthHeaders() },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
     if (res.status === 401) {
