@@ -1,25 +1,27 @@
 """
 auth.py — Supabase Auth JWT verification + FastAPI dependencies.
 
-Supabase issues HS256 JWTs signed with a project-wide secret available at
-Project Settings → API → "JWT Settings" → "JWT Secret". The frontend gets
-the JWT after a magic-link or password sign-in via @supabase/supabase-js
-and stores it in localStorage; it then sends it on every API call as
-`Authorization: Bearer <jwt>`.
+Supports BOTH of Supabase's JWT signing systems:
 
-This module:
-  * verifies the JWT against SUPABASE_JWT_SECRET (HS256)
-  * returns the patient's stable identifier (`auth.uid()`, the JWT's `sub`
-    claim — a UUID) which we use as `users.token` server-side
+  1. **New asymmetric keys (default for new projects, or projects that
+     have rotated to the new system).** Tokens are signed with ECC P-256
+     (alg=ES256) — sometimes RS256 or EdDSA — and verified against the
+     project's JWKS endpoint at
+     `<SUPABASE_URL>/auth/v1/.well-known/jwks.json`.
+
+  2. **Legacy HS256 shared secret.** Tokens carry alg=HS256 and are
+     verified against the SUPABASE_JWT_SECRET env var.
+
+Both can be in flight during a rotation window: tokens issued before the
+rotation may still be HS256-signed, tokens issued after are signed with
+the new key. We dispatch on the JWT's `alg` header so both verify cleanly.
+
+The frontend gets the JWT via @supabase/supabase-js (magic-link, password,
+or signUp) and stores it in localStorage; it sends it on every API call as
+`Authorization: Bearer <jwt>`.
 
 `current_user_id` is the FastAPI dependency callers should use to gate
 patient-scoped endpoints.
-
-Phase-1 step 2 keeps the surface narrow: only the actual web-UI endpoints
-(`/chat`, `/patient/interact`, `/patient/{token}/status`) require a JWT.
-External onboarding endpoints (`/connect/apple-health`, `/onboard/{token}`,
-`/shortcut/{token}`) keep their UUID-bearer model since they're invoked
-from Slack/iOS shortcut flows where there is no logged-in session.
 """
 from __future__ import annotations
 
@@ -36,33 +38,87 @@ logger = logging.getLogger(__name__)
 # Supabase tokens always carry these claims; we sanity-check audience.
 _EXPECTED_AUDIENCE = "authenticated"
 
+# Algorithms we will accept. ES256 is what Supabase's new ECC P-256 keys
+# use; HS256 is the legacy shared-secret path; RS256/EdDSA are listed
+# defensively in case Supabase migrates again.
+_ASYMMETRIC_ALGS = {"ES256", "RS256", "EdDSA"}
+_ALL_ALGS = _ASYMMETRIC_ALGS | {"HS256"}
+
 
 def _jwt_secret() -> str:
     secret = os.getenv("SUPABASE_JWT_SECRET", "").strip()
     if not secret:
         raise RuntimeError(
             "SUPABASE_JWT_SECRET not set. Get it from Supabase: "
-            "Project Settings → API → JWT Settings → 'JWT Secret'."
+            "Project Settings → JWT Keys → 'Legacy JWT Secret' tab."
         )
     return secret
 
 
+_jwks_client_cache: jwt.PyJWKClient | None = None
+
+
+def _jwks_client() -> jwt.PyJWKClient:
+    """Return a cached PyJWKClient pointed at this project's JWKS endpoint.
+
+    PyJWKClient caches keys per `kid` in-process; this single instance is
+    reused across requests. First call fetches JWKS; later calls hit the
+    cache until a new `kid` is seen.
+    """
+    global _jwks_client_cache
+    if _jwks_client_cache is None:
+        base = os.getenv("SUPABASE_URL", "").strip().rstrip("/")
+        if not base:
+            raise RuntimeError(
+                "SUPABASE_URL not set; required to verify asymmetric "
+                "Supabase JWTs against the project's JWKS endpoint."
+            )
+        _jwks_client_cache = jwt.PyJWKClient(
+            f"{base}/auth/v1/.well-known/jwks.json"
+        )
+    return _jwks_client_cache
+
+
 def verify_supabase_jwt(token: str) -> dict[str, Any]:
     """
-    Verify a Supabase-issued JWT (HS256, audience='authenticated') and return
-    its claims. Raises HTTPException(401) on any failure — bad signature,
-    expired, missing audience, etc.
+    Verify a Supabase-issued JWT and return its claims. Dispatches on the
+    JWT header's `alg`:
+      * HS256                → SUPABASE_JWT_SECRET (legacy)
+      * ES256/RS256/EdDSA    → JWKS endpoint (new asymmetric system)
+
+    Raises HTTPException(401) on any failure — bad signature, expired,
+    missing audience, unknown algorithm, etc.
     """
     if not token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="missing bearer token")
 
     try:
-        claims = jwt.decode(
-            token,
-            _jwt_secret(),
-            algorithms=["HS256"],
-            audience=_EXPECTED_AUDIENCE,
-        )
+        header = jwt.get_unverified_header(token)
+    except jwt.InvalidTokenError as exc:
+        logger.info("rejected jwt (bad header): %s", exc)
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="invalid token")
+
+    alg = (header.get("alg") or "").upper()
+    if alg not in _ALL_ALGS:
+        logger.info("rejected jwt with unsupported alg=%s", alg)
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="unsupported alg")
+
+    try:
+        if alg == "HS256":
+            claims = jwt.decode(
+                token,
+                _jwt_secret(),
+                algorithms=["HS256"],
+                audience=_EXPECTED_AUDIENCE,
+            )
+        else:
+            signing_key = _jwks_client().get_signing_key_from_jwt(token)
+            claims = jwt.decode(
+                token,
+                signing_key.key,
+                algorithms=[alg],
+                audience=_EXPECTED_AUDIENCE,
+            )
     except jwt.ExpiredSignatureError:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="token expired")
     except jwt.InvalidAudienceError:
@@ -70,6 +126,11 @@ def verify_supabase_jwt(token: str) -> dict[str, Any]:
     except jwt.InvalidTokenError as exc:
         logger.info("rejected jwt: %s", exc)
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="invalid token")
+    except jwt.PyJWKClientError as exc:
+        # JWKS fetch / key-not-found errors. Surface as 401 — the JWT
+        # itself looks fine but we couldn't get the public key to verify.
+        logger.warning("JWKS lookup failed: %s", exc)
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="JWKS unavailable")
 
     sub = claims.get("sub")
     if not sub:
