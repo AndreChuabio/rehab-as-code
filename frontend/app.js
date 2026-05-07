@@ -925,12 +925,13 @@ function switchStage(mode) {
   videoTab.setAttribute("aria-selected", !isChat);
 
   if (isChat) {
-    // Stop Tavus iframe when leaving video to free camera/mic
-    const frame = document.getElementById("tavusFrame");
-    if (frame && frame.style.display !== "none" && frame.src) {
-      // Just hide; reload iframe only if user clicks Start Session again
-    }
+    // Leaving video: keep the iframe in the DOM but don't tear it down — the
+    // patient may flip back. The End-session button is the explicit teardown.
     document.getElementById("chatInput")?.focus();
+  } else {
+    // Entering video: refresh the "Continue last session" affordance so a
+    // mid-day return doesn't show a stale row from a previous tab session.
+    loadRecentTavusSessions();
   }
 }
 
@@ -1061,40 +1062,134 @@ function renderProtocol({ protocol }) {
 }
 
 // ---------------------------------------------------------------------------
-// Tavus session
+// Tavus session (PR-P: auth-gated, persisted, no silent mock fallback)
+//
+// State machine:
+//   pre-session -> loading -> active   (start a new conversation)
+//   pre-session -> loading -> active   (continue an existing one)
+//   active      -> pre-session         (End session)
+//
+// All three buttons live inside the Video Call tab; pre-session shows
+// "Start a new session" + (conditionally) "Continue last", active shows
+// the Tavus iframe + an "End session" button.
 // ---------------------------------------------------------------------------
 
-async function startSession() {
-  const preSession = document.getElementById("preSession");
-  const loading = document.getElementById("loadingSession");
-  const frame = document.getElementById("tavusFrame");
-  const btn = document.getElementById("startBtn");
+let activeTavusSessionId = null;
 
-  btn.disabled = true;
-  preSession.style.display = "none";
-  loading.style.display = "flex";
+function _getVideoEls() {
+  return {
+    pre: document.getElementById("preSession"),
+    loading: document.getElementById("loadingSession"),
+    active: document.getElementById("activeSession"),
+    frame: document.getElementById("tavusFrame"),
+    startBtn: document.getElementById("startBtn"),
+    continueBtn: document.getElementById("continueBtn"),
+    endBtn: document.getElementById("endBtn"),
+  };
+}
 
+function _showVideoLoading() {
+  const els = _getVideoEls();
+  els.pre.style.display = "none";
+  els.active.style.display = "none";
+  els.loading.style.display = "flex";
+  els.startBtn.disabled = true;
+  els.continueBtn.disabled = true;
+}
+
+function _showVideoPreSession() {
+  const els = _getVideoEls();
+  els.loading.style.display = "none";
+  els.active.style.display = "none";
+  els.pre.style.display = "flex";
+  els.startBtn.disabled = false;
+  els.continueBtn.disabled = false;
+  if (els.frame) els.frame.src = "about:blank";
+}
+
+function _showVideoActive(conversationUrl) {
+  const els = _getVideoEls();
+  els.pre.style.display = "none";
+  els.loading.style.display = "none";
+  els.frame.src = conversationUrl;
+  els.active.style.display = "flex";
+}
+
+async function loadRecentTavusSessions() {
+  // Surfaces a "Continue last session" button when the most-recent row is
+  // still active. Silently skips when the patient is unauthed (the Video
+  // Call tab is gated behind auth at the start-session call anyway).
+  const continueBtn = document.getElementById("continueBtn");
+  if (!continueBtn) return;
+  const jwt = window.RehabAuth?.getJwt?.();
+  if (!jwt) {
+    continueBtn.style.display = "none";
+    return;
+  }
   try {
-    const res = await fetch(`${API_BASE}/start-session`, {
+    const res = await authedFetch(`${API_BASE}/tavus/sessions/recent?limit=5`);
+    if (!res.ok) {
+      continueBtn.style.display = "none";
+      return;
+    }
+    const data = await res.json();
+    const lastActive = (data.sessions || []).find((s) => s.is_active);
+    if (lastActive && lastActive.conversation_url) {
+      continueBtn.dataset.sessionId = lastActive.id;
+      continueBtn.dataset.conversationUrl = lastActive.conversation_url;
+      continueBtn.style.display = "inline-block";
+    } else {
+      continueBtn.style.display = "none";
+    }
+  } catch (e) {
+    console.warn("loadRecentTavusSessions failed", e);
+    continueBtn.style.display = "none";
+  }
+}
+
+async function startNewTavusSession() {
+  const jwt = window.RehabAuth?.getJwt?.();
+  if (!jwt) {
+    showToast("Sign in to start a video session.", "error");
+    return;
+  }
+  _showVideoLoading();
+  try {
+    const res = await authedFetch(`${API_BASE}/start-session`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_name: "Andre" }),
+      body: JSON.stringify({}),
     });
-    if (!res.ok) throw new Error(`Server error: ${res.status}`);
-    const data = await res.json();
-
-    loading.style.display = "none";
-
-    if (data.conversation_url && !data.conversation_url.includes("mock")) {
-      frame.src = data.conversation_url;
-      frame.style.display = "block";
-    } else {
-      preSession.style.display = "flex";
-      preSession.querySelector(".avatar-subtitle").textContent =
-        data.greeting || "Mock mode - set Tavus keys for live video";
-      btn.style.display = "none";
-      showToast("Mock mode - set TAVUS_API_KEY for live video", "info");
+    if (res.status === 503) {
+      _showVideoPreSession();
+      showToast("Video call temporarily unavailable.", "error");
+      return;
     }
+    if (res.status === 502) {
+      _showVideoPreSession();
+      showToast("Video provider error. Please retry shortly.", "error");
+      return;
+    }
+    if (res.status === 401) {
+      _showVideoPreSession();
+      showToast("Sign in to start a video session.", "error");
+      return;
+    }
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      _showVideoPreSession();
+      showToast(`Could not start session (${res.status})`, "error");
+      console.error("start-session failed", res.status, detail);
+      return;
+    }
+    const data = await res.json();
+    if (!data.conversation_url) {
+      _showVideoPreSession();
+      showToast("Video call response missing URL.", "error");
+      return;
+    }
+    activeTavusSessionId = data.tavus_session_id || null;
+    _showVideoActive(data.conversation_url);
 
     if (data.recommendations?.length) {
       const recPanel = document.getElementById("recommendations");
@@ -1104,13 +1199,56 @@ async function startSession() {
       }
     }
   } catch (e) {
-    loading.style.display = "none";
-    preSession.style.display = "flex";
-    btn.disabled = false;
     console.error(e);
+    _showVideoPreSession();
     showToast(`Error: ${e.message}`, "error");
   }
 }
+
+async function continueTavusSession() {
+  const continueBtn = document.getElementById("continueBtn");
+  const sessionId = continueBtn?.dataset?.sessionId;
+  const url = continueBtn?.dataset?.conversationUrl;
+  if (!sessionId || !url) {
+    // No active row found; fall back to start path.
+    startNewTavusSession();
+    return;
+  }
+  _showVideoLoading();
+  // The conversation URL is reusable for the duration of the call's TTL —
+  // no second create_conversation roundtrip needed.
+  activeTavusSessionId = sessionId;
+  _showVideoActive(url);
+}
+
+async function endTavusSession() {
+  const sessionId = activeTavusSessionId;
+  if (!sessionId) {
+    _showVideoPreSession();
+    return;
+  }
+  try {
+    const res = await authedFetch(
+      `${API_BASE}/tavus/sessions/${sessionId}/end`,
+      { method: "POST" },
+    );
+    if (!res.ok && res.status !== 404) {
+      const detail = await res.text().catch(() => "");
+      console.warn("end_tavus_session failed", res.status, detail);
+      showToast("Could not record session end. The call has stopped.", "warn");
+    }
+  } catch (e) {
+    console.warn("end_tavus_session error", e);
+  }
+  activeTavusSessionId = null;
+  _showVideoPreSession();
+  loadRecentTavusSessions();
+}
+
+// Legacy alias kept so any stray external callers (e.g. an old onclick
+// handler not yet refreshed) still resolve. Internal markup uses
+// startNewTavusSession directly.
+const startSession = startNewTavusSession;
 
 function renderFocus(items) {
   const container = document.getElementById("recCards");
