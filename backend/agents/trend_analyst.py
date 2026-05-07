@@ -1,97 +1,67 @@
 """
 trend_analyst.py - Phase C: longitudinal pattern detection over 4-8 weeks.
 
-Aggregates the patient's check-in history, protocol versions, and
-completed sessions over the last 4-8 weeks (server-side, before
-prompting), then asks Sonnet 4.6 to classify the trajectory:
+Aggregates the patient's check-in history and completed sessions over the
+last 4-8 weeks, then classifies the trajectory deterministically:
 
-    plateau       - metrics stable, no clear direction
-    breakthrough  - sustained improvement (recovery up, pain down, completion up)
-    regression    - sustained decline (pain up, missed sessions, recovery down)
-    steady        - normal week-to-week variation, no signal
+    plateau       - metrics stable, no clear direction, >=3 weeks of data
+    breakthrough  - sustained improvement (pain trending down significantly,
+                    adherence not collapsing)
+    regression    - sustained decline (pain trending up significantly OR
+                    adherence collapsing)
+    steady        - normal week-to-week variation, no actionable signal
 
-The aggregation is the key: we send the model numerical summaries
-(7-day moving averages, rolling pain trend, completion rates) rather
-than raw rows. This keeps the prompt tight and the model's reasoning
-focused on patterns, not on parsing checkin schemas.
+Was a Sonnet 4.6 call until 2026-05-07; now pure Python statistics. The LLM
+was repeatedly summarizing pre-aggregated numerical series into one of four
+labels - a job that linear regression + Mann-Kendall does more rigorously,
+faster, and at zero per-call cost. Output shape unchanged so consumers
+(evaluator, safety_reviewer) need no edits.
 
-Output is consumed by EvaluatorAgent (whose prompt incorporates
-trend_summary) and exposed in logs / future clinician views.
-
-No silent fallbacks: any Anthropic error raises TrendAnalystError. The
-orchestrator runs the trend analyst in parallel with the researcher; if
-it fails the orchestrator can choose to proceed with an empty trend
-summary (evaluator handles it gracefully) or surface the error - we
-return the typed exception so the caller decides.
+Output is consumed by EvaluatorAgent (whose prompt incorporates the
+returned dict as opaque JSON) and exposed in logs / clinician views.
 """
 from __future__ import annotations
 
-import json
 import logging
-import os
-import time
+import statistics
 from datetime import datetime, timedelta, timezone
+from math import erf, sqrt
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 
-_DEFAULT_MODEL = "claude-sonnet-4-6"
-
-
 class TrendAnalystError(RuntimeError):
-    """Raised when the trend analyst cannot produce a pattern."""
+    """Raised when the trend analyst cannot produce a pattern.
+
+    Reserved for genuine infrastructure problems (e.g., the helpers
+    receive un-coercible types). Insufficient-history is NOT an error -
+    analyze() returns None in that case.
+    """
 
 
-_SYSTEM_PROMPT = (
-    "You are a rehabilitation trend analyst. You receive pre-aggregated "
-    "longitudinal numerical summaries spanning 4-8 weeks of a patient's "
-    "rehab journey (rolling pain, recovery score, sleep, completion rate, "
-    "missed sessions). Classify the trajectory into one of:\n\n"
-    "  plateau      - metrics held steady at a level the patient has not "
-    "                 progressed past.\n"
-    "  breakthrough - sustained improvement across two or more axes.\n"
-    "  regression   - sustained decline across two or more axes.\n"
-    "  steady      - normal week-to-week noise; no actionable signal.\n\n"
-    "Cite specific numbers in `evidence`. Keep `implication_for_next_week` "
-    "to one short clinical sentence the evaluator agent can act on. Output "
-    "only via the propose_pattern tool."
-)
+# Thresholds that decide what counts as "meaningful" movement. Pinned here
+# as named constants so they're tunable from one place once production
+# data accumulates and Andre + Nikki want to A/B against trained models.
+_PAIN_SLOPE_THRESHOLD_PER_DAY = 0.05      # 0.5 points/10 days - clinically meaningful
+_ADHERENCE_SLOPE_THRESHOLD_PER_WEEK = 0.10  # 10 percentage points/week
+_ADHERENCE_STRONG_AVG = 0.70              # >=70% completion = "strong adherence"
+_PLATEAU_MIN_WEEKS = 3                    # need >=3 weeks of data to call plateau
+_PAIN_TREND_SIGNIFICANCE_P = 0.05         # Mann-Kendall p-value cutoff
 
 
-_TOOL = {
-    "name": "propose_pattern",
-    "description": "Submit the longitudinal pattern classification.",
-    "input_schema": {
-        "type": "object",
-        "properties": {
-            "pattern": {
-                "type": "string",
-                "enum": ["plateau", "breakthrough", "regression", "steady"],
-            },
-            "evidence": {
-                "type": "array",
-                "items": {"type": "string"},
-                "description": (
-                    "Specific numerical observations that support the "
-                    "pattern. Each item is one short sentence."
-                ),
-            },
-            "implication_for_next_week": {
-                "type": "string",
-                "description": (
-                    "One sentence for the evaluator: what this trend "
-                    "implies about the next prescription."
-                ),
-            },
-        },
-        "required": ["pattern", "evidence", "implication_for_next_week"],
-    },
-}
-
-
-def _model() -> str:
-    return os.getenv("TREND_ANALYST_MODEL", _DEFAULT_MODEL)
+def _parse_ts(value: Any) -> datetime | None:
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+    if isinstance(value, str):
+        try:
+            ts = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+    return None
 
 
 def _round_avg(values: list[float | int]) -> float | None:
@@ -107,9 +77,8 @@ def _aggregate(
 ) -> dict[str, Any]:
     """Produce a numerical snapshot from raw history.
 
-    The shapes mirror what user_store.get_session_history and
-    session_repo.list_recent return. Aggregation is bucketed by ISO
-    week so the model sees a clean rolling series, not raw timestamps.
+    Bucketed by ISO week. Used by the sufficient-history gate and as
+    one source of evidence strings on the returned dict.
     """
     now = datetime.now(timezone.utc)
     window_start = now - timedelta(weeks=weeks)
@@ -129,7 +98,6 @@ def _aggregate(
         if (p := entry.get("pain_level")) is not None:
             pain_levels.append(p)
             weekly_pain.setdefault(wk, []).append(p)
-        # Some checkin payloads embed wearable metrics inline.
         for k, target, weekly in (
             ("recovery_score", recovery_scores, weekly_recovery),
             ("sleep_score", sleep_scores, None),
@@ -198,31 +166,266 @@ def _aggregate(
     }
 
 
-def _parse_ts(value: Any) -> datetime | None:
-    if not value:
-        return None
-    if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    if isinstance(value, str):
-        try:
-            ts = datetime.fromisoformat(value.replace("Z", "+00:00"))
-            return ts if ts.tzinfo else ts.replace(tzinfo=timezone.utc)
-        except ValueError:
-            return None
-    return None
-
-
 def _has_enough_history(agg: dict[str, Any]) -> bool:
-    """Heuristic: at least 4 pain check-ins OR 4 completed sessions.
-
-    Below that threshold the model can't say anything meaningful and
-    we'd rather skip the call than produce noise. The evaluator handles
-    a None trend_summary fine.
-    """
     return (
         (agg.get("pain") or {}).get("n", 0) >= 4
         or (agg.get("sessions") or {}).get("completed", 0) >= 4
     )
+
+
+def _mann_kendall(values: list[float]) -> tuple[int, float]:
+    """Mann-Kendall trend test on an ordered series.
+
+    Returns (S, p_value) where S is the rank statistic and p_value is the
+    two-tailed normal-approximation p. Stdlib only; scipy not required.
+
+    For series shorter than 3 points the test is not meaningful and we
+    return (0, 1.0) - the caller treats that as "not significant".
+    """
+    n = len(values)
+    if n < 3:
+        return 0, 1.0
+    s = 0
+    for i in range(n - 1):
+        for j in range(i + 1, n):
+            d = values[j] - values[i]
+            if d > 0:
+                s += 1
+            elif d < 0:
+                s -= 1
+    var_s = n * (n - 1) * (2 * n + 5) / 18.0
+    if var_s <= 0:
+        return s, 1.0
+    if s > 0:
+        z = (s - 1) / sqrt(var_s)
+    elif s < 0:
+        z = (s + 1) / sqrt(var_s)
+    else:
+        z = 0.0
+    # Two-tailed p-value via the normal CDF, computed from erf.
+    p = 2.0 * (1.0 - 0.5 * (1.0 + erf(abs(z) / sqrt(2.0))))
+    return s, max(0.0, min(1.0, p))
+
+
+def _pain_trajectory(
+    checkins: list[dict[str, Any]] | None,
+    weeks: int,
+) -> dict[str, Any] | None:
+    """Linear-regression slope + Mann-Kendall significance on pain over the window.
+
+    Returns None if fewer than 3 pain points exist - linear regression is
+    not meaningful below that.
+    """
+    now = datetime.now(timezone.utc)
+    window_start = now - timedelta(weeks=weeks)
+    points: list[tuple[float, float]] = []
+    for entry in checkins or []:
+        ts = _parse_ts(entry.get("recorded_at"))
+        if ts is None or ts < window_start:
+            continue
+        p = entry.get("pain_level")
+        if p is None:
+            continue
+        days = (ts - window_start).total_seconds() / 86400.0
+        points.append((days, float(p)))
+
+    if len(points) < 3:
+        return None
+
+    points.sort(key=lambda pt: pt[0])
+    xs = [pt[0] for pt in points]
+    ys = [pt[1] for pt in points]
+    try:
+        slope, _intercept = statistics.linear_regression(xs, ys)
+    except statistics.StatisticsError:
+        return None
+
+    _s, p_value = _mann_kendall(ys)
+    third = max(1, len(ys) // 3)
+    direction = "down" if slope < 0 else "up" if slope > 0 else "flat"
+
+    return {
+        "n": len(points),
+        "first": ys[0],
+        "last": ys[-1],
+        "avg_first_third": _round_avg(ys[:third]),
+        "avg_last_third": _round_avg(ys[-third:]),
+        "slope_per_day": round(slope, 4),
+        "p_value": round(p_value, 4),
+        "significant": p_value < _PAIN_TREND_SIGNIFICANCE_P,
+        "direction": direction,
+    }
+
+
+def _adherence_trajectory(
+    sessions: list[dict[str, Any]] | None,
+    weeks: int,
+) -> dict[str, Any] | None:
+    """Weekly completion-rate slope.
+
+    Buckets sessions by ISO week, computes completion_rate per bucket,
+    runs linear regression on the weekly series. Returns None when
+    fewer than 2 weekly buckets exist (slope undefined).
+    """
+    now = datetime.now(timezone.utc)
+    window_start = now - timedelta(weeks=weeks)
+
+    weekly: dict[str, dict[str, int]] = {}
+    for s in sessions or []:
+        ts = _parse_ts(s.get("created_at"))
+        if ts is None or ts < window_start:
+            continue
+        wk = ts.strftime("%G-W%V")
+        bucket = weekly.setdefault(wk, {"completed": 0, "planned": 0,
+                                        "skipped": 0, "in_progress": 0})
+        st = s.get("status")
+        if st in bucket:
+            bucket[st] += 1
+
+    items = sorted(weekly.items())
+    xs: list[float] = []
+    ys: list[float] = []
+    for i, (_wk, bucket) in enumerate(items):
+        total = sum(bucket.values())
+        if total == 0:
+            continue
+        xs.append(float(i))
+        ys.append(bucket["completed"] / total)
+
+    if len(xs) < 2:
+        return None
+
+    try:
+        slope, _intercept = statistics.linear_regression(xs, ys)
+    except statistics.StatisticsError:
+        return None
+
+    avg_rate = sum(ys) / len(ys)
+    direction = "down" if slope < 0 else "up" if slope > 0 else "flat"
+
+    return {
+        "n_weeks": len(xs),
+        "first_week_rate": round(ys[0], 2),
+        "last_week_rate": round(ys[-1], 2),
+        "avg_rate": round(avg_rate, 2),
+        "slope_per_week": round(slope, 4),
+        "direction": direction,
+    }
+
+
+def _classify_pattern(
+    pain: dict[str, Any] | None,
+    adherence: dict[str, Any] | None,
+    agg: dict[str, Any],
+) -> str:
+    """Map (pain trajectory, adherence trajectory, agg snapshot) to one of
+    four pattern labels. First-match-wins:
+
+      regression  - pain trending up significantly OR adherence collapsing
+      breakthrough - pain trending down significantly AND adherence holding
+      plateau     - both trends flat, >=3 weeks of data, strong adherence
+      steady      - default
+    """
+    pain_up_sig = (
+        pain is not None
+        and pain["significant"]
+        and pain["slope_per_day"] > _PAIN_SLOPE_THRESHOLD_PER_DAY
+    )
+    pain_down_sig = (
+        pain is not None
+        and pain["significant"]
+        and pain["slope_per_day"] < -_PAIN_SLOPE_THRESHOLD_PER_DAY
+    )
+    adherence_collapse = (
+        adherence is not None
+        and adherence["slope_per_week"] < -_ADHERENCE_SLOPE_THRESHOLD_PER_WEEK
+    )
+
+    if pain_up_sig or adherence_collapse:
+        return "regression"
+
+    adherence_not_falling = (
+        adherence is None
+        or adherence["slope_per_week"] >= -0.05
+    )
+    if pain_down_sig and adherence_not_falling:
+        return "breakthrough"
+
+    weekly_pain = (agg.get("pain") or {}).get("weekly") or []
+    has_three_weeks = len(weekly_pain) >= _PLATEAU_MIN_WEEKS
+    pain_flat = (
+        pain is not None
+        and not pain["significant"]
+        and abs(pain["slope_per_day"]) < _PAIN_SLOPE_THRESHOLD_PER_DAY
+    )
+    adherence_strong = (
+        adherence is not None
+        and adherence["avg_rate"] >= _ADHERENCE_STRONG_AVG
+        and adherence["slope_per_week"] >= -0.05
+    )
+    if has_three_weeks and pain_flat and adherence_strong:
+        return "plateau"
+
+    return "steady"
+
+
+def _build_evidence(
+    pain: dict[str, Any] | None,
+    adherence: dict[str, Any] | None,
+    agg: dict[str, Any],
+) -> list[str]:
+    """Construct the human-readable evidence list. Each entry is one
+    self-contained sentence with the actual numbers - clinicians and the
+    evaluator agent can audit the classification by reading these alone."""
+    out: list[str] = []
+    if pain is not None:
+        sig_label = "significant" if pain["significant"] else "not significant"
+        out.append(
+            f"Pain: {pain['first']:.0f} -> {pain['last']:.0f} over {pain['n']} "
+            f"checkins (slope {pain['slope_per_day']:+.3f}/day, "
+            f"p={pain['p_value']:.2f}, {sig_label})."
+        )
+    sessions = agg.get("sessions") or {}
+    completion_rate = sessions.get("completion_rate")
+    if completion_rate is not None:
+        total = sum(sessions.get(k, 0) for k in
+                    ("completed", "planned", "skipped", "in_progress"))
+        out.append(
+            f"Completion: {completion_rate:.0%} "
+            f"({sessions.get('completed', 0)} of {total} sessions)."
+        )
+    if adherence is not None:
+        out.append(
+            f"Adherence trend: {adherence['first_week_rate']:.0%} -> "
+            f"{adherence['last_week_rate']:.0%} over {adherence['n_weeks']} "
+            f"weeks (slope {adherence['slope_per_week']:+.3f}/week)."
+        )
+    return out
+
+
+def _build_implication(
+    pattern: str,
+    pain: dict[str, Any] | None,
+    adherence: dict[str, Any] | None,
+) -> str:
+    if pattern == "regression":
+        if adherence is not None and adherence["slope_per_week"] < -_ADHERENCE_SLOPE_THRESHOLD_PER_WEEK:
+            return (
+                "Adherence dropping; review what's blocking the patient before "
+                "changing dose."
+            )
+        return (
+            "Pain trending against recovery; consider hold or regress and "
+            "review the patient's symptom log."
+        )
+    if pattern == "breakthrough":
+        return "Sustained improvement; consider progressing dose this week."
+    if pattern == "plateau":
+        return (
+            "Patient holding steady at current level for >=3 weeks; consider "
+            "introducing a progression to break through."
+        )
+    return "No clear trend; continue current prescription."
 
 
 def analyze(
@@ -241,13 +444,14 @@ def analyze(
         Patient auth.uid(). For logging only.
     checkins : list[dict] | None
         Recent symptom / pain check-ins. Same shape as
-        user_store.get_session_history (mixed kinds; the aggregator
-        filters on pain_level presence).
+        user_store.get_session_history (mixed kinds; this analyzer filters
+        on pain_level presence).
     sessions : list[dict] | None
         Recent rows from session_repo.list_recent.
     intake : dict | None
-        Optional baseline so the model can frame the trend (e.g.
-        post-op week 6 plateau is different from chronic-LBP plateau).
+        Optional baseline. Currently unused by the deterministic classifier
+        - kept in the signature so the existing orchestrator call (and any
+        future LLM-augmented version) doesn't need to change.
     weeks : int
         Lookback window in ISO weeks. 4-8 is the sweet spot.
 
@@ -255,18 +459,17 @@ def analyze(
     -------
     dict | None
         {"pattern": ..., "evidence": [...], "implication_for_next_week": ...}
-        when there is enough data and the model returns a valid response.
-        None when there is insufficient history (orchestrator passes None
-        to the evaluator, which handles it).
+        when there is enough data. None when there is insufficient history
+        (orchestrator passes None to the evaluator, which handles it).
 
     Raises
     ------
     TrendAnalystError
-        On Anthropic API failures, missing API key, or malformed output.
+        On unexpected failure (e.g., un-coercible input types). Insufficient
+        history is NOT an error - it returns None.
     """
-    api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
-    if not api_key:
-        raise TrendAnalystError("ANTHROPIC_API_KEY is not configured")
+    # `intake` is intentionally accepted but unused; see docstring.
+    _ = intake
 
     agg = _aggregate(checkins, sessions, weeks)
     if not _has_enough_history(agg):
@@ -279,63 +482,25 @@ def analyze(
         return None
 
     try:
-        import anthropic
-    except ImportError as exc:
-        raise TrendAnalystError(f"anthropic SDK not installed: {exc}") from exc
+        pain = _pain_trajectory(checkins, weeks)
+        adherence = _adherence_trajectory(sessions, weeks)
+    except (TypeError, ValueError) as exc:
+        raise TrendAnalystError(f"trend analyst input error: {exc}") from exc
 
-    client = anthropic.Anthropic(api_key=api_key)
-    parts: list[str] = [
-        "Aggregated longitudinal data:\n" + json.dumps(agg, indent=2, default=str),
-    ]
-    if intake:
-        parts.append("Patient intake (baseline):\n" + json.dumps(intake, indent=2, default=str))
-    parts.append("Classify the pattern via propose_pattern.")
-    prompt = "\n\n".join(parts)
+    pattern = _classify_pattern(pain, adherence, agg)
+    evidence = _build_evidence(pain, adherence, agg)
+    implication = _build_implication(pattern, pain, adherence)
 
-    started = time.monotonic()
-    try:
-        resp = client.messages.create(
-            model=_model(),
-            max_tokens=600,
-            system=_SYSTEM_PROMPT,
-            tools=[_TOOL],
-            tool_choice={"type": "tool", "name": "propose_pattern"},
-            messages=[{"role": "user", "content": prompt}],
-        )
-    except Exception as exc:
-        elapsed_ms = int((time.monotonic() - started) * 1000)
-        logger.warning(
-            "trend_analyst anthropic call failed in %dms token=%s: %s",
-            elapsed_ms, token, exc,
-        )
-        raise TrendAnalystError(f"trend analyst unavailable: {exc}") from exc
+    pain_slope = pain["slope_per_day"] if pain else None
+    adherence_slope = adherence["slope_per_week"] if adherence else None
+    logger.info(
+        "trend_analyst pattern=%s token=%s pain_slope=%s adherence_slope=%s "
+        "n_evidence=%d",
+        pattern, token, pain_slope, adherence_slope, len(evidence),
+    )
 
-    elapsed_ms = int((time.monotonic() - started) * 1000)
-    usage = getattr(resp, "usage", None)
-    in_tokens = getattr(usage, "input_tokens", None) if usage else None
-    out_tokens = getattr(usage, "output_tokens", None) if usage else None
-
-    for block in resp.content or []:
-        if (
-            getattr(block, "type", None) == "tool_use"
-            and getattr(block, "name", "") == "propose_pattern"
-        ):
-            data = dict(block.input or {})
-            pattern = data.get("pattern")
-            if pattern not in ("plateau", "breakthrough", "regression", "steady"):
-                raise TrendAnalystError(
-                    f"trend analyst returned invalid pattern: {pattern!r}"
-                )
-            out = {
-                "pattern": pattern,
-                "evidence": list(data.get("evidence") or []),
-                "implication_for_next_week": data.get("implication_for_next_week", ""),
-            }
-            logger.info(
-                "trend_analyst ok in %dms in_tokens=%s out_tokens=%s "
-                "pattern=%s token=%s",
-                elapsed_ms, in_tokens, out_tokens, pattern, token,
-            )
-            return out
-
-    raise TrendAnalystError("trend analyst returned no propose_pattern tool call")
+    return {
+        "pattern": pattern,
+        "evidence": evidence,
+        "implication_for_next_week": implication,
+    }
