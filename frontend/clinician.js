@@ -129,15 +129,32 @@
     }
     if (empty) empty.hidden = true;
 
-    for (const item of queue) {
+    // Sort: needs_clinician_review rows jump to the top so high-severity
+    // safety flags surface immediately. Server already returns rows in
+    // this order (status sort, then created_at DESC) but we re-sort
+    // defensively in case a future patch changes the endpoint shape.
+    const sortedQueue = [...queue].sort((a, b) => {
+      const aFlagged = a.status === "needs_clinician_review" ? 0 : 1;
+      const bFlagged = b.status === "needs_clinician_review" ? 0 : 1;
+      if (aFlagged !== bFlagged) return aFlagged - bFlagged;
+      return 0;
+    });
+
+    for (const item of sortedQueue) {
       const li = document.createElement("li");
-      li.className = "queue-item" + (item.id === selectedId ? " selected" : "");
+      const flagged = item.status === "needs_clinician_review";
+      li.className = "queue-item"
+        + (item.id === selectedId ? " selected" : "")
+        + (flagged ? " queue-item-flagged" : "");
       li.dataset.id = item.id;
       const phase = item.phase || "—";
       const week = item.week != null ? `wk ${item.week}` : "";
       const when = item.created_at ? relativeTime(item.created_at) : "";
+      const flagBadge = flagged
+        ? `<span class="queue-flag-badge">SAFETY</span>`
+        : "";
       li.innerHTML = `
-        <div class="queue-item-name">${escapeHtml(item.patient_name || item.token || "(unknown patient)")}</div>
+        <div class="queue-item-name">${flagBadge}${escapeHtml(item.patient_name || item.token || "(unknown patient)")}</div>
         <div class="queue-item-meta">${escapeHtml(phase)}${week ? ` · ${escapeHtml(week)}` : ""}${when ? ` · ${escapeHtml(when)}` : ""}</div>
       `;
       li.addEventListener("click", () => selectItem(item.id));
@@ -188,6 +205,43 @@
       intake: patient.intake,
       recent_sessions: patient.recent_sessions,
     }, null, 2);
+
+    // Safety review concerns. The backend attaches these (and may set
+    // status='needs_clinician_review') when the SafetyReviewAgent flagged
+    // the draft. Render at the top of the detail pane in red so the
+    // clinician sees them before scanning the diff. Visually distinct
+    // from the diff narrator (muted blue accent) — safety is red accent.
+    const safetyBlock = $("safetyConcerns");
+    const safetyBody = $("safetyConcernsBody");
+    const safetyLabel = $("safetyConcernsLabel");
+    if (safetyBlock && safetyBody) {
+      const concerns = (target.safety_concerns || []).filter(Boolean);
+      const flagged = target.status === "needs_clinician_review";
+      if (concerns.length > 0 || flagged) {
+        const items = concerns.length > 0
+          ? concerns.map((c) => {
+              const sev = (c.severity || "low").toLowerCase();
+              return `<li class="safety-concern safety-${escapeHtml(sev)}">
+                <span class="safety-check">${escapeHtml(c.check || "concern")}</span>
+                <span class="safety-severity">${escapeHtml(sev.toUpperCase())}</span>
+                <div class="safety-detail">${escapeHtml(c.detail || "")}</div>
+              </li>`;
+            }).join("")
+          : `<li class="safety-concern safety-high">
+              <span class="safety-detail">Flagged for clinician review.</span>
+            </li>`;
+        safetyBody.innerHTML = `<ul class="safety-concerns-list">${items}</ul>`;
+        if (safetyLabel) {
+          safetyLabel.textContent = flagged
+            ? "Safety review — clinician sign-off required"
+            : "Safety review — concerns flagged";
+        }
+        safetyBlock.classList.toggle("safety-flagged", flagged);
+        safetyBlock.hidden = false;
+      } else {
+        safetyBlock.hidden = true;
+      }
+    }
 
     // AI-generated diff narration. The backend returns:
     //   * a string when Haiku produced a usable summary
