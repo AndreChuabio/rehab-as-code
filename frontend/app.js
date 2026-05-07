@@ -1980,6 +1980,28 @@ function switchGalleryItem(idx) {
   const item = items[idx];
   if (!item) return;
 
+  // PR-U4: tear down any running form-check before swapping gallery
+  // content. Without this, the live PoseFormCheck singleton keeps
+  // running its detect loop against the <video> we're about to remove,
+  // and the next innerHTML rewrite leaves stale done / between / preflight
+  // overlays from the prior exercise stacked on top of the new one's
+  // pane. Andre hit this: Stationary Bike's metadata on the left, Quad
+  // Sets's preflight + "Workout complete" overlay rendering on the right
+  // simultaneously. Stop the singleton, cancel any speech, and remove
+  // the form-check button so maybeAttachFormCheckBtn binds a fresh one
+  // closing over the NEW item (the old button's onclick captured the
+  // old item).
+  const activeBtn = wrap.querySelector(".pose-form-check-btn[data-state='on']");
+  if (activeBtn) {
+    try { window.PoseFormCheck?.stop?.(); } catch (_) {}
+    try { window.speechSynthesis?.cancel?.(); } catch (_) {}
+    document.body.classList.remove("pose-active");
+  }
+  // Always drop the existing form-check button so the rebuilt one is
+  // bound to this idx's item, not whatever was active before.
+  const oldFcBtn = wrap.querySelector(".pose-form-check-btn");
+  if (oldFcBtn) oldFcBtn.remove();
+
   // Update active thumbnail
   wrap.querySelectorAll(".gallery-thumb-btn").forEach((btn, i) => {
     btn.classList.toggle("active", i === idx);
