@@ -5,8 +5,13 @@
     {
       "id": "quad_sets",
       "name": "Quad Sets",
-      "phase": ["acute", "subacute"],
-      "injury_types": ["knee"],
+      "phase": [
+        "acute",
+        "subacute"
+      ],
+      "injury_types": [
+        "knee"
+      ],
       "youtube_id": "RZkbu3WVeoI",
       "thumbnail_url": "https://img.youtube.com/vi/RZkbu3WVeoI/hqdefault.jpg",
       "cues": [
@@ -15,14 +20,22 @@
         "Hold each contraction 5 seconds"
       ],
       "regression_of": null,
-      "progression_to": ["terminal_knee_extension"],
-      "default_dose": "3 x 15, 5s holds"
+      "progression_to": [
+        "terminal_knee_extension"
+      ],
+      "default_dose": "3 x 15, 5s holds",
+      "body_region": "knee"
     },
     {
       "id": "heel_slides",
       "name": "Heel Slides",
-      "phase": ["acute", "subacute"],
-      "injury_types": ["knee"],
+      "phase": [
+        "acute",
+        "subacute"
+      ],
+      "injury_types": [
+        "knee"
+      ],
       "youtube_id": "B1Iiq_XfNUI",
       "thumbnail_url": "https://img.youtube.com/vi/B1Iiq_XfNUI/hqdefault.jpg",
       "cues": [
@@ -31,14 +44,21 @@
         "Pause 2 seconds at end-range"
       ],
       "regression_of": null,
-      "progression_to": ["stationary_bike"],
-      "default_dose": "3 x 10, ROM target 100 deg"
+      "progression_to": [
+        "stationary_bike"
+      ],
+      "default_dose": "3 x 10, ROM target 100 deg",
+      "body_region": "knee"
     },
     {
       "id": "terminal_knee_extension",
       "name": "Terminal Knee Extension (band)",
-      "phase": ["subacute"],
-      "injury_types": ["knee"],
+      "phase": [
+        "subacute"
+      ],
+      "injury_types": [
+        "knee"
+      ],
       "youtube_id": "C-cn_NfOpTU",
       "thumbnail_url": "https://img.youtube.com/vi/C-cn_NfOpTU/hqdefault.jpg",
       "cues": [
@@ -47,14 +67,22 @@
         "No quad lag - re-cue if heel lifts"
       ],
       "regression_of": null,
-      "progression_to": ["mini_squat"],
-      "default_dose": "3 x 12, yellow band"
+      "progression_to": [
+        "mini_squat"
+      ],
+      "default_dose": "3 x 12, yellow band",
+      "body_region": "knee"
     },
     {
       "id": "stationary_bike",
       "name": "Stationary Bike (ROM-focus)",
-      "phase": ["subacute", "strength"],
-      "injury_types": ["knee"],
+      "phase": [
+        "subacute",
+        "strength"
+      ],
+      "injury_types": [
+        "knee"
+      ],
       "youtube_id": "AB3hp4cP6XU",
       "thumbnail_url": "https://img.youtube.com/vi/AB3hp4cP6XU/hqdefault.jpg",
       "cues": [
@@ -63,14 +91,22 @@
         "Add resistance only if pain-free"
       ],
       "regression_of": null,
-      "progression_to": ["wall_sit"],
-      "default_dose": "10 min, RPE 4"
+      "progression_to": [
+        "wall_sit"
+      ],
+      "default_dose": "10 min, RPE 4",
+      "body_region": "knee"
     },
     {
       "id": "glute_bridge",
       "name": "Glute Bridge",
-      "phase": ["acute", "subacute"],
-      "injury_types": ["knee"],
+      "phase": [
+        "acute",
+        "subacute"
+      ],
+      "injury_types": [
+        "knee"
+      ],
       "youtube_id": "8bbE64NuDTU",
       "thumbnail_url": "https://img.youtube.com/vi/8bbE64NuDTU/hqdefault.jpg",
       "cues": [
@@ -79,14 +115,22 @@
         "Pause 2 seconds at the top"
       ],
       "regression_of": null,
-      "progression_to": ["single_leg_glute_bridge"],
-      "default_dose": "3 x 12"
+      "progression_to": [
+        "single_leg_glute_bridge"
+      ],
+      "default_dose": "3 x 12",
+      "body_region": "knee"
     },
     {
       "id": "wall_sit",
       "name": "Wall Sit",
-      "phase": ["subacute", "strength"],
-      "injury_types": ["knee"],
+      "phase": [
+        "subacute",
+        "strength"
+      ],
+      "injury_types": [
+        "knee"
+      ],
       "youtube_id": "y-wV4Venusw",
       "thumbnail_url": "https://img.youtube.com/vi/y-wV4Venusw/hqdefault.jpg",
       "cues": [
@@ -95,14 +139,21 @@
         "Stop if anterior knee pain"
       ],
       "regression_of": "single_leg_squat",
-      "progression_to": ["mini_squat"],
-      "default_dose": "3 x 30s holds"
+      "progression_to": [
+        "mini_squat"
+      ],
+      "default_dose": "3 x 30s holds",
+      "body_region": "knee"
     },
     {
       "id": "mini_squat",
       "name": "Mini Squat (0-45 deg)",
-      "phase": ["strength"],
-      "injury_types": ["knee"],
+      "phase": [
+        "strength"
+      ],
+      "injury_types": [
+        "knee"
+      ],
       "youtube_id": "aclHkVaku9U",
       "thumbnail_url": "https://img.youtube.com/vi/aclHkVaku9U/hqdefault.jpg",
       "cues": [
@@ -111,14 +162,21 @@
         "Even weight in both feet, mirror check"
       ],
       "regression_of": "single_leg_squat",
-      "progression_to": ["single_leg_squat"],
-      "default_dose": "3 x 12, bodyweight"
+      "progression_to": [
+        "single_leg_squat"
+      ],
+      "default_dose": "3 x 12, bodyweight",
+      "body_region": "knee"
     },
     {
       "id": "single_leg_squat",
       "name": "Single-Leg Squat",
-      "phase": ["strength"],
-      "injury_types": ["knee"],
+      "phase": [
+        "strength"
+      ],
+      "injury_types": [
+        "knee"
+      ],
       "youtube_id": "vPmxC44yOOY",
       "thumbnail_url": "https://img.youtube.com/vi/vPmxC44yOOY/hqdefault.jpg",
       "cues": [
@@ -127,15 +185,22 @@
         "Slow descent: 3 seconds down, 1 up"
       ],
       "regression_of": null,
-      "progression_to": ["box_jump"],
-      "default_dose": "3 x 8 per side"
+      "progression_to": [
+        "box_jump"
+      ],
+      "default_dose": "3 x 8 per side",
+      "body_region": "knee"
     },
-
     {
       "id": "ankle_alphabet",
       "name": "Ankle Alphabet",
-      "phase": ["acute", "subacute"],
-      "injury_types": ["ankle"],
+      "phase": [
+        "acute",
+        "subacute"
+      ],
+      "injury_types": [
+        "ankle"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -144,14 +209,22 @@
         "Stop if sharp pain - dull stretch only"
       ],
       "regression_of": null,
-      "progression_to": ["ankle_dorsiflexion_band"],
-      "default_dose": "3 sets A-Z, 2x daily"
+      "progression_to": [
+        "ankle_dorsiflexion_band"
+      ],
+      "default_dose": "3 sets A-Z, 2x daily",
+      "body_region": "ankle"
     },
     {
       "id": "ankle_towel_calf_stretch",
       "name": "Towel-Assisted Calf Stretch",
-      "phase": ["acute", "subacute"],
-      "injury_types": ["ankle"],
+      "phase": [
+        "acute",
+        "subacute"
+      ],
+      "injury_types": [
+        "ankle"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -160,14 +233,21 @@
         "Hold steady - no bouncing"
       ],
       "regression_of": null,
-      "progression_to": ["ankle_dorsiflexion_band"],
-      "default_dose": "3 x 30s holds"
+      "progression_to": [
+        "ankle_dorsiflexion_band"
+      ],
+      "default_dose": "3 x 30s holds",
+      "body_region": "ankle"
     },
     {
       "id": "ankle_dorsiflexion_band",
       "name": "Band-Resisted Dorsiflexion",
-      "phase": ["subacute"],
-      "injury_types": ["ankle"],
+      "phase": [
+        "subacute"
+      ],
+      "injury_types": [
+        "ankle"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -176,14 +256,21 @@
         "Slow return - control the eccentric"
       ],
       "regression_of": null,
-      "progression_to": ["ankle_calf_raises_double_leg"],
-      "default_dose": "3 x 15, yellow band"
+      "progression_to": [
+        "ankle_calf_raises_double_leg"
+      ],
+      "default_dose": "3 x 15, yellow band",
+      "body_region": "ankle"
     },
     {
       "id": "ankle_eversion_band",
       "name": "Band-Resisted Eversion",
-      "phase": ["subacute"],
-      "injury_types": ["ankle"],
+      "phase": [
+        "subacute"
+      ],
+      "injury_types": [
+        "ankle"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -192,14 +279,22 @@
         "Move only at the ankle, not the hip"
       ],
       "regression_of": null,
-      "progression_to": ["ankle_calf_raises_double_leg"],
-      "default_dose": "3 x 15, yellow band"
+      "progression_to": [
+        "ankle_calf_raises_double_leg"
+      ],
+      "default_dose": "3 x 15, yellow band",
+      "body_region": "ankle"
     },
     {
       "id": "ankle_calf_raises_double_leg",
       "name": "Double-Leg Calf Raises",
-      "phase": ["subacute", "strength"],
-      "injury_types": ["ankle"],
+      "phase": [
+        "subacute",
+        "strength"
+      ],
+      "injury_types": [
+        "ankle"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -208,14 +303,21 @@
         "Lower slowly - 3 seconds down"
       ],
       "regression_of": null,
-      "progression_to": ["ankle_calf_raises_single_leg"],
-      "default_dose": "3 x 15"
+      "progression_to": [
+        "ankle_calf_raises_single_leg"
+      ],
+      "default_dose": "3 x 15",
+      "body_region": "ankle"
     },
     {
       "id": "ankle_calf_raises_single_leg",
       "name": "Single-Leg Calf Raise",
-      "phase": ["strength"],
-      "injury_types": ["ankle"],
+      "phase": [
+        "strength"
+      ],
+      "injury_types": [
+        "ankle"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -224,14 +326,22 @@
         "Stop at first form breakdown"
       ],
       "regression_of": "ankle_calf_raises_double_leg",
-      "progression_to": ["ankle_lateral_hops"],
-      "default_dose": "3 x 10 each side"
+      "progression_to": [
+        "ankle_lateral_hops"
+      ],
+      "default_dose": "3 x 10 each side",
+      "body_region": "ankle"
     },
     {
       "id": "ankle_single_leg_balance",
       "name": "Single-Leg Balance",
-      "phase": ["subacute", "strength"],
-      "injury_types": ["ankle"],
+      "phase": [
+        "subacute",
+        "strength"
+      ],
+      "injury_types": [
+        "ankle"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -240,14 +350,21 @@
         "Stop the clock if you put the other foot down"
       ],
       "regression_of": null,
-      "progression_to": ["ankle_lateral_hops"],
-      "default_dose": "3 x 30s each side"
+      "progression_to": [
+        "ankle_lateral_hops"
+      ],
+      "default_dose": "3 x 30s each side",
+      "body_region": "ankle"
     },
     {
       "id": "ankle_lateral_hops",
       "name": "Lateral Line Hops",
-      "phase": ["strength"],
-      "injury_types": ["ankle"],
+      "phase": [
+        "strength"
+      ],
+      "injury_types": [
+        "ankle"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -257,14 +374,18 @@
       ],
       "regression_of": "ankle_single_leg_balance",
       "progression_to": [],
-      "default_dose": "3 x 10 hops"
+      "default_dose": "3 x 10 hops",
+      "body_region": "ankle"
     },
-
     {
       "id": "shoulder_pendulum",
       "name": "Pendulum Swings",
-      "phase": ["acute"],
-      "injury_types": ["shoulder"],
+      "phase": [
+        "acute"
+      ],
+      "injury_types": [
+        "shoulder"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -273,14 +394,22 @@
         "Small circles, both directions"
       ],
       "regression_of": null,
-      "progression_to": ["shoulder_isometric_er"],
-      "default_dose": "1 x 20 each direction"
+      "progression_to": [
+        "shoulder_isometric_er"
+      ],
+      "default_dose": "1 x 20 each direction",
+      "body_region": "shoulder"
     },
     {
       "id": "shoulder_isometric_er",
       "name": "Isometric External Rotation",
-      "phase": ["acute", "subacute"],
-      "injury_types": ["shoulder"],
+      "phase": [
+        "acute",
+        "subacute"
+      ],
+      "injury_types": [
+        "shoulder"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -289,14 +418,22 @@
         "Hold steady - 10 seconds, no breath holding"
       ],
       "regression_of": null,
-      "progression_to": ["shoulder_scapular_retraction"],
-      "default_dose": "3 x 10s holds"
+      "progression_to": [
+        "shoulder_scapular_retraction"
+      ],
+      "default_dose": "3 x 10s holds",
+      "body_region": "shoulder"
     },
     {
       "id": "shoulder_isometric_ir",
       "name": "Isometric Internal Rotation",
-      "phase": ["acute", "subacute"],
-      "injury_types": ["shoulder"],
+      "phase": [
+        "acute",
+        "subacute"
+      ],
+      "injury_types": [
+        "shoulder"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -305,14 +442,21 @@
         "Hold steady - 10 seconds"
       ],
       "regression_of": null,
-      "progression_to": ["shoulder_scapular_retraction"],
-      "default_dose": "3 x 10s holds"
+      "progression_to": [
+        "shoulder_scapular_retraction"
+      ],
+      "default_dose": "3 x 10s holds",
+      "body_region": "shoulder"
     },
     {
       "id": "shoulder_sleeper_stretch",
       "name": "Sleeper Stretch",
-      "phase": ["subacute"],
-      "injury_types": ["shoulder"],
+      "phase": [
+        "subacute"
+      ],
+      "injury_types": [
+        "shoulder"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -321,14 +465,22 @@
         "Stop at first end-range tension - no pain"
       ],
       "regression_of": null,
-      "progression_to": ["shoulder_wall_slides"],
-      "default_dose": "3 x 30s holds"
+      "progression_to": [
+        "shoulder_wall_slides"
+      ],
+      "default_dose": "3 x 30s holds",
+      "body_region": "shoulder"
     },
     {
       "id": "shoulder_scapular_retraction",
       "name": "Scapular Retraction",
-      "phase": ["subacute", "strength"],
-      "injury_types": ["shoulder"],
+      "phase": [
+        "subacute",
+        "strength"
+      ],
+      "injury_types": [
+        "shoulder"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -337,14 +489,22 @@
         "No shrugging - keep shoulders down"
       ],
       "regression_of": null,
-      "progression_to": ["shoulder_prone_t"],
-      "default_dose": "3 x 12"
+      "progression_to": [
+        "shoulder_prone_t"
+      ],
+      "default_dose": "3 x 12",
+      "body_region": "shoulder"
     },
     {
       "id": "shoulder_wall_slides",
       "name": "Wall Slides",
-      "phase": ["subacute", "strength"],
-      "injury_types": ["shoulder"],
+      "phase": [
+        "subacute",
+        "strength"
+      ],
+      "injury_types": [
+        "shoulder"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -353,14 +513,21 @@
         "Stop where contact breaks - work that range"
       ],
       "regression_of": null,
-      "progression_to": ["shoulder_prone_y"],
-      "default_dose": "3 x 10"
+      "progression_to": [
+        "shoulder_prone_y"
+      ],
+      "default_dose": "3 x 10",
+      "body_region": "shoulder"
     },
     {
       "id": "shoulder_prone_y",
       "name": "Prone Y Raise",
-      "phase": ["strength"],
-      "injury_types": ["shoulder"],
+      "phase": [
+        "strength"
+      ],
+      "injury_types": [
+        "shoulder"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -370,13 +537,18 @@
       ],
       "regression_of": "shoulder_wall_slides",
       "progression_to": [],
-      "default_dose": "3 x 10"
+      "default_dose": "3 x 10",
+      "body_region": "shoulder"
     },
     {
       "id": "shoulder_prone_t",
       "name": "Prone T Raise",
-      "phase": ["strength"],
-      "injury_types": ["shoulder"],
+      "phase": [
+        "strength"
+      ],
+      "injury_types": [
+        "shoulder"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -386,14 +558,18 @@
       ],
       "regression_of": "shoulder_scapular_retraction",
       "progression_to": [],
-      "default_dose": "3 x 10"
+      "default_dose": "3 x 10",
+      "body_region": "shoulder"
     },
-
     {
       "id": "lb_pelvic_tilt",
       "name": "Pelvic Tilt",
-      "phase": ["acute"],
-      "injury_types": ["low_back"],
+      "phase": [
+        "acute"
+      ],
+      "injury_types": [
+        "low_back"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -402,14 +578,22 @@
         "Hold 5 seconds, then release"
       ],
       "regression_of": null,
-      "progression_to": ["lb_cat_cow"],
-      "default_dose": "2 x 15"
+      "progression_to": [
+        "lb_cat_cow"
+      ],
+      "default_dose": "2 x 15",
+      "body_region": "low_back"
     },
     {
       "id": "lb_cat_cow",
       "name": "Cat-Cow",
-      "phase": ["acute", "subacute"],
-      "injury_types": ["low_back"],
+      "phase": [
+        "acute",
+        "subacute"
+      ],
+      "injury_types": [
+        "low_back"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -418,14 +602,21 @@
         "Move only as far as comfortable"
       ],
       "regression_of": null,
-      "progression_to": ["lb_bird_dog"],
-      "default_dose": "2 x 10"
+      "progression_to": [
+        "lb_bird_dog"
+      ],
+      "default_dose": "2 x 10",
+      "body_region": "low_back"
     },
     {
       "id": "lb_supine_knee_to_chest",
       "name": "Single Knee to Chest",
-      "phase": ["acute"],
-      "injury_types": ["low_back"],
+      "phase": [
+        "acute"
+      ],
+      "injury_types": [
+        "low_back"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -435,13 +626,18 @@
       ],
       "regression_of": null,
       "progression_to": [],
-      "default_dose": "2 x 30s each"
+      "default_dose": "2 x 30s each",
+      "body_region": "low_back"
     },
     {
       "id": "lb_child_pose",
       "name": "Child's Pose",
-      "phase": ["acute"],
-      "injury_types": ["low_back"],
+      "phase": [
+        "acute"
+      ],
+      "injury_types": [
+        "low_back"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -451,13 +647,19 @@
       ],
       "regression_of": null,
       "progression_to": [],
-      "default_dose": "2 x 30s"
+      "default_dose": "2 x 30s",
+      "body_region": "low_back"
     },
     {
       "id": "lb_mckenzie_press_up",
       "name": "McKenzie Press-Up",
-      "phase": ["acute", "subacute"],
-      "injury_types": ["low_back"],
+      "phase": [
+        "acute",
+        "subacute"
+      ],
+      "injury_types": [
+        "low_back"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -467,13 +669,19 @@
       ],
       "regression_of": null,
       "progression_to": [],
-      "default_dose": "2 x 10"
+      "default_dose": "2 x 10",
+      "body_region": "low_back"
     },
     {
       "id": "lb_glute_bridge_lb",
       "name": "Glute Bridge (low-back focus)",
-      "phase": ["acute", "subacute"],
-      "injury_types": ["low_back"],
+      "phase": [
+        "acute",
+        "subacute"
+      ],
+      "injury_types": [
+        "low_back"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -482,14 +690,22 @@
         "Pause 2 seconds at the top"
       ],
       "regression_of": null,
-      "progression_to": ["lb_bird_dog"],
-      "default_dose": "3 x 12"
+      "progression_to": [
+        "lb_bird_dog"
+      ],
+      "default_dose": "3 x 12",
+      "body_region": "low_back"
     },
     {
       "id": "lb_dead_bug",
       "name": "Dead Bug",
-      "phase": ["subacute", "strength"],
-      "injury_types": ["low_back"],
+      "phase": [
+        "subacute",
+        "strength"
+      ],
+      "injury_types": [
+        "low_back"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -498,14 +714,22 @@
         "If low back arches, reduce range"
       ],
       "regression_of": null,
-      "progression_to": ["lb_bird_dog"],
-      "default_dose": "3 x 10 each side"
+      "progression_to": [
+        "lb_bird_dog"
+      ],
+      "default_dose": "3 x 10 each side",
+      "body_region": "low_back"
     },
     {
       "id": "lb_bird_dog",
       "name": "Bird Dog",
-      "phase": ["subacute", "strength"],
-      "injury_types": ["low_back"],
+      "phase": [
+        "subacute",
+        "strength"
+      ],
+      "injury_types": [
+        "low_back"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -515,14 +739,18 @@
       ],
       "regression_of": "lb_dead_bug",
       "progression_to": [],
-      "default_dose": "3 x 10 each side"
+      "default_dose": "3 x 10 each side",
+      "body_region": "low_back"
     },
-
     {
       "id": "ham_seated_active_extension",
       "name": "Seated Active Knee Extension",
-      "phase": ["acute"],
-      "injury_types": ["hamstring"],
+      "phase": [
+        "acute"
+      ],
+      "injury_types": [
+        "hamstring"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -531,14 +759,21 @@
         "No bouncing - smooth and controlled"
       ],
       "regression_of": null,
-      "progression_to": ["ham_supine_curl_ball"],
-      "default_dose": "3 x 10"
+      "progression_to": [
+        "ham_supine_curl_ball"
+      ],
+      "default_dose": "3 x 10",
+      "body_region": "hamstring"
     },
     {
       "id": "ham_supine_active_stretch",
       "name": "Supine Active Hamstring Stretch",
-      "phase": ["acute"],
-      "injury_types": ["hamstring"],
+      "phase": [
+        "acute"
+      ],
+      "injury_types": [
+        "hamstring"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -547,14 +782,22 @@
         "Pulse gently - no force"
       ],
       "regression_of": null,
-      "progression_to": ["ham_supine_curl_ball"],
-      "default_dose": "3 x 10"
+      "progression_to": [
+        "ham_supine_curl_ball"
+      ],
+      "default_dose": "3 x 10",
+      "body_region": "hamstring"
     },
     {
       "id": "ham_supine_curl_ball",
       "name": "Supine Heel Curl on Ball",
-      "phase": ["acute", "subacute"],
-      "injury_types": ["hamstring"],
+      "phase": [
+        "acute",
+        "subacute"
+      ],
+      "injury_types": [
+        "hamstring"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -563,14 +806,21 @@
         "Slow return - control the eccentric"
       ],
       "regression_of": null,
-      "progression_to": ["ham_bridge_heel_slide"],
-      "default_dose": "3 x 10"
+      "progression_to": [
+        "ham_bridge_heel_slide"
+      ],
+      "default_dose": "3 x 10",
+      "body_region": "hamstring"
     },
     {
       "id": "ham_bridge_heel_slide",
       "name": "Bridge with Heel Slide",
-      "phase": ["subacute"],
-      "injury_types": ["hamstring"],
+      "phase": [
+        "subacute"
+      ],
+      "injury_types": [
+        "hamstring"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -579,14 +829,21 @@
         "Keep hips level - no drop"
       ],
       "regression_of": null,
-      "progression_to": ["ham_single_leg_rdl"],
-      "default_dose": "3 x 10 each leg"
+      "progression_to": [
+        "ham_single_leg_rdl"
+      ],
+      "default_dose": "3 x 10 each leg",
+      "body_region": "hamstring"
     },
     {
       "id": "ham_prone_hip_extension",
       "name": "Prone Hip Extension",
-      "phase": ["subacute"],
-      "injury_types": ["hamstring"],
+      "phase": [
+        "subacute"
+      ],
+      "injury_types": [
+        "hamstring"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -595,14 +852,22 @@
         "Glute squeeze first - not low-back arch"
       ],
       "regression_of": null,
-      "progression_to": ["ham_single_leg_rdl"],
-      "default_dose": "3 x 12 each leg"
+      "progression_to": [
+        "ham_single_leg_rdl"
+      ],
+      "default_dose": "3 x 12 each leg",
+      "body_region": "hamstring"
     },
     {
       "id": "ham_single_leg_rdl",
       "name": "Single-Leg Romanian Deadlift",
-      "phase": ["subacute", "strength"],
-      "injury_types": ["hamstring"],
+      "phase": [
+        "subacute",
+        "strength"
+      ],
+      "injury_types": [
+        "hamstring"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -611,14 +876,21 @@
         "Stop where back rounds - work that range"
       ],
       "regression_of": null,
-      "progression_to": ["ham_nordic_eccentric_assisted"],
-      "default_dose": "3 x 8 each side"
+      "progression_to": [
+        "ham_nordic_eccentric_assisted"
+      ],
+      "default_dose": "3 x 8 each side",
+      "body_region": "hamstring"
     },
     {
       "id": "ham_walking_lunge",
       "name": "Walking Lunge",
-      "phase": ["strength"],
-      "injury_types": ["hamstring"],
+      "phase": [
+        "strength"
+      ],
+      "injury_types": [
+        "hamstring"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -628,13 +900,18 @@
       ],
       "regression_of": null,
       "progression_to": [],
-      "default_dose": "3 x 10 each leg"
+      "default_dose": "3 x 10 each leg",
+      "body_region": "hamstring"
     },
     {
       "id": "ham_nordic_eccentric_assisted",
       "name": "Nordic Hamstring Curl (assisted)",
-      "phase": ["strength"],
-      "injury_types": ["hamstring"],
+      "phase": [
+        "strength"
+      ],
+      "injury_types": [
+        "hamstring"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -644,14 +921,18 @@
       ],
       "regression_of": "ham_single_leg_rdl",
       "progression_to": [],
-      "default_dose": "3 x 6, slow eccentric"
+      "default_dose": "3 x 6, slow eccentric",
+      "body_region": "hamstring"
     },
-
     {
       "id": "elbow_wrist_flexor_stretch",
       "name": "Wrist Flexor Stretch",
-      "phase": ["acute"],
-      "injury_types": ["elbow"],
+      "phase": [
+        "acute"
+      ],
+      "injury_types": [
+        "elbow"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -661,13 +942,18 @@
       ],
       "regression_of": null,
       "progression_to": [],
-      "default_dose": "3 x 30s holds"
+      "default_dose": "3 x 30s holds",
+      "body_region": "elbow"
     },
     {
       "id": "elbow_wrist_extensor_stretch",
       "name": "Wrist Extensor Stretch",
-      "phase": ["acute"],
-      "injury_types": ["elbow"],
+      "phase": [
+        "acute"
+      ],
+      "injury_types": [
+        "elbow"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -677,13 +963,19 @@
       ],
       "regression_of": null,
       "progression_to": [],
-      "default_dose": "3 x 30s holds"
+      "default_dose": "3 x 30s holds",
+      "body_region": "elbow"
     },
     {
       "id": "elbow_grip_squeeze",
       "name": "Grip Ball Squeeze",
-      "phase": ["acute", "subacute"],
-      "injury_types": ["elbow"],
+      "phase": [
+        "acute",
+        "subacute"
+      ],
+      "injury_types": [
+        "elbow"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -693,13 +985,18 @@
       ],
       "regression_of": null,
       "progression_to": [],
-      "default_dose": "3 x 15, 5s holds"
+      "default_dose": "3 x 15, 5s holds",
+      "body_region": "elbow"
     },
     {
       "id": "elbow_isometric_extension",
       "name": "Isometric Wrist Extension",
-      "phase": ["acute"],
-      "injury_types": ["elbow"],
+      "phase": [
+        "acute"
+      ],
+      "injury_types": [
+        "elbow"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -708,14 +1005,21 @@
         "Hold steady - no shaking"
       ],
       "regression_of": null,
-      "progression_to": ["elbow_eccentric_wrist_extension"],
-      "default_dose": "3 x 10s holds"
+      "progression_to": [
+        "elbow_eccentric_wrist_extension"
+      ],
+      "default_dose": "3 x 10s holds",
+      "body_region": "elbow"
     },
     {
       "id": "elbow_radial_nerve_glide",
       "name": "Radial Nerve Glide",
-      "phase": ["subacute"],
-      "injury_types": ["elbow"],
+      "phase": [
+        "subacute"
+      ],
+      "injury_types": [
+        "elbow"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -725,13 +1029,18 @@
       ],
       "regression_of": null,
       "progression_to": [],
-      "default_dose": "2 x 10"
+      "default_dose": "2 x 10",
+      "body_region": "elbow"
     },
     {
       "id": "elbow_pronation_supination_band",
       "name": "Band Pronation / Supination",
-      "phase": ["subacute"],
-      "injury_types": ["elbow"],
+      "phase": [
+        "subacute"
+      ],
+      "injury_types": [
+        "elbow"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -741,13 +1050,19 @@
       ],
       "regression_of": null,
       "progression_to": [],
-      "default_dose": "3 x 12"
+      "default_dose": "3 x 12",
+      "body_region": "elbow"
     },
     {
       "id": "elbow_eccentric_wrist_extension",
       "name": "Eccentric Wrist Extension",
-      "phase": ["subacute", "strength"],
-      "injury_types": ["elbow"],
+      "phase": [
+        "subacute",
+        "strength"
+      ],
+      "injury_types": [
+        "elbow"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -757,13 +1072,19 @@
       ],
       "regression_of": "elbow_isometric_extension",
       "progression_to": [],
-      "default_dose": "3 x 15, 1-2 lb"
+      "default_dose": "3 x 15, 1-2 lb",
+      "body_region": "elbow"
     },
     {
       "id": "elbow_eccentric_wrist_flexion",
       "name": "Eccentric Wrist Flexion",
-      "phase": ["subacute", "strength"],
-      "injury_types": ["elbow"],
+      "phase": [
+        "subacute",
+        "strength"
+      ],
+      "injury_types": [
+        "elbow"
+      ],
       "youtube_id": "",
       "thumbnail_url": "",
       "cues": [
@@ -773,7 +1094,8 @@
       ],
       "regression_of": null,
       "progression_to": [],
-      "default_dose": "3 x 15, 1-2 lb"
+      "default_dose": "3 x 15, 1-2 lb",
+      "body_region": "elbow"
     }
   ]
 }

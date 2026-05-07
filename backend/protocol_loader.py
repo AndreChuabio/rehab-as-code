@@ -71,16 +71,38 @@ def fetch_protocol(branch: str = DEFAULT_BRANCH) -> dict:
     return _fetch_from_github(branch)
 
 
+def _empty_protocol_for_user() -> dict:
+    """Return a clean empty-state payload for an authenticated patient with
+    no active protocol row.
+
+    Replaces the legacy `_stub_protocol()` / GitHub-YAML fallback for the
+    authenticated path. A signed-in patient who hasn't generated a plan yet
+    must NOT inherit Andre's post-ACL knee snapshot - that's how a sprained-
+    ankle patient ended up with `Wall Sit` in their sidebar. The frontend
+    keys off `phase == 'pending_intake'` to render a "Generate your first
+    plan" empty state.
+    """
+    return {
+        "patient": None,
+        "phase": "pending_intake",
+        "week": 0,
+        "exercises": [],
+    }
+
+
 def fetch_protocol_for_user(token: str, branch: str = DEFAULT_BRANCH) -> dict:
     """Fetch the active protocol for a specific patient.
 
-    When PROTOCOL_SOURCE=supabase, queries the `protocols` table for the
-    row where token=$1 AND status='active'. Falls back to the GitHub fetch
-    if the patient has no active row yet (e.g., new user pre-backfill) so
-    the demo doesn't break mid-rollout.
+    When PROTOCOL_SOURCE=supabase (the production path), queries the
+    `protocols` table for the row where token=$1 AND status='active'.
+    Returns an empty pending_intake payload if no active row exists -
+    Supabase is the canonical source for an authenticated patient, and the
+    legacy single-tenant GitHub YAML must NEVER leak into another patient's
+    view. This was the root of the "ankle-sprain patient sees Wall Sit" bug.
 
-    When PROTOCOL_SOURCE=github (default), behaves identically to
-    fetch_protocol() — ignores the token and reads from the repo.
+    When PROTOCOL_SOURCE=github (legacy default), still uses the GitHub
+    fetch for back-compat with the unauthenticated demo path. Authenticated
+    callers in production should run with PROTOCOL_SOURCE=supabase.
 
     A live release cycle on PROTOCOL_SOURCE=supabase, with backfill run
     for every existing patient, is the gate to dropping the GitHub path
@@ -91,10 +113,15 @@ def fetch_protocol_for_user(token: str, branch: str = DEFAULT_BRANCH) -> dict:
         payload = _fetch_active_from_supabase(token)
         if payload is not None:
             return payload
+        # NO YAML fallback for authenticated patients. They get an explicit
+        # empty state; the frontend's "generate first plan" CTA is the
+        # correct UX, and avoids cross-patient YAML leakage.
         logger.info(
-            "no active supabase protocol for token=%s; falling back to github read",
+            "no active supabase protocol for token=%s; returning empty "
+            "pending_intake payload (no YAML fallback for authenticated patient)",
             token,
         )
+        return _empty_protocol_for_user()
     return _fetch_from_github(branch)
 
 

@@ -25,6 +25,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -42,10 +43,17 @@ class ResearcherError(RuntimeError):
 
 _SYSTEM_PROMPT = (
     "You are a rehabilitation researcher. You receive a patient's injury "
-    "type, rehab phase, and week, plus the contents of one or more "
-    "evidence-based protocol library YAML files for that injury. Pick 4-8 "
-    "candidate exercises from those files that fit the patient's phase and "
-    "week.\n\n"
+    "type, body region, rehab phase, and week, plus the contents of one or "
+    "more evidence-based protocol library YAML files for that injury. Pick "
+    "4-8 candidate exercises from those files that fit the patient's phase "
+    "and week.\n\n"
+    "INJURY ANCHORING (load-bearing for clinical safety): every candidate "
+    "MUST target the patient's body_region. The library files you receive "
+    "are already filtered to that region; never invent exercises outside "
+    "those files, and never substitute exercises from a different region "
+    "even if you know they exist. If the library files contain no exercise "
+    "appropriate for the phase/week, return an empty `candidates` list - "
+    "the planner will refuse the draft rather than fabricate.\n\n"
     "For each candidate, cite the exact library file path it came from and "
     "the approximate line number where the exercise block begins. Give a "
     "one-sentence rationale grounded in the library entry. List "
@@ -185,9 +193,12 @@ def _build_user_prompt(
     week: int,
     intake: dict[str, Any] | None,
     library_files: list[dict[str, Any]],
+    body_region: str | None = None,
 ) -> str:
     parts: list[str] = [
         f"Injury type: {injury_type or 'unspecified'}",
+        f"Body region (HARD constraint - all candidates must target this): "
+        f"{body_region or 'unspecified'}",
         f"Rehab phase: {phase}",
         f"Week: {week}",
     ]
@@ -277,8 +288,24 @@ def candidates(
     except ImportError as exc:
         raise ResearcherError(f"anthropic SDK not installed: {exc}") from exc
 
+    # Resolve body_region for prompt anchoring. Falls back to None when
+    # the deterministic map + LLM classifier both miss; in that case the
+    # prompt notes "unspecified" and the planner's deterministic validator
+    # is the only safety net.
+    try:
+        # Local import to avoid a circular import: agents -> backend root.
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        import clinical_taxonomy as _ct
+        resolved_region = _ct.resolve_body_region(injury_type)
+    except Exception as exc:
+        logger.warning("researcher: body_region resolve failed: %s", exc)
+        resolved_region = None
+
     client = anthropic.Anthropic(api_key=api_key)
-    prompt = _build_user_prompt(injury_type, phase, week, intake, library_files)
+    prompt = _build_user_prompt(
+        injury_type, phase, week, intake, library_files,
+        body_region=resolved_region,
+    )
 
     started = time.monotonic()
     try:

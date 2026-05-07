@@ -47,6 +47,33 @@ def find_by_id(exercise_id: str) -> dict[str, Any] | None:
     return _BY_ID.get(exercise_id)
 
 
+def body_region_for(exercise_id: str | None) -> str | None:
+    """Return the body_region tag for a given exercise id, or None.
+
+    Looks up the entry in the library by id (or name). When the entry exists
+    but has no body_region (legacy entries pre-backfill), falls back to the
+    first injury_types value mapped to the canonical region taxonomy. Used
+    by the deterministic post-LLM validator in protocol generation.
+    """
+    if not exercise_id:
+        return None
+    ex = _BY_ID.get(exercise_id)
+    if ex is None:
+        # Loose match: legacy callers sometimes pass the human name.
+        slug = exercise_id.strip().lower().replace(" ", "_")
+        ex = _BY_ID.get(slug)
+    if ex is None:
+        return None
+    region = ex.get("body_region")
+    if region:
+        return region
+    # Fall back to the injury_types list if the explicit field is missing.
+    injury_types = ex.get("injury_types") or []
+    if injury_types:
+        return str(injury_types[0]).lower()
+    return None
+
+
 def find_by_phase(phase: str, injury_type: str | None = None) -> list[dict[str, Any]]:
     """Filter exercises by phase, optionally further filtered by injury_type.
 
