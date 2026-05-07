@@ -22,14 +22,63 @@ Event protocol yielded by chat_stream():
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
+import re
 from typing import Any, AsyncIterator, Awaitable, Callable
 
 import exercise_kb
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Symptom triage (Phase F)
+# ---------------------------------------------------------------------------
+
+# Pain / symptom keyword pre-filter. Cheap regex gate so the Haiku call only
+# fires on messages that actually mention a symptom. Kept rough on purpose -
+# false-positives are fine (Haiku will classify as "minor"); false-negatives
+# are the failure mode we care about (a real red-flag missed). Case-insensitive.
+SYMPTOM_KEYWORD_RE = re.compile(
+    r"\b("
+    r"pain|hurt|hurts|sore|ache|achey|achy|tweak|tweaky|sharp|sting|stung|"
+    r"swollen|swelling|stiff|stiffness|weak|weakness|giving way|gives way|"
+    r"popping|popped|grinding|locked|locking|cant|can'?t|"
+    r"numb|numbness|tingling|throbbing|burning"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# In-memory de-dup keyed by (session_id, sha256(message)) so an identical
+# message inside the same session doesn't re-classify on the model's
+# follow-up loop iteration. Vercel function instance lifetime is fine here -
+# this is not a correctness boundary, just a cost-saver. No Redis needed.
+_TRIAGE_SEEN: dict[tuple[str, str], bool] = {}
+
+
+def _triage_seen_key(session_id: str, message: str) -> tuple[str, str]:
+    digest = hashlib.sha256(message.encode("utf-8")).hexdigest()
+    return (session_id, digest)
+
+
+def _format_triage_block(triage: dict[str, Any]) -> str:
+    """Render the classifier output for injection into Maya's system prompt."""
+    return (
+        "\n\n[SYMPTOM_TRIAGE]\n"
+        f"severity: {triage.get('severity', '')}\n"
+        f"reasoning: {triage.get('reasoning', '')}\n"
+        f"recommendation: {triage.get('suggested_response', '')}\n"
+        "[/SYMPTOM_TRIAGE]\n"
+        "Acknowledge the patient's symptom, follow the recommendation, and "
+        "use the recommendation as a starting point - don't quote it verbatim. "
+        "When severity is clinician-attention, do NOT prescribe anything; "
+        "tell the patient their clinician has been flagged and will reach "
+        "out shortly. When severity is hold-load, suggest the regression. "
+        "When severity is minor, reassure and continue normal coaching."
+    )
 
 
 def _client():
@@ -186,6 +235,7 @@ def build_system_prompt(
     health: dict[str, Any],
     protocol: dict[str, Any],
     display_name: str | None = None,
+    triage_block: str | None = None,
 ) -> str:
     """Build Maya's system prompt.
 
@@ -222,7 +272,7 @@ def build_system_prompt(
             "Acknowledge it conversationally if relevant; do not auto-fire a trigger.\n\n"
         )
 
-    return (
+    base = (
         "You are Coach Maya's chat co-pilot - a concise, evidence-based "
         "physiotherapy assistant. The patient is "
         f"{patient}, week {week} {phase}.\n\n"
@@ -236,7 +286,11 @@ def build_system_prompt(
         "1. Keep replies under 60 words. Speak like a clinician, not a chatbot.\n"
         "2. When the patient describes pain, a tweak, swelling, or a tolerance "
         "issue, IMMEDIATELY call fire_symptom_trigger with their words verbatim, "
-        "then call recommend_exercise on a regression from the library.\n"
+        "then call recommend_exercise on a regression from the library. "
+        "EXCEPTION: when a triage block below says severity is "
+        "'clinician-attention', do NOT call any fire_*_trigger tool - the "
+        "orchestrator has already flagged the clinician; just respond to the "
+        "patient.\n"
         "3. When the patient asks how to do an exercise, call recommend_exercise.\n"
         "4. When the patient asks for an overview, call list_phase_exercises.\n"
         "5. When the patient explicitly asks to progress or 'plan next week', "
@@ -248,6 +302,9 @@ def build_system_prompt(
         "noting that a draft has been queued for clinician review (e.g., "
         "'logged - drafted a regression for clinician review on /clinician').\n"
     )
+    if triage_block:
+        base = base + triage_block
+    return base
 
 
 # ---------------------------------------------------------------------------
@@ -259,6 +316,18 @@ def build_system_prompt(
 # {"pending_protocol_id": str, "summary": str, "phase": str|None, "week": int|None}.
 # On failure it raises; the caller surfaces the error to the patient.
 TriggerExecutor = Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]
+
+
+# Phase F: when the symptom classifier returns severity='clinician-attention',
+# coach_chat asks the orchestrator (main.py) to clone the patient's current
+# protocol payload and persist a needs_clinician_review row with the
+# classifier output attached as safety_concerns. The writer takes the
+# triage dict + the patient's verbatim message and returns the
+# pending_protocol_id (str) on success. Raises on failure - we don't want a
+# silent miss on a high-severity flag, so coach_chat surfaces the error.
+ClinicianAttentionWriter = Callable[
+    [dict[str, Any], str], Awaitable[str]
+]
 
 
 async def _dispatch_tool(
@@ -377,6 +446,9 @@ async def chat_stream(
     max_iters: int = 3,
     user_token: str | None = None,
     display_name: str | None = None,
+    session_id: str = "default",
+    last_pose_metrics: dict[str, Any] | None = None,
+    clinician_attention_writer: ClinicianAttentionWriter | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """
     Drive a tool-using OpenAI chat completion. Yields the event protocol
@@ -387,6 +459,14 @@ async def chat_stream(
     a freshly-built one. `display_name` is sourced fresh from Supabase by
     the caller (see backend/main.py:/chat); when None, Maya addresses the
     patient anonymously rather than inventing or recycling a stale name.
+
+    Phase F: when the latest user message contains a pain / symptom keyword
+    and we haven't classified it in this session yet, call the symptom
+    classifier (Haiku 4.5). The classifier output is injected into Maya's
+    system prompt as a [SYMPTOM_TRIAGE] block. Side effects on
+    severity == 'clinician-attention' are routed through
+    `clinician_attention_writer` (provided by main.py); on hold-load /
+    minor we just steer Maya's reply via the prompt.
     """
     try:
         client = _client()
@@ -395,7 +475,87 @@ async def chat_stream(
         yield {"type": "done"}
         return
 
-    system_prompt = build_system_prompt(health, protocol, display_name=display_name)
+    # ── Phase F: pre-flight symptom triage ────────────────────────────────
+    triage_block: str | None = None
+    triage_result: dict[str, Any] | None = None
+    latest_user_msg = next(
+        (m.get("content", "") for m in reversed(messages) if m.get("role") == "user"),
+        "",
+    )
+    if latest_user_msg and SYMPTOM_KEYWORD_RE.search(latest_user_msg):
+        seen_key = _triage_seen_key(session_id, latest_user_msg)
+        if not _TRIAGE_SEEN.get(seen_key):
+            _TRIAGE_SEEN[seen_key] = True
+            try:
+                # Local import so the OpenAI-only chat path doesn't pay
+                # the anthropic import cost when no symptom is mentioned.
+                from agents.symptom_classifier import (
+                    SymptomClassifierError,
+                    classify,
+                )
+                triage_result = classify(
+                    message=latest_user_msg,
+                    wearables=health,
+                    protocol=protocol,
+                    last_pose_metrics=last_pose_metrics,
+                    token=user_token,
+                )
+                triage_block = _format_triage_block(triage_result)
+            except SymptomClassifierError as exc:
+                # No silent fallback to a fake "minor". Log + skip the
+                # triage block; Maya responds with her normal prompt.
+                logger.warning(
+                    "symptom triage skipped (classifier error) token=%s: %s",
+                    user_token, exc,
+                )
+                triage_result = None
+                triage_block = None
+            except Exception as exc:
+                logger.exception(
+                    "symptom triage skipped (unexpected error) token=%s: %s",
+                    user_token, exc,
+                )
+                triage_result = None
+                triage_block = None
+
+        # Side effect: clinician-attention writes a needs_clinician_review row.
+        # This is deterministic in the orchestrator, NOT LLM-routed.
+        if (
+            triage_result
+            and triage_result.get("severity") == "clinician-attention"
+            and clinician_attention_writer is not None
+        ):
+            try:
+                pending_id = await clinician_attention_writer(
+                    triage_result, latest_user_msg,
+                )
+                yield {
+                    "type": "tool_result",
+                    "name": "symptom_triage",
+                    "result": {
+                        "ok": True,
+                        "severity": "clinician-attention",
+                        "pending_protocol_id": pending_id,
+                    },
+                }
+            except Exception as exc:
+                logger.exception(
+                    "clinician_attention_writer failed token=%s: %s",
+                    user_token, exc,
+                )
+                yield {
+                    "type": "tool_result",
+                    "name": "symptom_triage",
+                    "result": {
+                        "ok": False,
+                        "severity": "clinician-attention",
+                        "error": str(exc),
+                    },
+                }
+
+    system_prompt = build_system_prompt(
+        health, protocol, display_name=display_name, triage_block=triage_block,
+    )
     convo: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
         *messages,
