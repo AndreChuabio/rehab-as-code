@@ -51,9 +51,9 @@ cited evidence in the PR body.
 | Trigger button | Endpoint | What the agent does | UI artifact |
 |---|---|---|---|
 | `1 intake` | `POST /patient/interact` (auth) | Run the structured `IntakeAgent` chat in the intake modal; on completion auto-fire `PlanGenerationAgent`, which calls the CodingAgent to write `protocol.yaml` and open a PR | Intake modal → plan-gen modal streaming the AG2 trace → PR card |
-| `2 weekly plan` | `POST /triggers/weekly-cron` | Read current protocol, evaluate progression criteria against wearable trends, advance/hold per `.cursorrules` | Current Protocol card updates to next week |
-| `3 check-in` | `POST /triggers/checkin` | Append today's check-in to `log.yaml`, flag any trend that should trigger a follow-up | log entry visible in PR diff |
-| `4 symptom` | `POST /triggers/symptom` | Patch one exercise in `protocol.yaml` based on the symptom report, cite a regression entry | Current Protocol card shows the patched exercise |
+| `2 weekly plan` | `POST /chat` tool `fire_weekly_plan_trigger` (auth) | Read current protocol, evaluate progression criteria against wearable trends, advance/hold per `.cursorrules` | Current Protocol card updates to next week |
+| `3 check-in` | `POST /chat` tool `fire_checkin_trigger` (auth) | Append today's check-in to `log.yaml`, flag any trend that should trigger a follow-up | log entry visible in PR diff |
+| `4 symptom` | `POST /chat` tool `fire_symptom_trigger` (auth) | Patch one exercise in `protocol.yaml` based on the symptom report, cite a regression entry | Current Protocol card shows the patched exercise |
 
 Demo starts empty (`patient: null, phase: pending_intake, exercises: []`).
 Each flow's PR must be approved before the next flow runs, so the chain
@@ -263,7 +263,7 @@ Production: https://rehab-as-code-five.vercel.app
 | GET | `/calendar` | Today's calendar events |
 | POST | `/agent/invoke` | Fire an agent run; returns `invocation_id`, `pr_url`, `branch`, `provider` |
 | GET | `/agent/stream/{id}` | SSE stream of TraceEvents |
-| POST | `/triggers/{weekly-cron,checkin,symptom}` | Funnel into `_invoke_with_fallback` |
+| ~~POST `/triggers/*`~~ | removed 2026-05-06 | Use `/chat` tools (`fire_*_trigger`) or `/agent/invoke` |
 | POST | `/patient/interact` | Auth-gated. Drives the IntakeAgent → PlanGenerationAgent flow that backs the intake + plan-gen modals. `metadata.force = "plan_generation"` re-runs plan generation |
 | GET | `/patient/me/intake-status` | Auth-gated. Returns `state ∈ {needs_intake, needs_plan, ready}` so the frontend can route to the right modal |
 | POST | `/pr/apply` | Mark draft ready then `gh pr merge --squash` (the Approve gesture) |
