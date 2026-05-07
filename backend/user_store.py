@@ -573,53 +573,11 @@ def _sql_get_last_set_completion(
 #   * %s parameter placeholders instead of ?
 # Public-API dict shape (load_user output) is identical.
 
-_PG_INIT_LOCK = Lock()
 _PG_INITIALIZED = False
 
-_PG_SCHEMA = """
-CREATE TABLE IF NOT EXISTS users (
-    token TEXT PRIMARY KEY,
-    slack_user_id TEXT UNIQUE,
-    patient_name TEXT,
-    created_at TEXT NOT NULL,
-    last_active TEXT NOT NULL,
-    last_sync TEXT,
-    injury_category TEXT
-);
-
-CREATE TABLE IF NOT EXISTS health_records (
-    token TEXT NOT NULL REFERENCES users(token) ON DELETE CASCADE,
-    recorded_at TEXT NOT NULL,
-    payload JSONB NOT NULL,
-    PRIMARY KEY (token, recorded_at)
-);
-
-CREATE TABLE IF NOT EXISTS intake_records (
-    token TEXT PRIMARY KEY REFERENCES users(token) ON DELETE CASCADE,
-    recorded_at TEXT NOT NULL,
-    payload JSONB NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS protocol_state (
-    token TEXT PRIMARY KEY REFERENCES users(token) ON DELETE CASCADE,
-    last_updated TEXT NOT NULL,
-    current_phase TEXT,
-    current_week INTEGER,
-    last_pr_url TEXT,
-    payload JSONB NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS checkins (
-    session_id TEXT PRIMARY KEY,
-    token TEXT NOT NULL REFERENCES users(token) ON DELETE CASCADE,
-    recorded_at TEXT NOT NULL,
-    pain_level INTEGER,
-    payload JSONB NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_checkins_token_time ON checkins(token, recorded_at);
-CREATE INDEX IF NOT EXISTS idx_users_slack ON users(slack_user_id);
-"""
+# Postgres schema lives in supabase/migrations/. Adding a runtime
+# CREATE TABLE IF NOT EXISTS block here would shadow drift between code and
+# DB and race the deploy-time apply. See _pg_init() below.
 
 
 def _pg_dsn() -> str:
@@ -643,18 +601,18 @@ def _pg_conn():
 
 
 def _pg_init() -> None:
-    global _PG_INITIALIZED
-    if _PG_INITIALIZED:
-        return
-    with _PG_INIT_LOCK:
-        if _PG_INITIALIZED:
-            return
-        import psycopg
+    """No-op for the Postgres backend.
 
-        with psycopg.connect(_pg_dsn(), autocommit=True) as conn:
-            with conn.cursor() as cur:
-                cur.execute(_PG_SCHEMA)
-        _PG_INITIALIZED = True
+    Schema is owned by Supabase migrations (supabase/migrations/*.sql) — see
+    20260504185400_init_user_store.sql for the canonical shape and any
+    later dated migration for additive changes. Running CREATE TABLE IF
+    NOT EXISTS at runtime against Postgres masks migration drift (the
+    server quietly comes up against a half-migrated DB) and races the
+    deployment-time apply step. Sqlite local-dev still gets its lazy
+    init below.
+    """
+    global _PG_INITIALIZED
+    _PG_INITIALIZED = True
 
 
 def _pg_create_user(slack_user_id: str | None) -> str:

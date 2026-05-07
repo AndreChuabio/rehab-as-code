@@ -507,11 +507,22 @@ class AgentInvokeRequest(BaseModel):
 async def _invoke_with_fallback(
     req: AgentInvokeRequest,
 ) -> tuple[object, "AgentInvocation"]:
-    """Run the agent. On any live-provider failure, fall back to cached_replay.
+    """Run the agent.
 
-    The demo path is always cached_replay unless DEMO_LIVE_AGENT=1. This keeps
-    the stage deterministic while still letting us flip to the live orchestrator
-    for real captures and sponsor-table demos.
+    Provider selection rules:
+      * If req.provider is set, use it verbatim (per-call override, no fallback).
+      * Else if DEMO_LIVE_AGENT=1, use AGENT_PROVIDER (default cached_replay).
+      * Else default to cached_replay (demo / stage runs).
+
+    Fallback rules (intentionally narrow):
+      * If the resolved provider IS cached_replay, the call should not fail —
+        but if it does, raise so the caller sees the underlying problem.
+      * If the resolved provider is anything else (a live provider), failures
+        ARE NOT silently masked by cached_replay anymore. We log + re-raise,
+        and the FastAPI handler (agent_invoke / _chat_trigger_executor /
+        trigger_*) returns 5xx with a friendly detail. The frontend toast
+        layer renders that detail; tests live in
+        backend/tests/test_*.py.
     """
     demo_live = os.getenv("DEMO_LIVE_AGENT", "0") == "1"
     provider = req.provider
@@ -546,14 +557,21 @@ async def _invoke_with_fallback(
         invocation = await agent.invoke(invocation_request)
         return agent, invocation
     except Exception as exc:
-        logger.warning(
-            "live agent provider %s failed (%s); falling back to cached_replay",
+        # Live provider failed. We used to silently swap in cached_replay
+        # to keep the demo moving — that's fine for a hackathon stage but
+        # masks real outages once real patients are in the loop. Surface
+        # the failure as a 5xx the frontend toast layer can render.
+        logger.exception(
+            "agent provider %s failed for flow=%s",
             provider,
-            exc,
+            req.flow,
         )
-        fallback = get_agent("cached_replay")
-        invocation = await fallback.invoke(invocation_request)
-        return fallback, invocation
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Couldn't generate your plan, please try again in a moment."
+            ),
+        )
 
 
 @app.post("/agent/invoke")
@@ -573,82 +591,17 @@ async def agent_invoke(req: AgentInvokeRequest):
     }
 
 
-# ---- Patient-journey trigger endpoints ----------------------------------
-# All four trigger endpoints funnel through the same orchestrator. Only the
-# `flow` and body fields change. This is the "5 triggers, 1 orchestrator"
-# story for the pitch. Apple Health sync stays on /health-sync above.
-
-
-class IntakeRequest(BaseModel):
-    intake_text: str
-
-
-class CheckinRequest(BaseModel):
-    checkin_text: str
-
-
-class SymptomRequest(BaseModel):
-    symptom_text: str
-
-
-@app.post("/triggers/intake")
-async def trigger_intake(body: IntakeRequest):
-    """Patient intake form submitted -> initialize protocol."""
-    req = AgentInvokeRequest(flow="intake", intake_text=body.intake_text)
-    agent, invocation = await _invoke_with_fallback(req)
-    _INVOCATIONS[invocation.invocation_id] = (agent, invocation)
-    return {
-        "trigger": "intake",
-        "invocation_id": invocation.invocation_id,
-        "pr_url": invocation.pr_url,
-        "branch": invocation.branch,
-        "provider": agent.name,
-    }
-
-
-@app.post("/triggers/weekly-cron")
-async def trigger_weekly_cron():
-    """Weekly schedule -> generate next week's protocol."""
-    req = AgentInvokeRequest(flow="weekly_plan")
-    agent, invocation = await _invoke_with_fallback(req)
-    _INVOCATIONS[invocation.invocation_id] = (agent, invocation)
-    return {
-        "trigger": "weekly-cron",
-        "invocation_id": invocation.invocation_id,
-        "pr_url": invocation.pr_url,
-        "branch": invocation.branch,
-        "provider": agent.name,
-    }
-
-
-@app.post("/triggers/checkin")
-async def trigger_checkin(body: CheckinRequest):
-    """Daily check-in logged -> append to log, evaluate trend."""
-    req = AgentInvokeRequest(flow="checkin", checkin_text=body.checkin_text)
-    agent, invocation = await _invoke_with_fallback(req)
-    _INVOCATIONS[invocation.invocation_id] = (agent, invocation)
-    return {
-        "trigger": "checkin",
-        "invocation_id": invocation.invocation_id,
-        "pr_url": invocation.pr_url,
-        "branch": invocation.branch,
-        "provider": agent.name,
-    }
-
-
-@app.post("/triggers/symptom")
-async def trigger_symptom(body: SymptomRequest):
-    """Mid-session symptom report -> patch protocol."""
-    req = AgentInvokeRequest(flow="symptom_adjustment", symptom_text=body.symptom_text)
-    agent, invocation = await _invoke_with_fallback(req)
-    _INVOCATIONS[invocation.invocation_id] = (agent, invocation)
-    return {
-        "trigger": "symptom",
-        "invocation_id": invocation.invocation_id,
-        "pr_url": invocation.pr_url,
-        "branch": invocation.branch,
-        "provider": agent.name,
-    }
+# Removed: /triggers/intake, /triggers/checkin, /triggers/symptom,
+# /triggers/weekly-cron. These were the hackathon-era unauthenticated
+# trigger endpoints used to demonstrate the "5 buttons -> 1 orchestrator"
+# pattern. Real callers were the four buttons in the patient UI; the
+# patient UI now talks to /patient/interact (intake) and /chat (everything
+# else) which both run as authenticated tool calls through the same
+# _invoke_with_fallback orchestrator. Grep across the repo (frontend, cron,
+# orchestrator, plugin, api) on 2026-05-06 found zero callers, and leaving
+# unauth public POST endpoints around is a foot-gun once real patients
+# are signing in. _chat_trigger_executor below still funnels into the
+# same orchestrator; nothing about the agent surface changed.
 
 
 # ── Pose form-check session telemetry ────────────────────────────────────────
