@@ -61,9 +61,14 @@ function navigateTo(step) {
 }
 
 function routeFromHash() {
-  const hash = window.location.hash.replace("#", "") || "intake";
-  const fn = STEP_ROUTES[hash];
-  if (fn) fn(); else triggerIntake();
+  const hash = window.location.hash.replace("#", "");
+  if (!hash) return;
+  // Visual only — keep the step indicator in sync with the URL hash, but
+  // do NOT auto-open intake / plan-gen / etc. modals just because the
+  // URL had a hash on load or the user pressed Back. Modals open
+  // explicitly when the user clicks a step button (which routes through
+  // navigateTo() → STEP_ROUTES[step]()).
+  setActiveStepBtn(hash);
 }
 
 window.addEventListener("hashchange", routeFromHash);
@@ -76,7 +81,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadProtocol();
   switchStage("chat");
   applyStepLocks();
-  routeFromHash(); // honour the URL on load; defaults to #intake
+  routeFromHash(); // honour URL on load — visual only; no auto-modal-opens.
   bootstrapAuth();
   wireIntakeModal();
   wirePlanGenModal();
@@ -518,20 +523,18 @@ async function refreshPatientState({ openModalIfNeeded = true } = {}) {
 
   if (!openModalIfNeeded) return patientState;
 
-  // Clinician in "View as patient" preview mode: don't auto-open intake or
-  // plan-gen modals. They're just inspecting how the patient view looks
-  // and don't actually want to fill out intake against their own user_id.
-  if (sessionStorage.getItem("asPatient") === "1") return patientState;
-
-  if (patientState.state === "needs_intake") {
-    showIntakeModal();
-  } else if (patientState.state === "needs_plan") {
-    showPlanGenModal({ kickoff: true });
-  } else {
+  // We deliberately do NOT auto-open the intake or plan-gen modals based
+  // on patientState anymore. Auto-popups were too aggressive — they fired
+  // on every page load, on every account switch, on the clinician
+  // "View as patient" preview, and (worst) for users who already had an
+  // active protocol but no intake record (the backfilled-protocol case).
+  // Patients explicitly start intake by clicking "1 intake" in the step
+  // strip below the chat. The state machine still runs so step locks +
+  // sidebar protocol fetch behave correctly; only the modal-open is
+  // suppressed.
+  if (patientState.state === "ready" || patientState.has_protocol) {
     closeIntakeModal();
     closePlanGenModal();
-    // Mirror local flag so the rest of the legacy-demo gating logic
-    // (sidebar locks, /protocol load) keeps working without rewrites.
     intakeComplete = true;
     localStorage.setItem("rehab_intake_complete", "1");
     if (patientState.has_protocol) {
