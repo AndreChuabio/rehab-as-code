@@ -300,6 +300,13 @@ class PlanGenerationAgent(PatientAgent):
     def _generate_protocol_supabase(self, token: str, inputs: dict) -> dict:
         """Insert a pending_review row directly. No CodingAgent, no GitHub."""
         try:
+            # Override patient_name with the canonical Supabase value so the
+            # model can't echo a stale name from a prior protocol payload it
+            # was shown in load_patient_context. Source order: intake.name ->
+            # auth.users metadata -> email local-part -> the model's guess.
+            canonical = user_store.get_display_name(token)
+            if canonical:
+                inputs = {**inputs, "patient_name": canonical}
             payload = _build_payload_from_inputs(inputs)
             protocol_id = protocol_repo.save_pending(
                 token=token,

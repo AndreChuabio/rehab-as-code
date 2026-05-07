@@ -44,6 +44,14 @@ function navigateTo(step) {
   if (window.location.hash !== `#${step}`) {
     history.pushState(null, "", `#${step}`);
   }
+  // Quick-action buttons chain through chat tools whose result lands as a
+  // bubble several lines below the input. Without a visible cue the click
+  // looks "broken." Surface a transient indicator + scroll the chat to
+  // bottom; showCoachWorkingIndicator drops itself when the next chat
+  // event lands. Safe to call even on steps that don't fire chat tools
+  // immediately - the indicator is removed in the same tick if no chat
+  // activity follows within the watchdog window.
+  showCoachWorkingIndicator();
   const fn = STEP_ROUTES[step];
   if (fn) fn();
 }
@@ -254,11 +262,17 @@ async function bootstrapAuth() {
       // Server-driven state machine: ask the backend whether this patient
       // needs intake / plan-gen / nothing, and route to the right modal.
       refreshPatientState().catch((e) => console.warn("state refresh failed", e));
+      // Pull today's session log so the sidebar reflects what's already
+      // logged on the server (persists across refresh, unlike the prior
+      // in-memory array). Best-effort; swallowed errors above on /sessions/today.
+      refreshTodaySession().catch(() => {});
     } else {
       showPill(null);
       closeIntakeModal();
       closePlanGenModal();
       patientState = null;
+      todaySession = [];
+      renderTodaySession();
       // Re-show the overlay if it isn't a deliberate skip and user has no
       // session — but never on the magic-link redirect, which fires onChange
       // with a fresh session right after.
@@ -919,21 +933,23 @@ function renderProtocol({ protocol }) {
   const exercises = protocol.exercises || [];
   const isPendingIntake =
     !exercises.length ||
-    protocol.phase === "pending_intake" ||
-    !protocol.patient;
+    protocol.phase === "pending_intake";
 
   if (isPendingIntake) {
     meta.textContent = "no protocol yet";
     list.innerHTML = `
       <li class="protocol-empty">
         <div class="empty-headline">No protocol yet</div>
-        <div class="empty-sub">Click <strong>1 intake</strong> below to onboard the patient. The cloud agent will generate the initial protocol.</div>
+        <div class="empty-sub">Click <strong>Start intake</strong> below to onboard the patient. Coach Maya will draft the initial protocol for clinician review.</div>
       </li>
     `;
     return;
   }
 
-  meta.textContent = `${protocol.patient} - ${protocol.phase || "rehab"} - week ${protocol.week ?? "?"}`;
+  // Don't render protocol.patient here - it's a denormalized snapshot that
+  // drifts between accounts (the "Christian" bug). The signed-in user's name
+  // is already on the auth pill at the top of the page.
+  meta.textContent = `${protocol.phase || "rehab"} - week ${protocol.week ?? "?"}`;
   list.innerHTML = exercises
     .map((ex) => {
       const parts = [];
@@ -1523,26 +1539,111 @@ function triggerExercise() {
 async function loadExerciseCards() {
   const log = document.getElementById("chatLog");
 
-  const render = (exercises) => {
+  const render = (exercises, opts = {}) => {
     if (!exercises.length) {
-      appendChatBubble("coach", "No exercises in your plan yet — complete step 2 first.");
-      return;
+      appendChatBubble("coach", "No exercises matched - try Browse all to see the full library.");
+    } else {
+      renderExerciseGallery(exercises);
     }
-    renderExerciseGallery(exercises);
+    appendBrowseAllAffordance(opts.activeTab || "plan");
     scrollChatLog();
   };
 
   if (approvedPlanExercises.length) {
-    render(approvedPlanExercises);
+    render(approvedPlanExercises, { activeTab: "plan" });
     return;
   }
   try {
     const res = await authedFetch(`${API_BASE}/protocol/exercises`);
     if (!res.ok) throw new Error(`status ${res.status}`);
     const data = await res.json();
-    render(data.exercises || []);
+    render(data.exercises || [], { activeTab: "plan" });
   } catch (e) {
     appendChatBubble("error", `Could not load exercises: ${e.message}`);
+  }
+}
+
+// "Browse all exercises" affordance below the active gallery. Clicking it
+// fetches /exercises (the full library, no auth) and re-renders the gallery
+// with the entire catalogue. Includes a phase filter so the patient can
+// narrow to acute/subacute/strength.
+function appendBrowseAllAffordance(activeTab) {
+  const log = document.getElementById("chatLog");
+  if (!log) return;
+  // Avoid stacking duplicates if loadExerciseCards re-runs.
+  const prev = document.getElementById("browseAllPanel");
+  if (prev) prev.remove();
+
+  const panel = document.createElement("div");
+  panel.id = "browseAllPanel";
+  panel.className = "chat-bubble coach browse-all-panel";
+  panel.innerHTML = `
+    <div class="browse-all-header">
+      <strong>Exercise library</strong>
+      <span class="browse-all-tabs">
+        <button type="button" class="browse-all-tab ${activeTab === "plan" ? "active" : ""}"
+                data-tab="plan">My plan</button>
+        <button type="button" class="browse-all-tab ${activeTab === "all" ? "active" : ""}"
+                data-tab="all">Browse all</button>
+      </span>
+    </div>
+    <div class="browse-all-filters" id="browseAllFilters" style="display:none">
+      <label>Phase
+        <select id="browseAllPhase">
+          <option value="">any</option>
+          <option value="acute">acute</option>
+          <option value="subacute">subacute</option>
+          <option value="strength">strength</option>
+        </select>
+      </label>
+    </div>
+  `;
+  log.appendChild(panel);
+
+  panel.querySelectorAll(".browse-all-tab").forEach((btn) => {
+    btn.addEventListener("click", () => switchExerciseTab(btn.dataset.tab));
+  });
+  const filters = panel.querySelector("#browseAllFilters");
+  if (filters) filters.style.display = activeTab === "all" ? "flex" : "none";
+  const phaseEl = panel.querySelector("#browseAllPhase");
+  if (phaseEl) phaseEl.addEventListener("change", () => loadAllExercises(phaseEl.value || ""));
+}
+
+async function switchExerciseTab(tab) {
+  if (tab === "plan") {
+    clearChatLog();
+    loadExerciseCards();
+    return;
+  }
+  // Browse all
+  await loadAllExercises("");
+}
+
+async function loadAllExercises(phase) {
+  clearChatLog();
+  appendChatBubble("coach", phase
+    ? `Showing all ${escapeHtml(phase)} exercises in the library.`
+    : "Showing the full exercise library.");
+  try {
+    const url = phase
+      ? `${API_BASE}/exercises?phase=${encodeURIComponent(phase)}`
+      : `${API_BASE}/exercises`;
+    const res = await authedFetch(url);
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const data = await res.json();
+    const exercises = data.exercises || [];
+    if (!exercises.length) {
+      appendChatBubble("coach", "No exercises matched that filter.");
+    } else {
+      renderExerciseGallery(exercises);
+    }
+    appendBrowseAllAffordance("all");
+    // Re-set the phase select to its current value after re-render
+    const phaseEl = document.getElementById("browseAllPhase");
+    if (phaseEl && phase) phaseEl.value = phase;
+    scrollChatLog();
+  } catch (e) {
+    appendChatBubble("error", `Could not load library: ${e.message}`);
   }
 }
 
@@ -1559,6 +1660,9 @@ function renderExerciseGallery(exercises) {
     const ytId     = ex.youtube_id || "";
     const watchUrl = ex.youtube_watch_url || "";
     const thumb    = ex.thumbnail_url || (ytId ? `https://img.youtube.com/vi/${ytId}/hqdefault.jpg` : "");
+    // Cache the friendly name so the today's-session sidebar can render
+    // "Wall Squat" rather than "wall_squat" when /sessions/today returns.
+    rememberExerciseName(ex.id || ex.name, ex.name || ex.id);
     return { ex, genUrl, ytId, watchUrl, thumb };
   });
 
@@ -1643,13 +1747,16 @@ function switchGalleryItem(idx) {
 }
 
 // ---------------------------------------------------------------------------
-// Pose form check (feature spike — flag-gated, throwaway)
-// Toggle with /?pose=1 (persists to localStorage). See frontend/pose.js.
+// Pose form check
 // ---------------------------------------------------------------------------
+// The feature is shipped, no longer behind a URL flag. The button renders on
+// every gallery card whose exercise_id has a check roster in pose.js's
+// EXERCISES map. Camera permission is requested at click-time by the browser;
+// nothing else gates discovery.
 
 function maybeAttachFormCheckBtn(wrap, item) {
   if (!window.PoseFormCheck) {
-    console.warn("PoseFormCheck not loaded — pose.js failed to initialize");
+    console.warn("PoseFormCheck not loaded - pose.js failed to initialize");
     return;
   }
   // Only show the button on exercises that have pose criteria defined.
@@ -1662,7 +1769,8 @@ function maybeAttachFormCheckBtn(wrap, item) {
   btn.type = "button";
   btn.className = "pose-form-check-btn";
   btn.dataset.state = "off";
-  btn.textContent = "Form Check (webcam)";
+  btn.textContent = "Start guided form-check";
+  btn.title = "Use your webcam for live rep + alignment feedback";
   btn.onclick = () => togglePoseFormCheck(wrap, item, btn);
   videoWrap.parentElement.insertBefore(btn, videoWrap);
 }
@@ -1990,6 +2098,10 @@ async function sendChat(message, { skipUserBubble = false } = {}) {
   const empty = document.getElementById("chatEmpty");
   if (empty) empty.remove();
 
+  // Drop any "Coach Maya is on it..." transient as soon as a real coach
+  // bubble is about to render - they would otherwise stack visually.
+  hideCoachWorkingIndicator();
+
   const sendBtn = document.getElementById("chatSendBtn");
   const input = document.getElementById("chatInput");
   setChatBusy(true, sendBtn, input);
@@ -2244,34 +2356,142 @@ function scrollChatLog() {
   if (log) log.scrollTop = log.scrollHeight;
 }
 
-// ---------------------------------------------------------------------------
-// Today's session (ephemeral, local-only)
-// ---------------------------------------------------------------------------
-// Adds from the chat exercise cards land here, NOT in the protocol. Protocol
-// changes go through a real cloud-agent flow (weekly_plan / symptom /
-// intake / checkin). "Add to today" is a click-through to "I'll do this in
-// today's workout" - no PR, no waiting.
+// "Coach Maya is on it" transient. Quick-action buttons + sendChat() both
+// invoke this so the patient sees an immediate visual ack while the LLM /
+// chat-tool round-trip is in flight. Idempotent: calling twice in a row
+// does not stack indicators.
+let _coachWorkingTimer = null;
+function showCoachWorkingIndicator() {
+  const log = document.getElementById("chatLog");
+  if (!log) return;
+  let el = document.getElementById("coachWorkingIndicator");
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "coachWorkingIndicator";
+    el.className = "chat-bubble coach thinking coach-working";
+    el.textContent = "Coach Maya is on it...";
+    log.appendChild(el);
+  }
+  scrollChatLog();
+  // Watchdog: if nothing else hits the chat for 12s, drop the indicator so
+  // it doesn't linger after a button that didn't actually fire a chat tool.
+  if (_coachWorkingTimer) clearTimeout(_coachWorkingTimer);
+  _coachWorkingTimer = setTimeout(hideCoachWorkingIndicator, 12_000);
+}
 
-const todaySession = [];
+function hideCoachWorkingIndicator() {
+  if (_coachWorkingTimer) {
+    clearTimeout(_coachWorkingTimer);
+    _coachWorkingTimer = null;
+  }
+  const el = document.getElementById("coachWorkingIndicator");
+  if (el) el.remove();
+}
 
-function addToTodayFromBtn(btn) {
+// ---------------------------------------------------------------------------
+// Today's session (DB-backed via /sessions/*)
+// ---------------------------------------------------------------------------
+// Adds from the chat exercise cards land in public.sessions, scoped to the
+// authenticated patient (RLS). The clinician dashboard reads the same rows
+// for the adherence panel. Protocol changes still go through clinician
+// review (chat-tool fires); "Add to today" is just "I plan to do this set
+// today" - no protocol mutation.
+//
+// We keep an in-memory mirror so re-renders don't always hit the network,
+// but truth lives on the server. On every meaningful event we re-fetch
+// /sessions/today.
+
+let todaySession = []; // mirror of /sessions/today; rows from session_repo
+
+async function refreshTodaySession() {
+  if (!window.RehabAuth?.getJwt?.()) {
+    // No JWT: the in-memory array stays empty; the card stays hidden.
+    todaySession = [];
+    renderTodaySession();
+    return;
+  }
+  try {
+    const tz = (Intl?.DateTimeFormat?.().resolvedOptions().timeZone) || "UTC";
+    const res = await authedFetch(`${API_BASE}/sessions/today`, {
+      headers: { "X-Timezone": tz },
+    });
+    if (res.status === 401) {
+      todaySession = [];
+      renderTodaySession();
+      return;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    todaySession = (data.sessions || []).map((s) => ({
+      id: s.id,
+      exercise_id: s.exercise_id,
+      name: s.exercise_id,  // friendly name lookup happens at render time
+      status: s.status,
+      planned_sets: s.planned_sets,
+      planned_reps: s.planned_reps,
+    }));
+    renderTodaySession();
+  } catch (e) {
+    console.warn("refreshTodaySession failed:", e);
+  }
+}
+
+async function addToTodayFromBtn(btn) {
   const id   = btn.dataset.addId   || "";
   const name = btn.dataset.addName || id || "exercise";
   if (!id) return;
-  if (todaySession.some((e) => e.id === id)) {
+
+  // Optimistic UX: disable the button immediately. Re-fetch /sessions/today
+  // on success so the sidebar reflects what the server actually accepted.
+  if (todaySession.some((e) => e.exercise_id === id)) {
     showToast(`${name} is already in today's session`, "info");
     return;
   }
-  todaySession.push({ id, name, addedAt: new Date().toISOString() });
-  renderTodaySession();
+  if (!window.RehabAuth?.getJwt?.()) {
+    showToast("Sign in to log this to your record", "info");
+    return;
+  }
 
-  // Reveal the video on the card now that the exercise is confirmed
-  const wrap = btn.closest(".exercise-card");
-  if (wrap) revealVideoOnCard(wrap);
-
-  btn.textContent = "✓ Added";
   btn.disabled = true;
-  btn.classList.remove("primary");
+  const prevText = btn.textContent;
+  btn.textContent = "Adding...";
+
+  try {
+    const res = await authedFetch(`${API_BASE}/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ exercise_id: id }),
+    });
+    if (res.status === 401) {
+      btn.disabled = false;
+      btn.textContent = prevText;
+      showToast("Sign in to log this to your record", "info");
+      return;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    btn.textContent = "Added to today";
+    btn.classList.remove("primary");
+    showToast(`${name} added to today`, "info");
+    // Reveal the video on the card now that the exercise is confirmed.
+    const wrap = btn.closest(".exercise-card");
+    if (wrap) revealVideoOnCard(wrap);
+    await refreshTodaySession();
+  } catch (e) {
+    console.warn("addToToday failed:", e);
+    btn.disabled = false;
+    btn.textContent = prevText;
+    showToast(`Could not log: ${e.message}`, "error");
+  }
+}
+
+const _EXERCISE_NAME_LOOKUP = {}; // exercise_id -> friendly name; populated by gallery renders
+
+function rememberExerciseName(id, name) {
+  if (id && name) _EXERCISE_NAME_LOOKUP[id] = name;
+}
+
+function exerciseDisplayName(id) {
+  return _EXERCISE_NAME_LOOKUP[id] || id;
 }
 
 function renderTodaySession() {
@@ -2284,24 +2504,50 @@ function renderTodaySession() {
   }
   card.style.display = "block";
   list.innerHTML = todaySession
-    .map(
-      (e) => `
-    <li class="today-session-item">
-      <span class="today-session-name">${escapeHtml(e.name)}</span>
-      <button class="today-session-remove" onclick="removeFromToday('${escapeHtml(e.id)}')"
-              title="Remove">x</button>
+    .map((e) => {
+      const friendly = exerciseDisplayName(e.exercise_id);
+      const statusGlyph =
+        e.status === "completed" ? "✓" :
+        e.status === "in_progress" ? "..." :
+        e.status === "skipped" ? "—" : "";
+      const statusClass = e.status || "planned";
+      return `
+    <li class="today-session-item ${statusClass}">
+      <span class="today-session-name">${escapeHtml(friendly)}</span>
+      <span class="today-session-status">${escapeHtml(statusGlyph)}</span>
+      <button class="today-session-remove"
+              onclick="markSessionSkipped('${escapeHtml(e.id)}')"
+              title="Skip">x</button>
     </li>
-  `,
-    )
+  `;
+    })
     .join("");
 }
 
-function removeFromToday(id) {
-  const i = todaySession.findIndex((e) => e.id === id);
-  if (i >= 0) {
-    todaySession.splice(i, 1);
-    renderTodaySession();
+async function markSessionSkipped(sessionId) {
+  if (!sessionId) return;
+  try {
+    const res = await authedFetch(`${API_BASE}/sessions/${encodeURIComponent(sessionId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status: "skipped" }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    await refreshTodaySession();
+  } catch (e) {
+    console.warn("markSessionSkipped failed:", e);
+    showToast(`Could not skip: ${e.message}`, "error");
   }
+}
+
+// Backwards-compat alias for any cached HTML referring to removeFromToday.
+function removeFromToday(idOrSessionId) {
+  // The new flow operates on session_id, but legacy markup may still pass
+  // an exercise_id. Try to resolve.
+  const target = todaySession.find(
+    (e) => e.id === idOrSessionId || e.exercise_id === idOrSessionId,
+  );
+  if (target) markSessionSkipped(target.id);
 }
 
 // ---------------------------------------------------------------------------
