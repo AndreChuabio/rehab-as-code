@@ -203,6 +203,30 @@ def _validate(proposal: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _summarize_protocol(result: dict[str, Any]) -> dict[str, Any]:
+    """PHI-safe summary of the planner's draft payload. Counts + structural
+    facts only — the full YAML lives in protocols.payload, no need to
+    duplicate."""
+    if not isinstance(result, dict):
+        return {"_unknown_shape": str(type(result))}
+    exercises = result.get("exercises", []) or []
+    return {
+        "phase": result.get("phase"),
+        "week": result.get("week"),
+        "body_region": result.get("body_region"),
+        "n_exercises": len(exercises),
+        "exercise_ids": [str(e.get("id", ""))[:80] for e in exercises[:12]],
+    }
+
+
+from observability import trace_sync
+
+
+@trace_sync(
+    "planner",
+    model="claude-sonnet-4-6",
+    summarize=_summarize_protocol,
+)
 def compose(
     candidates: list[dict[str, Any]],
     signal: dict[str, Any],

@@ -225,6 +225,31 @@ def _has_enough_history(agg: dict[str, Any]) -> bool:
     )
 
 
+def _summarize_trend(result: dict[str, Any] | None) -> dict[str, Any]:
+    """PHI-safe summary: pattern label + numeric deltas only."""
+    if not isinstance(result, dict):
+        return {"_skipped": True}
+    return {
+        "pattern": result.get("pattern"),
+        "data_completeness": result.get("data_completeness"),
+        "n_checkins": (result.get("counts") or {}).get("checkins"),
+        "n_sessions": (result.get("counts") or {}).get("sessions"),
+    }
+
+
+def _decision_from_trend(result: dict[str, Any] | None) -> str | None:
+    return (result or {}).get("pattern") if isinstance(result, dict) else None
+
+
+from observability import trace_sync
+
+
+@trace_sync(
+    "trend_analyst",
+    model="claude-sonnet-4-6",
+    summarize=_summarize_trend,
+    decision_from=_decision_from_trend,
+)
 def analyze(
     *,
     token: str,

@@ -63,7 +63,15 @@ from user_store import (
     get_last_set_completion,
 )
 from shortcut_template import generate_shortcut
-from auth import current_user_id, is_clinician, optional_user_id, require_clinician_id
+from auth import (
+    current_user_id,
+    is_admin,
+    is_clinician,
+    optional_user_id,
+    require_admin_id,
+    require_clinician_id,
+)
+from observability import attach_patient, clear_run_context, set_run_context
 import coach_chat
 import qrcode
 import qrcode.image.svg
@@ -79,6 +87,29 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def observability_request_context(request, call_next):
+    """Initialize per-request observability context.
+
+    Sets a request_id (auto-generated UUID) before the handler runs;
+    patient_uid lands later inside the handler when current_user_id
+    resolves the JWT. Agents wrapped with @trace_agent read this via
+    contextvars and write one pipeline_runs row per call.
+    """
+    set_run_context(request_id=None, patient_uid=None)
+    try:
+        response = await call_next(request)
+    finally:
+        clear_run_context()
+    return response
+
+
+# Admin / observability dashboard router. All routes gated by
+# require_admin_id; mounted under /admin/*.
+from api.admin import router as admin_router  # noqa: E402
+app.include_router(admin_router)
 
 CONTEXT_FILE = Path(__file__).parent.parent / "context.json"
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
@@ -1628,6 +1659,7 @@ async def chat(req: ChatRequest, user_id: str = Depends(current_user_id)):
     Requires a Supabase JWT in `Authorization: Bearer <jwt>`. The `sub`
     claim becomes the patient's stable token in user_store.
     """
+    attach_patient(user_id)
     ensure_user(user_id)
     health = get_health_data()
     protocol_payload = fetch_protocol_for_user(user_id) or {}
@@ -1703,6 +1735,7 @@ async def patient_interact(
     """
     from agents import get_patient_agent, PatientRequest
 
+    attach_patient(user_id)
     ensure_user(user_id)
 
     intake = user_store.get_intake(user_id)

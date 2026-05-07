@@ -342,6 +342,26 @@ def _build_user_prompt(
     return "\n\n".join(parts)
 
 
+def _summarize_candidates(result: list[dict[str, Any]]) -> dict[str, Any]:
+    """PHI-safe summary for pipeline_runs.output_summary. Counts only,
+    plus the structured fields the next agent consumes — never raw
+    citations text or rationale prose."""
+    items = result or []
+    return {
+        "n_candidates": len(items),
+        "ids": [str(c.get("id", ""))[:80] for c in items[:10]],
+        "regions": sorted({(c.get("body_region") or "?") for c in items if isinstance(c, dict)}),
+    }
+
+
+from observability import trace_sync
+
+
+@trace_sync(
+    "researcher",
+    model="claude-sonnet-4-6",
+    summarize=_summarize_candidates,
+)
 def candidates(
     injury_type: str | None,
     phase: str,

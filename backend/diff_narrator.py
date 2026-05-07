@@ -155,6 +155,35 @@ def _has_meaningful_diff(
     return active_payload != proposed_payload
 
 
+def _summarize_narrator(result: tuple[str | None, "NarratorStatus"]) -> dict[str, Any]:
+    """PHI-safe summary: status enum only — never the prose itself.
+    The narration text already lives in protocols.diff_summary on the
+    happy path; duplicating into pipeline_runs would be redundant +
+    adds a second PHI surface to govern."""
+    if not isinstance(result, tuple) or len(result) < 2:
+        return {"_unknown_shape": str(type(result))}
+    text, status = result[0], result[1]
+    return {
+        "narrator_status": str(status) if status is not None else None,
+        "text_len": len(text) if isinstance(text, str) else 0,
+    }
+
+
+def _decision_from_narrator(result: tuple[str | None, "NarratorStatus"]) -> str | None:
+    if not isinstance(result, tuple) or len(result) < 2:
+        return None
+    return str(result[1]) if result[1] is not None else None
+
+
+from observability import trace_sync
+
+
+@trace_sync(
+    "diff_narrator",
+    model="claude-haiku-4-5",
+    summarize=_summarize_narrator,
+    decision_from=_decision_from_narrator,
+)
 def summarize(
     active_payload: dict[str, Any] | None,
     proposed_payload: dict[str, Any] | None,
