@@ -211,16 +211,18 @@
     </div>
   </div>
 
-  <!-- Plan-generation modal. Opens immediately after intake completes (or when
-       /patient/me/intake-status returns state="needs_plan"). Streams the AG2
-       multi-agent trace from /agent/stream/{invocation_id} live, then surfaces
-       the PR card. -->
+  <!-- Plan-generation modal. Opens immediately after intake completes (or
+       when /patient/me/intake-status returns state="needs_plan"). Streams
+       the agent's reasoning trace from /agent/stream/{invocation_id} live,
+       then surfaces the pending-protocol approve card so a clinician can
+       review the proposed protocol from /clinician. -->
   <div class="plan-gen-modal" id="planGenModal" hidden>
     <div class="plan-gen-card">
       <h2>Drafting your protocol</h2>
       <p class="plan-gen-blurb" id="planGenBlurb">
-        Coach Maya is calling the planner agent and the protocol-edit pipeline.
-        Reasoning trace below — you'll see file edits, a branch, and a PR.
+        Coach Maya is drafting a protocol from your intake and wearable
+        signals. The proposal will be saved as <strong>pending review</strong>
+        and a clinician will approve or reject it before it goes live.
       </p>
       <div class="plan-gen-trace" id="planGenTrace"></div>
       <div class="plan-gen-pr" id="planGenPrCard" hidden></div>
