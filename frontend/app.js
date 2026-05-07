@@ -2444,6 +2444,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
           <div class="pose-overlay" id="poseGuidedOverlay">
             <div class="pose-overlay-set" id="poseSetLabel"></div>
             <div class="pose-overlay-rep" id="poseRepLabel"></div>
+            <button class="pose-presence-done" id="posePresenceDoneBtn" type="button" hidden>Mark set done</button>
             <div class="pose-overlay-pulse" id="poseStatusPulse" data-status="idle" aria-hidden="true"></div>
             <div class="pose-correction-bubble" id="poseCorrectionBubble" hidden></div>
             <div class="pose-rest-overlay" id="poseRestOverlay" hidden>
@@ -2508,6 +2509,17 @@ async function togglePoseFormCheck(wrap, item, btn) {
   const preflightEl  = videoWrap.querySelector("#posePreflight");
   const preflightSt  = videoWrap.querySelector("#posePreflightStatus");
   const preflightGo  = videoWrap.querySelector("#posePreflightGoBtn");
+  const presenceDone = videoWrap.querySelector("#posePresenceDoneBtn");
+  // PR-U2: cache the engaged exercise's mode so the active-phase logic
+  // can branch on presence vs rep-tracked without re-reading the
+  // EXERCISES map every frame. Computed once at engage time.
+  const isPresenceMode =
+    window.PoseFormCheck?.EXERCISES?.[item.ex.id]?.mode === "presence";
+  // Hold duration for presence mode. Library entries don't (yet) carry
+  // a duration_min; we default to 60s/set, which lines up with the
+  // typical PT cue ("hold for one minute"). When library/protocol
+  // payloads start carrying explicit durations, source from there.
+  const presenceHoldSeconds = 60;
   const videoEl      = videoWrap.querySelector("#poseVideo");
   const canvasEl     = videoWrap.querySelector("#poseCanvas");
   const stageEl      = videoWrap.querySelector("#poseStage");
@@ -2553,6 +2565,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
   function clearTimers() {
     if (guided.restTimer)           { clearInterval(guided.restTimer); guided.restTimer = null; }
     if (guided.correctionFadeTimer) { clearTimeout(guided.correctionFadeTimer); guided.correctionFadeTimer = null; }
+    if (guided.presenceTimer)       { clearInterval(guided.presenceTimer); guided.presenceTimer = null; }
   }
 
   function updateSetRepLabels() {
@@ -2601,8 +2614,54 @@ async function togglePoseFormCheck(wrap, item, btn) {
     restOverlay.hidden = true;
     betweenOl.hidden = true;
     doneOverlay.hidden = true;
-    updateSetRepLabels();
+    if (isPresenceMode) {
+      // PR-U2: presence-mode exercises (ankle alphabet, band isolations,
+      // lateral hops) don't have a 2D-trackable rep signal. Run a hold
+      // timer instead of the rep state machine; expose a manual "Mark
+      // set done" button so the patient can advance early if their PT
+      // gave a different cadence. On either path, endSet() fires.
+      startPresenceHold();
+    } else {
+      updateSetRepLabels();
+    }
   }
+
+  // PR-U2: presence-mode set runner. Speaks start / halfway / complete
+  // cues, ticks an mm:ss progress chip into the rep label slot, and
+  // surfaces a "Mark set done" button for the patient to fast-forward.
+  // No rep counting — the headline metric is elapsed-vs-target time,
+  // not rep count.
+  function startPresenceHold() {
+    let elapsed = 0;
+    const total = presenceHoldSeconds;
+    const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+    setLabel.textContent = `Set ${guided.setIdx + 1}/${guided.totalSets}`;
+    repLabel.textContent = `Hold ${fmt(0)} / ${fmt(total)}`;
+    presenceDone.hidden = false;
+    speakNow(`Set ${guided.setIdx + 1}, hold for ${total} seconds`);
+    if (guided.presenceTimer) clearInterval(guided.presenceTimer);
+    guided.presenceTimer = setInterval(() => {
+      elapsed += 1;
+      repLabel.textContent = `Hold ${fmt(elapsed)} / ${fmt(total)}`;
+      if (elapsed === Math.floor(total / 2)) speakNow("Halfway");
+      if (elapsed >= total) {
+        clearInterval(guided.presenceTimer);
+        guided.presenceTimer = null;
+        endSet();
+      }
+    }, 1000);
+  }
+
+  // Manual fast-forward — usable any time during a presence-mode set.
+  // Idempotent: clearTimers() inside endSet handles re-entry.
+  presenceDone.onclick = () => {
+    if (guided.phase !== "active" || !isPresenceMode) return;
+    if (guided.presenceTimer) {
+      clearInterval(guided.presenceTimer);
+      guided.presenceTimer = null;
+    }
+    endSet();
+  };
 
   function startRest() {
     guided.phase = "rest";
@@ -2672,9 +2731,16 @@ async function togglePoseFormCheck(wrap, item, btn) {
   }
 
   function endSet() {
-    const reps = guided.repsHistoryThisSet.length;
-    const warns = guided.repsHistoryThisSet.filter((r) => r.status !== "good").length;
-    speakNow(`Set ${guided.setIdx + 1} complete. ${reps} reps, ${warns} form warnings.`);
+    // PR-U2: hide presence-mode UI bits before transitioning. No-op for
+    // rep-tracked exercises (button is already hidden).
+    if (presenceDone) presenceDone.hidden = true;
+    if (isPresenceMode) {
+      speakNow(`Set ${guided.setIdx + 1} complete.`);
+    } else {
+      const reps = guided.repsHistoryThisSet.length;
+      const warns = guided.repsHistoryThisSet.filter((r) => r.status !== "good").length;
+      speakNow(`Set ${guided.setIdx + 1} complete. ${reps} reps, ${warns} form warnings.`);
+    }
     guided.setIdx += 1;
     if (guided.setIdx >= guided.totalSets) {
       finishWorkout();
@@ -2690,9 +2756,26 @@ async function togglePoseFormCheck(wrap, item, btn) {
     // Required-landmark gate. We don't see raw lms here, so proxy via the
     // metrics list: if at least 2/3 of the exercise's checks resolved this
     // frame, the body is visible enough.
-    const expected = (window.PoseFormCheck.EXERCISES?.[item.ex.id]?.checks || []).length;
+    //
+    // PR-U2: presence-mode exercises (ankle alphabet, band isolations,
+    // lateral hops) intentionally have a single "presence" check because
+    // 2D BlazePose can't reliably resolve their joint of interest. The
+    // generic Math.max(2, ...) gate makes this single-check case
+    // unreachable (got is at most 1), so the Start button stayed disabled
+    // forever. Branch on mode so presence-mode exercises gate on got >= 1.
+    const exDef = window.PoseFormCheck.EXERCISES?.[item.ex.id];
+    const isPresenceMode = exDef?.mode === "presence";
+    const expected = (exDef?.checks || []).length;
     const got = (payload.metrics || []).length;
-    const detected = expected > 0 && got >= Math.max(2, Math.ceil(expected * 0.66));
+    const detected = isPresenceMode
+      ? got >= 1
+      : expected > 0 && got >= Math.max(2, Math.ceil(expected * 0.66));
+    // PR-U2 observability: surface the actual tracking count so a patient
+    // who's not making the gate sees WHY ("Tracking 0/3 markers" vs the
+    // opaque "Move so your full body is in frame"). This is what Andre
+    // means by AI observability — visible state for the AI pipeline so
+    // failure modes don't read as dead silence.
+    const trackingChip = `Tracking ${got}/${expected} ${expected === 1 ? "marker" : "markers"}`;
     const ts = performance.now();
     if (detected) {
       if (guided.detectedSinceTs == null) guided.detectedSinceTs = ts;
@@ -2701,18 +2784,18 @@ async function togglePoseFormCheck(wrap, item, btn) {
         if (preflightGo.disabled) {
           preflightGo.disabled = false;
           preflightGo.classList.add("ready");
-          preflightSt.textContent = "Looking good. Tap Start when ready.";
+          preflightSt.textContent = `${trackingChip} — looking good. Tap Start when ready.`;
         }
       } else {
-        preflightSt.textContent = "Hold still... locking in.";
+        preflightSt.textContent = `${trackingChip} — hold still, locking in.`;
       }
     } else {
       guided.detectedSinceTs = null;
       preflightGo.disabled = true;
       preflightGo.classList.remove("ready");
       preflightSt.textContent = got === 0
-        ? "No body detected. Step into the outline."
-        : "Move so your full body is in frame.";
+        ? `${trackingChip} — no body detected. Step into the outline.`
+        : `${trackingChip} — move so your full body is in frame.`;
     }
   }
 
