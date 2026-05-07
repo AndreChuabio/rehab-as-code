@@ -11,12 +11,18 @@ the modal closes and the plan-gen modal opens to stream the AG2 PR run.
 
 Vision support and Tavus session creation tools remain registered for future use
 but are no longer surfaced in the system prompt; the modal does not collect a photo.
+
+PR-K adds `capture_intake_from_chat`, an alternate path that lets coach_chat's
+`start_intake_tool` persist intake fields conversationally (patient says
+"I tweaked my ankle this morning" and Maya gathers the rest in dialog).
+The structured modal still works; this is additive.
 """
 from __future__ import annotations
 
 import json
 import logging
 import os
+from typing import Any, Literal
 
 import anthropic
 
@@ -28,6 +34,191 @@ sys.path.insert(0, str(__import__("pathlib").Path(__file__).parent.parent))
 import user_store
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Conversational intake (PR-K)
+# ---------------------------------------------------------------------------
+
+# Keys that constitute a "complete" intake record. Mirrors the
+# save_intake_record tool's required list, minus `name`/`age` (those are
+# collected up-front by Supabase Auth + the structured modal; conversational
+# intake is additive on top of an authenticated patient).
+_INTAKE_REQUIRED_KEYS = (
+    "injury_type",
+    "surgery_date",
+    "pain_level",
+    "symptoms",
+    "goals",
+)
+
+# Keys we accept from the chat tool. Any key outside this allowlist is
+# dropped on entry — guards against the model hallucinating a column.
+_INTAKE_ALLOWED_KEYS = frozenset(
+    _INTAKE_REQUIRED_KEYS + ("name", "age", "photo_url", "photo_findings")
+)
+
+
+class IntakeCaptureError(RuntimeError):
+    """Raised when capture_intake_from_chat fails for a recoverable reason
+    the chat layer should surface to the patient (DB outage, validation
+    failure, etc.). Distinct from ValueError so the dispatcher can map it
+    to a tool_result error rather than a hard 500."""
+
+
+def _validate_intake_fields(fields: dict[str, Any]) -> dict[str, Any]:
+    """Drop unknown keys and run light type coercion.
+
+    Pain level: clamp to 0..10. Symptoms / goals: coerce to list[str].
+    Free-text fields (injury_type, surgery_date) are left as-is. We
+    intentionally do NOT log values here — see PHI hygiene note in the
+    PR-K scope.
+    """
+    cleaned: dict[str, Any] = {}
+    for key, value in (fields or {}).items():
+        if key not in _INTAKE_ALLOWED_KEYS:
+            continue
+        if value is None:
+            continue
+        if key == "pain_level":
+            try:
+                pain = int(value)
+            except (TypeError, ValueError):
+                raise IntakeCaptureError(
+                    "pain_level must be an integer between 0 and 10"
+                )
+            if pain < 0 or pain > 10:
+                raise IntakeCaptureError(
+                    "pain_level must be between 0 and 10"
+                )
+            cleaned[key] = pain
+            continue
+        if key in ("symptoms", "goals"):
+            if isinstance(value, str):
+                cleaned[key] = [value]
+            elif isinstance(value, list):
+                cleaned[key] = [str(v) for v in value if str(v).strip()]
+            else:
+                raise IntakeCaptureError(f"{key} must be a string or array of strings")
+            continue
+        if key == "age":
+            try:
+                cleaned[key] = int(value)
+            except (TypeError, ValueError):
+                raise IntakeCaptureError("age must be an integer")
+            continue
+        cleaned[key] = value
+    return cleaned
+
+
+def _missing_required(payload: dict[str, Any]) -> list[str]:
+    """Return the subset of `_INTAKE_REQUIRED_KEYS` not satisfied by payload."""
+    missing: list[str] = []
+    for k in _INTAKE_REQUIRED_KEYS:
+        v = payload.get(k)
+        if v is None:
+            missing.append(k)
+            continue
+        if isinstance(v, (list, str)) and len(v) == 0:
+            missing.append(k)
+    return missing
+
+
+def capture_intake_from_chat(
+    token: str,
+    fields: dict[str, Any],
+    mode: Literal["new", "update"],
+) -> dict[str, Any]:
+    """Persist an intake_records row from a conversational capture (PR-K).
+
+    Parameters
+    ----------
+    token : str
+        Supabase auth.uid() of the patient (NOT a client-supplied token).
+    fields : dict
+        Subset of intake fields captured from chat. Only keys in
+        `_INTAKE_ALLOWED_KEYS` are accepted; everything else is dropped.
+    mode : Literal["new", "update"]
+        - "new" : start a fresh intake record. Today this REPLACES the
+          existing row's payload (intake_records.token is PRIMARY KEY).
+          PR-L will lift this to a multi-row schema; until then,
+          mode="new" should only fire when the patient is genuinely
+          starting over (e.g., new injury) — Maya's prompt is gated on that.
+        - "update" : deep-merge `fields` into the latest row's payload
+          while preserving keys the patient hasn't re-provided.
+
+    Returns
+    -------
+    {
+        "intake_id": str,            # the patient's token (per current schema)
+        "fields_captured": [str],    # keys actually persisted this call
+        "fields_missing": [str],     # required keys still absent from the row
+        "mode": str,
+    }
+
+    Raises
+    ------
+    IntakeCaptureError
+        On validation failure or DB write failure. Caller (coach_chat
+        dispatcher) surfaces the message via a tool_result error event;
+        no silent fallback to a fake-success.
+    """
+    if not token:
+        raise IntakeCaptureError("auth token required")
+    if mode not in ("new", "update"):
+        raise IntakeCaptureError(f"unsupported mode: {mode!r}")
+
+    cleaned = _validate_intake_fields(fields)
+    if not cleaned:
+        raise IntakeCaptureError("no recognised intake fields supplied")
+
+    if mode == "new":
+        # Replace the row. Until PR-L's multi-row schema lands, "new" is an
+        # upsert that overwrites the existing payload. We log the keys
+        # captured (NOT values) so PHI doesn't leak.
+        payload = dict(cleaned)
+        try:
+            user_store.save_intake(token, payload)
+        except Exception as exc:
+            logger.exception("save_intake (new) failed for token=%s", token)
+            raise IntakeCaptureError(f"failed to persist intake: {exc}") from exc
+    else:
+        # update: deep-merge into the latest row's payload. If no row
+        # exists, treat as new so a half-update doesn't silently no-op.
+        prior = user_store.get_intake(token) or {}
+        merged = dict(prior)
+        # For list-typed keys (symptoms, goals) we union the values rather
+        # than overwriting — patients refining "and also stiffness" should
+        # accumulate, not clobber.
+        for k, v in cleaned.items():
+            if k in ("symptoms", "goals") and isinstance(v, list):
+                existing = merged.get(k) or []
+                if not isinstance(existing, list):
+                    existing = [str(existing)]
+                merged_set = list(dict.fromkeys([*existing, *v]))
+                merged[k] = merged_set
+            else:
+                merged[k] = v
+        try:
+            user_store.save_intake(token, merged)
+        except Exception as exc:
+            logger.exception("save_intake (update) failed for token=%s", token)
+            raise IntakeCaptureError(f"failed to persist intake: {exc}") from exc
+
+    persisted = user_store.get_intake(token) or {}
+    missing = _missing_required(persisted)
+
+    logger.info(
+        "conversational_intake captured token=%s mode=%s keys=%s missing=%s",
+        token, mode, sorted(cleaned.keys()), missing,
+    )
+
+    return {
+        "intake_id": token,
+        "fields_captured": sorted(cleaned.keys()),
+        "fields_missing": missing,
+        "mode": mode,
+    }
 
 SYSTEM_PROMPT = """You are a rehabilitation intake specialist.
 Collect the following fields through warm, natural conversation — ask one question at a time.
