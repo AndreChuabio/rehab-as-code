@@ -172,16 +172,23 @@ EXERCISE PACING RULES:
 --- END REHAB CONTEXT ---"""
 
 
-def build_system_prompt(health: dict, events: list[dict]) -> dict:
+def build_system_prompt(
+    health: dict,
+    events: list[dict],
+    protocol: dict | None = None,
+) -> dict:
     """
     Build the Tavus conversational_context block + a Claude-generated greeting.
 
-    Signature unchanged from the wellness-coach scaffold so existing FastAPI
-    endpoints continue to work. Internally fetches the rehab protocol so the
-    avatar greets with current protocol context.
+    Originally signed `(health, events)` for the wellness-coach scaffold; PR-P
+    added an optional `protocol` kwarg so the caller can pass a per-user
+    protocol resolved via fetch_protocol_for_user(user_id). When omitted we
+    fall back to the legacy single-tenant fetch_protocol() so older callers
+    keep working.
     """
     cal_summary = summarize_calendar(events)
-    protocol = fetch_protocol()
+    if protocol is None:
+        protocol = fetch_protocol()
     focus = analyze_rehab_signals(health, protocol)
     context_block = _build_context_block(
         health, events, focus, cal_summary, protocol)

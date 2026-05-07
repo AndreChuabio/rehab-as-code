@@ -2,18 +2,33 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  --bg:        #0d1117;
-  --surface:   #161b22;
-  --surface2:  #1c2330;
-  --border:    #30363d;
-  --text:      #e6edf3;
-  --muted:     #8b949e;
-  --accent:    #3fb68b;   /* soft green */
-  --accent2:   #4a90d9;   /* calm blue */
-  --warn:      #e3a845;
-  --danger:    #f87171;
-  --radius:    12px;
-  --shadow:    0 4px 24px rgba(0,0,0,0.4);
+  /* Clinical Twilight palette. Cool, precise, clinician-forward.
+     Replaces the previous GitHub-dark + sage-green palette. PR-Q untangles
+     --accent (CTA) from --success (completion / done states) so the same
+     token no longer does double duty. See frontend/DESIGN_SYSTEM.md §1. */
+  --bg:             #0b1220;
+  --surface:        #141c2e;
+  --surface2:       #1d2742;
+  --surface3:       #283356;   /* hover / selected — replaces invisible surface2 hovers */
+  --border:         #2e3a5c;
+  --border-strong:  #4a5a85;
+  --text:           #e8eef7;
+  --text-strong:    #ffffff;
+  --muted:          #9aa7c2;
+  --accent:         #4fb3c4;   /* primary CTA — desaturated medical teal */
+  --accent-hover:   #6bc6d6;
+  --accent2:        #7a9eff;   /* secondary / link — calm periwinkle */
+  --success:        #5fd09a;   /* completed session, approved pill, "you did it" */
+  --success-bg:     #1a3329;
+  --warn:           #e8b54a;
+  --warn-bg:        #3a2e15;
+  --danger:         #ff6b7a;
+  --danger-bg:      #3a1820;
+  --ai-accent:      #c89b6c;   /* warm tan — AI-generated narrator block */
+  --ai-bg:          #2a2218;
+  --mock-border:    #ff6b7a;
+  --radius:         12px;
+  --shadow:         0 4px 24px rgba(0, 0, 0, 0.4);
 }
 
 body {
@@ -94,7 +109,7 @@ body {
   text-align: left;
   font-family: inherit;
 }
-.agent-btn.primary { background: var(--accent); color: #0d1117; border-color: var(--accent); }
+.agent-btn.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
 .agent-btn.primary:hover:not(:disabled) { filter: brightness(1.1); }
 .agent-btn.secondary { background: var(--surface2); color: var(--text); }
 .agent-btn.secondary:hover:not(:disabled) { background: #232a37; border-color: var(--accent2); }
@@ -132,10 +147,10 @@ body {
   color: var(--text);
 }
 .team-node.active {
-  background: rgba(63, 182, 139, 0.15);
+  background: rgba(79, 179, 196, 0.15);
   border-color: var(--accent);
   color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(63, 182, 139, 0.08);
+  box-shadow: 0 0 0 3px rgba(79, 179, 196, 0.08);
 }
 
 /* ── Patient-journey trigger strip ────────────────────────────────── */
@@ -166,7 +181,7 @@ body {
 }
 .trigger-btn.primary {
   background: var(--accent);
-  color: #0d1117;
+  color: var(--bg);
   border-color: var(--accent);
   font-weight: 600;
 }
@@ -209,7 +224,7 @@ body {
 .trace-event.trace-child {
   margin-left: 14px;
   border-left-color: var(--accent2);
-  background: rgba(74, 144, 217, 0.06);
+  background: rgba(122, 158, 255, 0.06);
 }
 .trace-glyph { color: var(--muted); font-weight: 600; }
 .trace-ts { color: var(--muted); text-align: right; }
@@ -217,16 +232,16 @@ body {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 999px;
-  background: rgba(74, 144, 217, 0.18);
+  background: rgba(122, 158, 255, 0.18);
   color: var(--accent2);
   font-weight: 600;
   text-transform: lowercase;
   letter-spacing: 0.02em;
 }
 .trace-label { color: var(--text); word-break: break-word; }
-.trace-pr_opened { border-left-color: var(--accent); }
-.trace-pr_opened .trace-glyph { color: var(--accent); }
-.trace-agent_completed { border-left-color: var(--accent); }
+.trace-pr_opened { border-left-color: var(--success); }
+.trace-pr_opened .trace-glyph { color: var(--success); }
+.trace-agent_completed { border-left-color: var(--success); }
 .trace-agent_failed { border-left-color: var(--danger); }
 .trace-agent_failed .trace-glyph { color: var(--danger); }
 
@@ -283,7 +298,7 @@ body {
 .stat { display: flex; justify-content: space-between; align-items: center; }
 .stat-label { color: var(--muted); font-size: 13px; }
 .stat-value { font-size: 18px; font-weight: 600; }
-.score.good { color: var(--accent); }
+.score.good { color: var(--success); }
 .score.ok   { color: var(--warn); }
 .score.low  { color: var(--danger); }
 
@@ -316,8 +331,20 @@ body {
   text-transform: uppercase;
   cursor: default;
 }
-.source-badge.live { background: rgba(52, 211, 153, 0.15); color: #34d399; }
-.source-badge.mock { background: rgba(148, 163, 184, 0.15); color: var(--muted); }
+/* PR-Q: source-badge palette
+   .live  — quiet green pill, real production data
+   .mock  — DASHED red outline, transparent fill. Calling out a non-real
+            source must read distinct from a safety alert (which uses a
+            solid red banner). The dashed outline + cap text + brand-red
+            colour signal "synthetic data" without competing for the
+            "patient is in danger" attention slot. */
+.source-badge.live { background: rgba(95, 208, 154, 0.15); color: var(--success); }
+.source-badge.mock {
+  background: transparent;
+  border: 2px dashed var(--mock-border);
+  color: var(--danger);
+  letter-spacing: 0.12em;
+}
 
 /* ── Center Panel ──────────────────────────────────────────────────── */
 .center-panel {
@@ -365,7 +392,7 @@ body {
   align-items: center;
   gap: 10px;
   background: var(--accent);
-  color: #0d1117;
+  color: var(--bg);
   border: none;
   border-radius: 50px;
   padding: 14px 32px;
@@ -373,7 +400,7 @@ body {
   font-weight: 700;
   cursor: pointer;
   transition: transform .15s, opacity .15s;
-  box-shadow: 0 0 24px rgba(63, 182, 139, 0.3);
+  box-shadow: 0 0 24px rgba(79, 179, 196, 0.3);
 }
 .start-btn:hover  { transform: scale(1.04); }
 .start-btn:active { transform: scale(.98); }
@@ -400,7 +427,7 @@ body {
 
 /* Mic hint */
 .mic-hint {
-  background: rgba(74, 144, 217, 0.15);
+  background: rgba(122, 158, 255, 0.15);
   border: 1px solid var(--accent2);
   color: var(--text);
   font-size: 13px;
@@ -415,6 +442,47 @@ body {
   width: 100%;
   height: 500px;
   border: none;
+}
+
+/* Start a new / continue session row (PR-P) */
+.video-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: center;
+}
+
+.start-btn.secondary {
+  background: var(--surface2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: none;
+}
+
+.start-btn.secondary:hover { background: var(--surface); }
+
+.active-session {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  gap: 12px;
+}
+
+.end-btn {
+  align-self: center;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 18px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color .15s, color .15s;
+}
+
+.end-btn:hover {
+  color: var(--text);
+  border-color: var(--text);
 }
 
 /* ── Recommendations ───────────────────────────────────────────────── */
@@ -452,7 +520,7 @@ body {
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--accent);
-  background: rgba(63, 182, 139, 0.12);
+  background: rgba(79, 179, 196, 0.12);
   padding: 2px 8px;
   border-radius: 999px;
 }
@@ -492,7 +560,7 @@ body {
 .chat-bubble.user {
   align-self: flex-end;
   background: var(--accent2);
-  color: #0d1117;
+  color: var(--bg);
   border-bottom-right-radius: 4px;
   font-weight: 500;
 }
@@ -505,8 +573,8 @@ body {
 }
 .chat-bubble.system {
   align-self: stretch;
-  background: rgba(74, 144, 217, 0.08);
-  border: 1px solid rgba(74, 144, 217, 0.3);
+  background: rgba(122, 158, 255, 0.08);
+  border: 1px solid rgba(122, 158, 255, 0.3);
   color: var(--muted);
   font-size: 12px;
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
@@ -514,7 +582,7 @@ body {
 }
 .chat-bubble.error {
   align-self: stretch;
-  background: rgba(248, 113, 113, 0.08);
+  background: var(--danger-bg);
   border: 1px solid var(--danger);
   color: var(--danger);
   font-size: 13px;
@@ -597,7 +665,7 @@ body {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   font-size: 11px;
   color: var(--accent);
-  background: rgba(63, 182, 139, 0.12);
+  background: rgba(79, 179, 196, 0.12);
   padding: 2px 8px;
   border-radius: 999px;
 }
@@ -610,9 +678,9 @@ body {
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
 .video-source.sora {
-  background: rgba(74, 144, 217, 0.15);
+  background: rgba(122, 158, 255, 0.15);
   color: var(--accent2);
-  border: 1px solid rgba(74, 144, 217, 0.4);
+  border: 1px solid rgba(122, 158, 255, 0.4);
 }
 .video-source.youtube {
   background: rgba(148, 163, 184, 0.12);
@@ -663,12 +731,13 @@ body {
 }
 .exercise-action-btn.primary {
   background: var(--accent);
-  color: #0d1117;
+  color: var(--bg);
   border-color: var(--accent);
   font-weight: 600;
 }
 
-/* Tool-call inline pill (shown in chat as a thin status line) */
+/* Tool-call inline pill (shown in chat as a thin status line). The agent
+   "did a thing successfully" semantics, so the left rail uses --success. */
 .chat-tool-line {
   align-self: stretch;
   display: flex;
@@ -678,12 +747,12 @@ body {
   color: var(--muted);
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
   padding: 4px 8px;
-  background: rgba(63, 182, 139, 0.06);
-  border-left: 2px solid var(--accent);
+  background: rgba(95, 208, 154, 0.06);
+  border-left: 2px solid var(--success);
   border-radius: 4px;
   flex-shrink: 0;
 }
-.chat-tool-line .tool-glyph { color: var(--accent); }
+.chat-tool-line .tool-glyph { color: var(--success); }
 .chat-tool-line a { color: var(--accent2); text-decoration: none; }
 .chat-tool-line a:hover { text-decoration: underline; }
 
@@ -733,7 +802,7 @@ body {
 
 .chat-send-btn {
   background: var(--accent);
-  color: #0d1117;
+  color: var(--bg);
   border: none;
   border-radius: 8px;
   padding: 0 18px;
@@ -812,10 +881,10 @@ body {
 }
 .agent-status.working .agent-status-dot {
   background: var(--accent);
-  box-shadow: 0 0 0 3px rgba(63, 182, 139, 0.2);
+  box-shadow: 0 0 0 3px rgba(79, 179, 196, 0.2);
   animation: pulse 1.4s ease-in-out infinite;
 }
-.agent-status.done .agent-status-dot { background: var(--accent); }
+.agent-status.done .agent-status-dot { background: var(--success); }
 .agent-status.error .agent-status-dot { background: var(--danger); }
 .agent-status-label {
   color: var(--text);
@@ -850,7 +919,7 @@ body {
 .team-mini-node.active {
   color: var(--accent);
   border-color: var(--accent);
-  background: rgba(63, 182, 139, 0.1);
+  background: rgba(79, 179, 196, 0.1);
 }
 .team-mini-arrow { color: var(--muted); font-size: 11px; }
 
@@ -970,21 +1039,21 @@ body {
   background: #232a37;
 }
 .quick-action.primary {
-  background: rgba(63, 182, 139, 0.12);
+  background: rgba(79, 179, 196, 0.12);
   color: var(--accent);
-  border-color: rgba(63, 182, 139, 0.4);
+  border-color: rgba(79, 179, 196, 0.4);
   font-weight: 600;
 }
 .quick-action.primary:hover:not(:disabled) {
-  background: rgba(63, 182, 139, 0.2);
+  background: rgba(79, 179, 196, 0.2);
   border-color: var(--accent);
 }
 .quick-action:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Inline agent trace bubble (renders inside chat log) */
 .chat-bubble.agent-trace {
-  background: rgba(74, 144, 217, 0.06);
-  border: 1px solid rgba(74, 144, 217, 0.2);
+  background: rgba(122, 158, 255, 0.06);
+  border: 1px solid rgba(122, 158, 255, 0.2);
   border-radius: 10px;
   padding: 10px 12px;
   font-size: 12px;
@@ -1029,10 +1098,11 @@ body {
   to   { opacity: 1; transform: translateX(0); }
 }
 
-/* Inline PR result bubble */
+/* Inline PR result bubble. "PR opened successfully" reads as completion,
+   so this tile uses --success (not --accent / CTA). */
 .chat-bubble.pr-result {
-  background: rgba(63, 182, 139, 0.08);
-  border: 1px solid rgba(63, 182, 139, 0.4);
+  background: rgba(95, 208, 154, 0.08);
+  border: 1px solid rgba(95, 208, 154, 0.4);
   border-radius: 10px;
   padding: 12px 14px;
   align-self: stretch;
@@ -1044,14 +1114,14 @@ body {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--accent);
+  color: var(--success);
   font-weight: 600;
 }
 .pr-result-cta {
   display: inline-block;
   align-self: flex-start;
   background: var(--accent);
-  color: #0d1117;
+  color: var(--bg);
   padding: 8px 14px;
   border-radius: 6px;
   font-size: 13px;
@@ -1068,7 +1138,7 @@ body {
 }
 .pr-approve-btn {
   background: var(--accent);
-  color: #0d1117;
+  color: var(--bg);
   border: none;
   padding: 8px 14px;
   border-radius: 6px;
@@ -1082,7 +1152,7 @@ body {
 .pr-approve-btn:disabled { opacity: 0.6; cursor: wait; }
 .pr-approve-btn.applied {
   background: var(--surface2);
-  color: var(--accent);
+  color: var(--success);
   cursor: default;
 }
 .demo-reset-btn {
@@ -1287,8 +1357,8 @@ body {
   justify-content: space-between;
   gap: 8px;
   padding: 6px 10px;
-  background: rgba(63, 182, 139, 0.08);
-  border: 1px solid rgba(63, 182, 139, 0.25);
+  background: rgba(95, 208, 154, 0.08);
+  border: 1px solid rgba(95, 208, 154, 0.25);
   border-radius: 6px;
   font-size: 13px;
 }
@@ -1304,7 +1374,7 @@ body {
   border-radius: 4px;
   transition: all 0.12s ease;
 }
-.today-session-remove:hover { color: var(--danger); background: rgba(248, 113, 113, 0.1); }
+.today-session-remove:hover { color: var(--danger); background: rgba(255, 107, 122, 0.1); }
 .today-session-hint {
   font-size: 11px;
   color: var(--muted);
@@ -1816,7 +1886,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .auth-card .auth-secondary:disabled { opacity: 0.6; cursor: not-allowed; }
 .auth-card button[type="submit"] {
   background: var(--accent);
-  color: #0d1117;
+  color: var(--bg);
   border: none;
   border-radius: 6px;
   padding: 10px 14px;
@@ -1836,8 +1906,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   color: var(--muted);
   line-height: 1.4;
 }
-.auth-status-ok  { color: var(--accent); border: 1px solid rgba(63, 182, 139, 0.3); }
-.auth-status-err { color: var(--danger); border: 1px solid rgba(248, 113, 113, 0.3); }
+.auth-status-ok  { color: var(--success); border: 1px solid rgba(95, 208, 154, 0.3); background: var(--success-bg); }
+.auth-status-err { color: var(--danger); border: 1px solid rgba(255, 107, 122, 0.3); background: var(--danger-bg); }
 .auth-skip {
   background: transparent;
   border: none;
@@ -1874,8 +1944,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   text-overflow: ellipsis;
 }
 .auth-pill-signout {
-  background: rgba(248, 113, 113, 0.12);
-  border: 1px solid rgba(248, 113, 113, 0.4);
+  background: rgba(255, 107, 122, 0.12);
+  border: 1px solid rgba(255, 107, 122, 0.4);
   color: var(--danger);
   border-radius: 999px;
   padding: 3px 10px;
@@ -1884,7 +1954,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   cursor: pointer;
   font-family: inherit;
 }
-.auth-pill-signout:hover { background: rgba(248, 113, 113, 0.22); }
+.auth-pill-signout:hover { background: rgba(255, 107, 122, 0.22); }
 
 /* Status dot — green for signed-in, amber for demo-mode. */
 .auth-pill-dot {
@@ -1894,8 +1964,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   flex-shrink: 0;
   display: inline-block;
 }
-.auth-pill-dot-ok   { background: #3fb68b; box-shadow: 0 0 6px rgba(63, 182, 139, 0.6); }
-.auth-pill-dot-demo { background: #f5b945; box-shadow: 0 0 6px rgba(245, 185, 69, 0.55); }
+.auth-pill-dot-ok   { background: var(--success); box-shadow: 0 0 6px rgba(95, 208, 154, 0.6); }
+.auth-pill-dot-demo { background: var(--warn); box-shadow: 0 0 6px rgba(232, 181, 74, 0.55); }
 
 /* Generic action button — variants below pick the colour. */
 .auth-pill-action {
@@ -1907,17 +1977,17 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   font-family: inherit;
 }
 .auth-pill-action-signout {
-  background: rgba(248, 113, 113, 0.12);
-  border: 1px solid rgba(248, 113, 113, 0.4);
+  background: rgba(255, 107, 122, 0.12);
+  border: 1px solid rgba(255, 107, 122, 0.4);
   color: var(--danger);
 }
-.auth-pill-action-signout:hover { background: rgba(248, 113, 113, 0.22); }
+.auth-pill-action-signout:hover { background: rgba(255, 107, 122, 0.22); }
 .auth-pill-action-signin {
-  background: rgba(63, 182, 139, 0.14);
-  border: 1px solid rgba(63, 182, 139, 0.45);
+  background: rgba(79, 179, 196, 0.14);
+  border: 1px solid rgba(79, 179, 196, 0.45);
   color: var(--accent);
 }
-.auth-pill-action-signin:hover { background: rgba(63, 182, 139, 0.26); }
+.auth-pill-action-signin:hover { background: rgba(79, 179, 196, 0.26); }
 
 /* Floating chip shown when a clinician has opted into "View as patient"
    mode, so they can flip back without retyping the URL. Pinned bottom-left
@@ -1927,8 +1997,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   left: 18px;
   bottom: 18px;
   z-index: 8500;
-  background: rgba(74, 144, 226, 0.14);
-  border: 1px solid rgba(74, 144, 226, 0.5);
+  background: rgba(122, 158, 255, 0.14);
+  border: 1px solid rgba(122, 158, 255, 0.5);
   color: #b6d2f7;
   border-radius: 999px;
   padding: 7px 14px;
@@ -1938,7 +2008,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   font-family: inherit;
   box-shadow: var(--shadow);
 }
-.back-to-dash-chip:hover { background: rgba(74, 144, 226, 0.26); color: #fff; }
+.back-to-dash-chip:hover { background: rgba(122, 158, 255, 0.26); color: #fff; }
 
 /* "Set password" mini-button on the signed-in pill. */
 .auth-pill-setpw {
@@ -2021,7 +2091,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .setpw-cancel:hover { color: var(--text); }
 .setpw-save {
   background: var(--accent);
-  color: #0d1117;
+  color: var(--bg);
 }
 .setpw-save:hover:not(:disabled) { filter: brightness(1.08); }
 .setpw-save:disabled { opacity: 0.6; cursor: not-allowed; }
@@ -2031,8 +2101,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   border-radius: 6px;
   background: var(--surface2);
 }
-.setpw-status-ok  { color: var(--accent); border: 1px solid rgba(63, 182, 139, 0.3); }
-.setpw-status-err { color: var(--danger); border: 1px solid rgba(248, 113, 113, 0.3); }
+.setpw-status-ok  { color: var(--success); border: 1px solid rgba(95, 208, 154, 0.3); background: var(--success-bg); }
+.setpw-status-err { color: var(--danger); border: 1px solid rgba(255, 107, 122, 0.3); background: var(--danger-bg); }
 
 /* ── Structured intake modal ────────────────────────────────────────────── */
 
@@ -2112,7 +2182,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .intake-bubble-user {
   align-self: flex-end;
   background: var(--accent);
-  color: #0d1117;
+  color: var(--bg);
 }
 .intake-form {
   display: flex;
@@ -2134,7 +2204,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 .intake-form button {
   background: var(--accent);
-  color: #0d1117;
+  color: var(--bg);
   border: none;
   border-radius: 6px;
   padding: 10px 16px;
@@ -2225,7 +2295,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .plan-gen-actions { display: flex; justify-content: flex-end; }
 .plan-gen-continue {
   background: var(--accent);
-  color: #0d1117;
+  color: var(--bg);
   border: none;
   border-radius: 6px;
   padding: 10px 18px;
@@ -2268,7 +2338,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 .browse-all-tab.active {
   background: var(--accent);
-  color: #0d1117;
+  color: var(--bg);
   border-color: var(--accent);
 }
 .browse-all-filters {
@@ -2679,12 +2749,12 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 
 .review-pill.review-pill-rejected .review-pill-btn {
-  border-color: rgba(248, 113, 113, 0.55);
+  border-color: rgba(255, 107, 122, 0.55);
   color: #f8a3a3;
 }
 .review-pill-rejected-dot {
   background: #f87171;
-  box-shadow: 0 0 8px rgba(248, 113, 113, 0.6);
+  box-shadow: 0 0 8px rgba(255, 107, 122, 0.6);
   animation: review-pill-rejected-pulse 1.4s ease-in-out infinite;
 }
 @keyframes review-pill-rejected-pulse {
@@ -2884,16 +2954,16 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .auto-checkin-dot.tone-good   { border-color: var(--accent); color: var(--accent); }
 .auto-checkin-dot.tone-warn   { border-color: var(--warn);   color: var(--warn); }
 .auto-checkin-dot.tone-danger { border-color: var(--danger); color: var(--danger); }
-.auto-checkin-dot.selected.tone-good   { background: var(--accent); color: #0d1117; }
-.auto-checkin-dot.selected.tone-warn   { background: var(--warn);   color: #0d1117; }
-.auto-checkin-dot.selected.tone-danger { background: var(--danger); color: #0d1117; }
+.auto-checkin-dot.selected.tone-good   { background: var(--accent); color: var(--bg); }
+.auto-checkin-dot.selected.tone-warn   { background: var(--warn);   color: var(--bg); }
+.auto-checkin-dot.selected.tone-danger { background: var(--danger); color: var(--bg); }
 .auto-checkin-dot.selected {
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
 }
 
 .auto-checkin-notes-input {
   width: 100%;
-  background: #0d1117;
+  background: var(--bg);
   border: 1px solid var(--border);
   color: var(--text);
   padding: 10px 12px;
@@ -2912,7 +2982,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 .auto-checkin-submit {
   background: var(--accent);
-  color: #0d1117;
+  color: var(--bg);
   border: 1px solid var(--accent);
   padding: 10px 16px;
   border-radius: 8px;
@@ -2935,7 +3005,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   font-size: 13px;
 }
 .auto-checkin-status.error {
-  background: rgba(248, 113, 113, 0.08);
+  background: rgba(255, 107, 122, 0.08);
   border: 1px solid var(--danger);
   color: var(--danger);
 }
@@ -3003,7 +3073,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .todays-session-cta-btn {
   align-self: flex-start;
   background: var(--accent);
-  color: #0d1117;
+  color: var(--bg);
   border: none;
   border-radius: 8px;
   padding: 10px 16px;
@@ -3024,7 +3094,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .todays-session-sidebar-btn {
   width: 100%;
   background: var(--accent);
-  color: #0d1117;
+  color: var(--bg);
   border: none;
   border-radius: 8px;
   padding: 10px 12px;
@@ -3104,7 +3174,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .picker-row.done .picker-row-check {
   border-color: var(--accent);
   background: var(--accent);
-  color: #0d1117;
+  color: var(--bg);
 }
 .picker-row-name { flex: 1; font-weight: 500; }
 .picker-row-dose {
@@ -3136,7 +3206,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 .picker-action.primary {
   background: var(--accent);
-  color: #0d1117;
+  color: var(--bg);
   border-color: var(--accent);
   font-weight: 600;
 }

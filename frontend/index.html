@@ -85,13 +85,23 @@
           <div class="video-container" id="videoContainer">
             <div class="pre-session" id="preSession">
               <div class="avatar-placeholder">
-                <p class="avatar-name">Coach Maya</p>
-                <p class="avatar-subtitle">Post-op rehab specialist</p>
+                <p class="avatar-name">Video session with Coach Maya</p>
+                <p class="avatar-subtitle">
+                  Talk live with the AI coach. Maya knows your current plan,
+                  recent sessions, and any flagged symptoms. Sessions are
+                  saved to your record.
+                </p>
               </div>
-              <button class="start-btn" id="startBtn" onclick="startSession()">
-                Start Video Session
-              </button>
-              <p class="video-hint">
+              <div class="video-actions">
+                <button class="start-btn" id="startBtn" onclick="startNewTavusSession()">
+                  Start a new session
+                </button>
+                <button class="start-btn secondary" id="continueBtn"
+                        style="display:none" onclick="continueTavusSession()">
+                  Continue last session
+                </button>
+              </div>
+              <p class="video-hint" id="videoHint">
                 Video is the visceral surface. The chat tab is where actions happen.
               </p>
             </div>
@@ -99,13 +109,17 @@
               <div class="spinner"></div>
               <p>Coach Maya is preparing your session...</p>
             </div>
-            <iframe
-              id="tavusFrame"
-              class="tavus-frame"
-              style="display:none"
-              allow="camera; microphone; autoplay"
-              allowfullscreen
-            ></iframe>
+            <div class="active-session" id="activeSession" style="display:none">
+              <iframe
+                id="tavusFrame"
+                class="tavus-frame"
+                allow="camera; microphone; autoplay"
+                allowfullscreen
+              ></iframe>
+              <button class="end-btn" id="endBtn" onclick="endTavusSession()">
+                End session
+              </button>
+            </div>
           </div>
         </div>
 

@@ -45,7 +45,7 @@ load_dotenv()
 from health_mock import get_health_data, ingest_shortcut_payload
 from calendar_fetch import get_calendar_events
 from context_builder import build_system_prompt
-from tavus_client import create_conversation
+from tavus_client import create_conversation, TavusAPIError, TavusConfigError
 from protocol_loader import (
     fetch_protocol,
     fetch_protocol_for_user,
@@ -88,7 +88,13 @@ if FRONTEND_DIR.exists():
 
 
 class StartSessionRequest(BaseModel):
-    user_name: str = "there"
+    """Body for POST /start-session.
+
+    The patient's display name is now resolved server-side from the JWT subject
+    via user_store.get_display_name(user_id), so `user_name` is no longer
+    accepted from clients. Kept as an empty model for forward-compat — the
+    endpoint requires no body but FastAPI's Pydantic-default still accepts {}.
+    """
 
 
 class HealthSyncPayload(BaseModel):
@@ -218,40 +224,174 @@ def calendar():
 
 
 @app.post("/start-session")
-def start_session(req: StartSessionRequest = StartSessionRequest()):
+def start_session(
+    req: StartSessionRequest = StartSessionRequest(),
+    user_id: str = Depends(current_user_id),
+):
+    """Create a Tavus CVI conversation for the authenticated patient.
+
+    Pipeline (PR-P hardened):
+      1. Resolve patient identity from the JWT (`current_user_id`); user_name
+         is read server-side from user_store.get_display_name. The body's
+         `user_name` field is ignored — the only source of truth is the JWT.
+      2. Fetch health + calendar + the patient's per-user protocol so the
+         conversational context references their actual phase/week/exercises.
+      3. Call tavus_client.create_conversation. Missing keys -> 503;
+         upstream HTTP failure -> 502. No silent mock fallback.
+      4. Persist a tavus_sessions row (status='active', expires_at set from
+         the Tavus max_call_duration). Frontend uses this to surface
+         "Continue last" and to call POST /tavus/sessions/{id}/end on
+         teardown. Persistence failures log + still return the conversation
+         URL — the patient should not lose the call because the audit row
+         hiccupped.
+      5. Return conversation_url + conversation_id + tavus_session_id +
+         recommendations + health summary.
+
+    PHI hygiene: log token + conversation_id + status. Never log greeting
+    text, system prompt, or replica/persona IDs at INFO. The greeting is
+    safe to return in the response body (the patient already typed the
+    inputs that produced it).
     """
-    Full pipeline:
-    1. Fetch health + calendar data
-    2. Build Claude-generated system prompt + greeting
-    3. Create Tavus CVI session
-    4. Return conversation URL + recommendations
-    """
+    ensure_user(user_id)
+
     try:
         health = get_health_data()
         events = get_calendar_events()
-        context = build_system_prompt(health, events)
+        protocol_payload = fetch_protocol_for_user(user_id) or fetch_protocol()
+        context = build_system_prompt(health, events, protocol=protocol_payload)
+    except Exception as exc:
+        logger.exception("start_session context_build_failed token=%s", user_id)
+        raise HTTPException(status_code=500, detail=f"context build failed: {exc}")
 
+    try:
         conversation = create_conversation(
             system_prompt=context["system_prompt"],
             greeting=context["greeting"],
-            user_name=req.user_name
+            user_name=user_store.get_display_name(user_id) or "there",
+        )
+    except TavusConfigError as exc:
+        # Missing env vars - feature is not provisioned. Surface a 503 so the
+        # frontend renders a "temporarily unavailable" toast instead of a
+        # broken iframe with a mock URL.
+        logger.warning("start_session config_error token=%s reason=%s", user_id, exc)
+        raise HTTPException(
+            status_code=503,
+            detail="Video call temporarily unavailable.",
+        )
+    except TavusAPIError as exc:
+        logger.warning("start_session tavus_api_error token=%s reason=%s", user_id, exc)
+        raise HTTPException(
+            status_code=502,
+            detail="Video call provider error. Please try again shortly.",
         )
 
-        return {
-            "conversation_url": conversation["conversation_url"],
-            "conversation_id": conversation["conversation_id"],
-            "status": conversation["status"],
-            "greeting": context["greeting"],
-            "recommendations": context["recommendations"],
-            "health_summary": {
-                "sleep_score": health["sleep_score"],
-                "hrv_ms": health["hrv_ms"],
-                "recovery_score": health["recovery_score"],
-            },
-            "event_count": len(events)
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # Persist the session row so the patient can continue / end it later and
+    # the clinician can see history. Failures here log but don't fail the
+    # response - the call URL is the load-bearing path; the audit row is the
+    # UX/dashboard surface and a write hiccup shouldn't lose the call.
+    tavus_session_id: str | None = None
+    try:
+        import tavus_repo
+        row = tavus_repo.insert_active(
+            token=user_id,
+            conversation_id=conversation["conversation_id"],
+            conversation_url=conversation["conversation_url"],
+            replica_id=conversation.get("replica_id"),
+            persona_id=conversation.get("persona_id"),
+            expires_at=conversation.get("expires_at"),
+        )
+        tavus_session_id = row["id"]
+        logger.info(
+            "start_session ok token=%s tavus_session_id=%s conversation_id=%s status=%s",
+            user_id, tavus_session_id,
+            conversation["conversation_id"], conversation["status"],
+        )
+    except Exception as exc:
+        logger.warning(
+            "start_session persistence_failed token=%s conversation_id=%s reason=%s",
+            user_id, conversation["conversation_id"], exc,
+        )
+
+    return {
+        "conversation_url": conversation["conversation_url"],
+        "conversation_id": conversation["conversation_id"],
+        "tavus_session_id": tavus_session_id,
+        "status": conversation["status"],
+        "expires_at": conversation.get("expires_at"),
+        "greeting": context["greeting"],
+        "recommendations": context["recommendations"],
+        "health_summary": {
+            "sleep_score": health["sleep_score"],
+            "hrv_ms": health["hrv_ms"],
+            "recovery_score": health["recovery_score"],
+        },
+        "event_count": len(events),
+    }
+
+
+@app.get("/tavus/sessions/recent")
+def list_recent_tavus_sessions(
+    limit: int = Query(5, ge=1, le=20),
+    user_id: str = Depends(current_user_id),
+):
+    """Return the patient's most-recent Tavus sessions, newest-first.
+
+    Used by the frontend Video Call tab to surface a "Continue last session"
+    affordance when the most-recent row is still active and not expired.
+    Capped at 5 by default; max 20.
+    """
+    ensure_user(user_id)
+    import tavus_repo
+    try:
+        rows = tavus_repo.list_recent(user_id, limit=limit)
+    except tavus_repo.TavusRepoError as exc:
+        # DATABASE_URL missing / psycopg unavailable. Treat as soft empty so
+        # the Video Call tab still renders the "Start new session" path
+        # without breaking other patient screens.
+        logger.warning("list_recent_tavus_sessions repo_unavailable: %s", exc)
+        return {"sessions": []}
+    enriched = [{**r, "is_active": tavus_repo.is_active(r)} for r in rows]
+    return {"sessions": enriched}
+
+
+@app.post("/tavus/sessions/{session_id}/end")
+def end_tavus_session(
+    session_id: str,
+    user_id: str = Depends(current_user_id),
+):
+    """Patient-initiated end of a Tavus session.
+
+    Marks the row status='ended' and ended_at=NOW() (idempotent on repeats).
+    Best-effort calls Tavus's DELETE /conversations/{id} to free the slot
+    upstream; the row is flipped regardless of the upstream call's outcome.
+
+    Returns the updated row. 404 when the row doesn't exist or doesn't
+    belong to this patient (RLS-equivalent check at the SQL layer).
+    """
+    import tavus_repo
+    try:
+        row = tavus_repo.end_session(session_id=session_id, token=user_id)
+    except tavus_repo.TavusRepoError as exc:
+        msg = str(exc)
+        if "not found" in msg:
+            raise HTTPException(status_code=404, detail="tavus session not found")
+        logger.exception("end_tavus_session repo_failed token=%s", user_id)
+        raise HTTPException(status_code=500, detail=msg)
+
+    # Best-effort upstream end. Don't gate the response on this; the patient
+    # is done with the call and the row has already moved to ended.
+    try:
+        from tavus_client import end_conversation
+        end_conversation(row.get("conversation_id") or "")
+    except Exception as exc:
+        logger.info("end_tavus_session upstream_end_failed conversation_id=%s reason=%s",
+                    row.get("conversation_id"), exc)
+
+    logger.info(
+        "end_tavus_session ok token=%s tavus_session_id=%s status=%s",
+        user_id, row["id"], row["status"],
+    )
+    return row
 
 
 @app.get("/context")
