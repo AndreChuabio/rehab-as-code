@@ -32,6 +32,22 @@
       <div class="clinician-queue-empty" id="queueEmpty" hidden>
         Nothing to review.
       </div>
+
+      <!-- Adherence risk cohort. Heuristic-based today (rules over missed
+           sessions, completion rate, pain trend, checkin silence). When
+           the trained model ships the response carries layer="xgb"; the
+           UI reads the same fields either way. -->
+      <details class="clinician-risk" id="riskCohortPanel">
+        <summary class="clinician-risk-summary">
+          <span class="clinician-risk-label">At-risk patients</span>
+          <span class="clinician-risk-count" id="riskCount">—</span>
+          <button type="button" class="clinician-refresh" id="riskRefresh">↻</button>
+        </summary>
+        <ol class="clinician-risk-list" id="riskList"></ol>
+        <div class="clinician-risk-empty" id="riskEmpty" hidden>
+          No active patients in the last 21 days.
+        </div>
+      </details>
     </aside>
 
     <section class="clinician-detail" id="clinicianDetail">

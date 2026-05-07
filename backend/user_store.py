@@ -23,7 +23,7 @@ import logging
 import os
 import sqlite3
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any
@@ -856,6 +856,46 @@ def _pg_get_session_history(token: str, limit: int = 10) -> list[dict]:
     return [r["payload"] for r in reversed(rows)]
 
 
+def _pg_list_active_tokens(days: int, limit: int) -> list[str]:
+    """Return tokens for users active in the last `days` days, capped at `limit`.
+
+    "Active" = `users.last_active >= NOW() - INTERVAL`. last_active is
+    touched on every authenticated mutation (load_user, save_health,
+    save_checkin, etc.) so it's a reasonable proxy for "currently
+    engaged with the product."
+
+    Service-role read across all patients - ml/adherence runs server-side
+    so we want the full active cohort, not just the caller's own row.
+    """
+    with _pg_conn() as c, c.cursor() as cur:
+        cur.execute(
+            "SELECT token FROM users WHERE last_active >= NOW() - "
+            "(%s || ' days')::INTERVAL ORDER BY last_active DESC LIMIT %s",
+            (str(days), limit),
+        )
+        return [r["token"] for r in cur.fetchall()]
+
+
+def _sql_list_active_tokens(days: int, limit: int) -> list[str]:
+    """Sqlite mirror. Tests run against this; the behavior must match the
+    Postgres version for a given dataset (within timestamp resolution)."""
+    cutoff = _now() - timedelta(days=days)
+    with _sql_conn() as c:
+        rows = c.execute(
+            "SELECT token FROM users WHERE last_active >= ? "
+            "ORDER BY last_active DESC LIMIT ?",
+            (cutoff.isoformat(), limit),
+        ).fetchall()
+    return [row[0] for row in rows]
+
+
+def _flat_list_active_tokens(days: int, limit: int) -> list[str]:
+    """Flatfile backend has no `last_active` index; return empty rather
+    than scanning every JSON file. Flatfile is dev-only and the adherence
+    cohort doesn't run there."""
+    return []
+
+
 def _pg_get_last_set_completion(
     token: str, exercise_id: str | None = None
 ) -> dict | None:
@@ -973,6 +1013,22 @@ def get_session_history(token: str, limit: int = 10) -> list[dict]:
     return _pick(
         _flat_get_session_history, _sql_get_session_history, _pg_get_session_history,
         token, limit,
+    )
+
+
+def list_active_tokens(days: int = 21, limit: int = 500) -> list[str]:
+    """Return tokens for users with last_active within the last `days` days.
+
+    Hard-capped at `limit` (default 500) so the dashboard query stays
+    bounded as the patient base grows. The current target is ~50 patients;
+    when the cap matters we'll add cursor pagination.
+
+    The flatfile backend returns []; postgres + sqlite both honor the
+    `last_active` filter.
+    """
+    return _pick(
+        _flat_list_active_tokens, _sql_list_active_tokens, _pg_list_active_tokens,
+        days, limit,
     )
 
 
