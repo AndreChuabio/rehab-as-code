@@ -518,6 +518,11 @@ async function refreshPatientState({ openModalIfNeeded = true } = {}) {
 
   if (!openModalIfNeeded) return patientState;
 
+  // Clinician in "View as patient" preview mode: don't auto-open intake or
+  // plan-gen modals. They're just inspecting how the patient view looks
+  // and don't actually want to fill out intake against their own user_id.
+  if (sessionStorage.getItem("asPatient") === "1") return patientState;
+
   if (patientState.state === "needs_intake") {
     showIntakeModal();
   } else if (patientState.state === "needs_plan") {
