@@ -346,10 +346,20 @@
         if (s.pose_metrics?.rep_count != null) meta.push(`${s.pose_metrics.rep_count} reps`);
         if (s.pose_metrics?.worst_status) meta.push(s.pose_metrics.worst_status);
         const metaStr = meta.length ? ` (${meta.join(", ")})` : "";
-        return `<li class="session-item ${s.status}">
+        // PR-T2: dim + label rows whose body_region differs from the
+        // patient's currently-active protocol. is_current_region===false
+        // means the row is from a prior protocol; we don't drop it
+        // (adherence is history) but the dim makes it clear which
+        // sessions count toward the current plan.
+        const outOfRegionClass = s.is_current_region === false ? " out-of-region" : "";
+        const regionTag = s.is_current_region === false
+          ? `<span class="session-region-tag">prior region: ${escapeHtml(s.body_region || "unknown")}</span>`
+          : "";
+        return `<li class="session-item ${s.status}${outOfRegionClass}">
           <span class="session-status">${escapeHtml(s.status)}</span>
           <span class="session-ex">${escapeHtml(s.exercise_id)}</span>
           <span class="session-meta">${escapeHtml(metaStr)}</span>
+          ${regionTag}
         </li>`;
       }).join("");
       return `

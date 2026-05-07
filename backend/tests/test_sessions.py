@@ -244,3 +244,210 @@ def test_recent_sessions_patient_cannot_read_other_patient(
 def test_recent_sessions_rejects_unauthenticated(unauthed_client):
     resp = unauthed_client.get("/sessions/recent")
     assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# PR-T2: region enrichment on /sessions/today and /sessions/recent
+# ---------------------------------------------------------------------------
+#
+# Both endpoints enrich each row with body_region + is_current_region so
+# the frontends can dim sessions tied to a body region the patient isn't
+# currently rehabbing. We never drop rows — adherence-as-history. The
+# response also echoes active_body_region so the client can render the
+# context without re-fetching the protocol.
+
+
+def _stub_session_recent(monkeypatch, rows: list[dict[str, Any]]) -> None:
+    class _FakeSessionRepo:
+        class SessionRepoError(RuntimeError):
+            pass
+
+        @staticmethod
+        def list_recent(*, token, days=7):
+            # Return a fresh list each call — the endpoint mutates rows
+            # in place, and we don't want test-to-test bleed.
+            return [dict(r) for r in rows]
+
+    import sys
+    monkeypatch.setitem(sys.modules, "session_repo", _FakeSessionRepo)
+
+
+def _stub_session_today(monkeypatch, rows: list[dict[str, Any]]) -> None:
+    class _FakeSessionRepo:
+        class SessionRepoError(RuntimeError):
+            pass
+
+        @staticmethod
+        def list_today(*, token, tz_name=None):
+            return [dict(r) for r in rows]
+
+    import sys
+    monkeypatch.setitem(sys.modules, "session_repo", _FakeSessionRepo)
+
+
+def _stub_protocol_active(monkeypatch, payload: dict[str, Any] | None) -> None:
+    """payload is the protocol payload (or None for "no active protocol").
+    The repo wrapper mimics protocol_repo.get_active's shape: None or
+    {id, token, payload, ...}."""
+
+    class _FakeProtocolRepo:
+        @staticmethod
+        def get_active(token):
+            if payload is None:
+                return None
+            return {
+                "id": "active-id",
+                "token": token,
+                "payload": payload,
+                "status": "active",
+            }
+
+    import sys
+    monkeypatch.setitem(sys.modules, "protocol_repo", _FakeProtocolRepo)
+
+
+def _stub_body_region_lookup(monkeypatch, mapping: dict[str, str | None]) -> None:
+    """Force exercise_kb.body_region_for to honor the test's mapping
+    instead of the real knowledge/exercise-library.json. None values
+    simulate exercises missing from the kb."""
+    import exercise_kb
+
+    def _resolver(exercise_id):
+        if exercise_id is None:
+            return None
+        return mapping.get(exercise_id)
+
+    monkeypatch.setattr(exercise_kb, "body_region_for", _resolver)
+
+
+def test_today_enriches_with_body_region_and_is_current_region(
+    authed_client, fake_user_id, monkeypatch,
+):
+    """Patient on an ankle protocol; sessions table has a mix of ankle
+    and elbow rows. Both render — elbow is marked
+    is_current_region=False so the sidebar can dim it."""
+    _stub_session_today(monkeypatch, [
+        {"id": "s1", "exercise_id": "ankle_alphabet", "status": "planned"},
+        {"id": "s2", "exercise_id": "calf_raise", "status": "completed"},
+        {"id": "s3", "exercise_id": "tricep_extension", "status": "skipped"},
+    ])
+    _stub_protocol_active(monkeypatch, {"body_region": "ankle"})
+    _stub_body_region_lookup(monkeypatch, {
+        "ankle_alphabet": "ankle",
+        "calf_raise": "ankle",
+        "tricep_extension": "elbow",
+    })
+    monkeypatch.setattr("main.ensure_user", lambda t, slack_user_id=None: t)
+
+    resp = authed_client.get("/sessions/today", headers={"X-Timezone": "America/New_York"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["active_body_region"] == "ankle"
+    rows = {r["id"]: r for r in body["sessions"]}
+    assert len(rows) == 3, "no row dropping — adherence-as-history"
+    assert rows["s1"]["body_region"] == "ankle"
+    assert rows["s1"]["is_current_region"] is True
+    assert rows["s2"]["is_current_region"] is True
+    assert rows["s3"]["body_region"] == "elbow"
+    assert rows["s3"]["is_current_region"] is False
+
+
+def test_today_no_active_protocol_marks_all_rows_not_current(
+    authed_client, fake_user_id, monkeypatch,
+):
+    """No active protocol -> active_body_region is None and every row
+    is is_current_region=False (nothing is "current"). Rows still
+    return so the patient can see what they had been doing."""
+    _stub_session_today(monkeypatch, [
+        {"id": "s1", "exercise_id": "ankle_alphabet", "status": "planned"},
+    ])
+    _stub_protocol_active(monkeypatch, None)
+    _stub_body_region_lookup(monkeypatch, {"ankle_alphabet": "ankle"})
+    monkeypatch.setattr("main.ensure_user", lambda t, slack_user_id=None: t)
+
+    resp = authed_client.get("/sessions/today", headers={"X-Timezone": "UTC"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["active_body_region"] is None
+    assert body["sessions"][0]["is_current_region"] is False
+    assert body["sessions"][0]["body_region"] == "ankle"
+
+
+def test_today_unknown_exercise_marks_body_region_null(
+    authed_client, fake_user_id, monkeypatch,
+):
+    """Exercise not in the kb -> body_region: None, is_current_region:
+    False (an unknown region cannot match the active region)."""
+    _stub_session_today(monkeypatch, [
+        {"id": "s1", "exercise_id": "ankle_alphabet", "status": "planned"},
+        {"id": "s2", "exercise_id": "totally_unknown_id", "status": "completed"},
+    ])
+    _stub_protocol_active(monkeypatch, {"body_region": "ankle"})
+    _stub_body_region_lookup(monkeypatch, {
+        "ankle_alphabet": "ankle",
+        "totally_unknown_id": None,
+    })
+    monkeypatch.setattr("main.ensure_user", lambda t, slack_user_id=None: t)
+
+    resp = authed_client.get("/sessions/today", headers={"X-Timezone": "UTC"})
+    assert resp.status_code == 200, resp.text
+    rows = {r["id"]: r for r in resp.json()["sessions"]}
+    assert rows["s1"]["is_current_region"] is True
+    assert rows["s2"]["body_region"] is None
+    assert rows["s2"]["is_current_region"] is False
+
+
+def test_recent_enriches_with_body_region_and_is_current_region(
+    authed_clinician_client, fake_clinician_id, fake_user_id, monkeypatch,
+):
+    """Clinician fetching another patient's last 7 days. Mix of ankle
+    + elbow rows. All survive; elbow rows are flagged
+    is_current_region=False so the dashboard can dim them."""
+    _stub_session_recent(monkeypatch, [
+        {"id": "r1", "exercise_id": "ankle_alphabet", "status": "completed",
+         "created_at": "2026-05-05T10:00:00Z"},
+        {"id": "r2", "exercise_id": "tricep_extension", "status": "skipped",
+         "created_at": "2026-05-04T10:00:00Z"},
+    ])
+    _stub_protocol_active(monkeypatch, {"body_region": "ankle"})
+    _stub_body_region_lookup(monkeypatch, {
+        "ankle_alphabet": "ankle",
+        "tricep_extension": "elbow",
+    })
+    monkeypatch.setattr("main.is_clinician", lambda uid: uid == fake_clinician_id)
+
+    resp = authed_clinician_client.get(
+        f"/sessions/recent?days=7&token={fake_user_id}",
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["token"] == fake_user_id
+    assert body["active_body_region"] == "ankle"
+    rows = {r["id"]: r for r in body["sessions"]}
+    assert len(rows) == 2
+    assert rows["r1"]["is_current_region"] is True
+    assert rows["r2"]["is_current_region"] is False
+    assert rows["r2"]["body_region"] == "elbow"
+
+
+def test_recent_legacy_active_no_body_region_marks_rows_not_current(
+    authed_client, fake_user_id, monkeypatch,
+):
+    """Legacy active protocol without a body_region key (pre-injury-
+    anchoring rows). Defensive fallback: every row is_current_region=
+    False so we don't accidentally claim something as 'current' when we
+    don't actually know what the active region is."""
+    _stub_session_recent(monkeypatch, [
+        {"id": "r1", "exercise_id": "ankle_alphabet", "status": "completed"},
+    ])
+    # Active protocol exists but its payload has no body_region.
+    _stub_protocol_active(monkeypatch, {"week": 3, "phase": "subacute"})
+    _stub_body_region_lookup(monkeypatch, {"ankle_alphabet": "ankle"})
+
+    resp = authed_client.get("/sessions/recent?days=7")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["active_body_region"] is None
+    assert body["sessions"][0]["is_current_region"] is False
+    # body_region still resolved on the row itself even when active is unknown
+    assert body["sessions"][0]["body_region"] == "ankle"

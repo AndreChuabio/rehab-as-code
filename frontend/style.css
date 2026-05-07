@@ -2362,6 +2362,23 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   color: var(--muted);
 }
 
+/* PR-T2: visual demarcation for sessions whose body_region != the
+   patient's current active protocol. We dim the row and surface an
+   inline "prior: <region>" tag so the patient sees adherence-as-history
+   without confusing it with their current plan. Uses Clinical Twilight
+   tokens — never raw hex. */
+.today-session-item.out-of-region {
+  opacity: 0.55;
+  border-left: 2px solid var(--ai-bg);
+  padding-left: 8px;
+}
+.today-session-region-tag {
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+  margin-left: 6px;
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    PR-J: Guided exercise mode overlays.
    These layer on top of #poseStage (which already hosts the webcam video

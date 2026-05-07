@@ -1372,6 +1372,45 @@ def patch_session(
     return row
 
 
+def _enrich_sessions_with_region(
+    rows: list[dict[str, Any]],
+    token: str,
+) -> tuple[list[dict[str, Any]], str | None]:
+    """Add body_region + is_current_region to each session row.
+
+    PR-T2: when the active protocol's body_region differs from a session
+    row's exercise region, the row is "out of region" — usually a stale
+    session from before the patient's current injury. We enrich (don't
+    drop) so adherence-as-history stays intact; the frontend dims +
+    labels out-of-region rows visually.
+
+    Edge cases:
+      * No active protocol -> active_region is None, every row is
+        is_current_region=False (nothing is "current").
+      * Active payload missing body_region (legacy rows) -> active_region
+        is None, every row is is_current_region=False. Defensive.
+      * Exercise not in kb -> body_region is None, is_current_region is
+        False (an unknown region cannot match any region).
+
+    Returns (enriched_rows, active_body_region) so callers can echo the
+    region back to the client without re-fetching the protocol.
+    """
+    import protocol_repo
+    import exercise_kb
+
+    active = protocol_repo.get_active(token)
+    active_region = (active or {}).get("payload", {}).get("body_region") if active else None
+    for r in rows:
+        region = exercise_kb.body_region_for(r.get("exercise_id"))
+        r["body_region"] = region
+        r["is_current_region"] = (
+            active_region is not None
+            and region is not None
+            and region == active_region
+        )
+    return rows, active_region
+
+
 @app.get("/sessions/today")
 def list_today_sessions(
     x_timezone: str | None = Header(None, alias="X-Timezone"),
@@ -1382,6 +1421,11 @@ def list_today_sessions(
     The patient's local timezone arrives via the X-Timezone header (the
     frontend reads Intl.DateTimeFormat().resolvedOptions().timeZone). Falls
     back to UTC if the header is absent or unresolvable.
+
+    PR-T2: rows are enriched with body_region + is_current_region so the
+    sidebar can dim sessions tied to a body region the patient isn't
+    currently rehabbing (e.g., a wall_sit lingering from a prior knee
+    protocol while the patient is now on an ankle plan).
     """
     ensure_user(user_id)
     import session_repo as _sr
@@ -1390,7 +1434,8 @@ def list_today_sessions(
     except Exception as exc:
         logger.exception("list_today failed")
         raise HTTPException(status_code=500, detail=str(exc))
-    return {"sessions": rows}
+    rows, active_region = _enrich_sessions_with_region(rows, user_id)
+    return {"sessions": rows, "active_body_region": active_region}
 
 
 @app.get("/sessions/recent")
@@ -1404,6 +1449,11 @@ def list_recent_sessions(
     Patient self-fetch: omit `token` -> reads the caller's own sessions.
     Clinician fetch: pass `?token=<patient_uuid>` -> reads that patient's
     sessions (gated by is_clinician check; rejects with 403 otherwise).
+
+    PR-T2: rows are enriched with body_region + is_current_region so the
+    clinician's adherence panel can dim sessions tied to a body region the
+    patient isn't currently rehabbing. We never drop rows — adherence is
+    history.
     """
     target = user_id
     if token and token != user_id:
@@ -1417,7 +1467,13 @@ def list_recent_sessions(
     except Exception as exc:
         logger.exception("list_recent failed")
         raise HTTPException(status_code=500, detail=str(exc))
-    return {"sessions": rows, "token": target, "days": days}
+    rows, active_region = _enrich_sessions_with_region(rows, target)
+    return {
+        "sessions": rows,
+        "token": target,
+        "days": days,
+        "active_body_region": active_region,
+    }
 
 
 # -------------------------------------------------------------------------
