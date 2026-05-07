@@ -136,7 +136,7 @@ def _build_context_block(
 
     return f"""--- PATIENT REHAB CONTEXT ---
 
-Patient: {protocol.get('patient', 'Andre')}
+Patient: {protocol.get('patient', 'the patient')}
 Phase: {protocol.get('phase', 'post-op recovery')}
 Week: {protocol.get('week', 'n/a')}
 
@@ -214,7 +214,7 @@ def _greeting_prompt(health: dict, focus: list[dict], protocol: dict) -> str:
 Coach Maya is warm, precise, evidence-cited. She knows the patient's wearable data and current rehab protocol.
 
 Patient state:
-- Name: {protocol.get('patient', 'Andre')}
+- Name: {protocol.get('patient', 'the patient')}
 - Phase: {protocol.get('phase', 'post-op recovery')}, week {protocol.get('week', 'n/a')}
 - Sleep last night: {health['sleep_hours']}h (score {health['sleep_score']}/100)
 - HRV: {health['hrv_ms']}ms ({hrv_trend} 7-day average)

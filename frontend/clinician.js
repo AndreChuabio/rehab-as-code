@@ -191,6 +191,76 @@
 
     $("diffProposed").innerHTML = renderDiffPane(target.payload || {}, active && active.payload, "right");
     $("diffActive").innerHTML = renderDiffPane(active && active.payload, target.payload || {}, "left");
+
+    // Adherence panel: last 7 days of public.sessions for this patient.
+    // RLS allows clinicians read-across, but the FastAPI endpoint also
+    // gates by is_clinician() server-side.
+    loadRecentSessions(patient.token).catch((e) =>
+      console.warn("recent sessions load failed", e),
+    );
+  }
+
+  async function loadRecentSessions(patientToken) {
+    const host = $("detailSessions");
+    if (!host) return;
+    host.innerHTML = `<div class="clinician-sessions-empty">Loading...</div>`;
+    if (!patientToken) {
+      host.innerHTML = `<div class="clinician-sessions-empty">No patient token.</div>`;
+      return;
+    }
+    let data;
+    try {
+      const res = await authedFetch(
+        `${API_BASE}/sessions/recent?days=7&token=${encodeURIComponent(patientToken)}`,
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      data = await res.json();
+    } catch (e) {
+      host.innerHTML = `<div class="clinician-sessions-empty">Failed: ${escapeHtml(e.message)}</div>`;
+      return;
+    }
+    const sessions = data.sessions || [];
+    if (!sessions.length) {
+      host.innerHTML = `<div class="clinician-sessions-empty">No sessions in the last 7 days.</div>`;
+      return;
+    }
+    // Bucket by created_at (UTC date). Lightweight; the dashboard isn't
+    // the place to do timezone-precise day boundaries.
+    const byDay = new Map();
+    for (const s of sessions) {
+      const d = (s.created_at || "").slice(0, 10) || "unknown";
+      if (!byDay.has(d)) byDay.set(d, []);
+      byDay.get(d).push(s);
+    }
+    const days = Array.from(byDay.entries()).sort((a, b) => a[0].localeCompare(b[0]));
+    const rows = days.map(([day, list]) => {
+      const planned = list.filter((s) => s.status === "planned").length;
+      const inProg = list.filter((s) => s.status === "in_progress").length;
+      const completed = list.filter((s) => s.status === "completed").length;
+      const skipped = list.filter((s) => s.status === "skipped").length;
+      const items = list.map((s) => {
+        const meta = [];
+        if (s.pose_metrics?.rep_count != null) meta.push(`${s.pose_metrics.rep_count} reps`);
+        if (s.pose_metrics?.worst_status) meta.push(s.pose_metrics.worst_status);
+        const metaStr = meta.length ? ` (${meta.join(", ")})` : "";
+        return `<li class="session-item ${s.status}">
+          <span class="session-status">${escapeHtml(s.status)}</span>
+          <span class="session-ex">${escapeHtml(s.exercise_id)}</span>
+          <span class="session-meta">${escapeHtml(metaStr)}</span>
+        </li>`;
+      }).join("");
+      return `
+        <div class="session-day">
+          <div class="session-day-header">
+            <strong>${escapeHtml(day)}</strong>
+            <span class="session-day-counts">
+              ${completed} completed, ${planned} planned, ${inProg} in progress, ${skipped} skipped
+            </span>
+          </div>
+          <ul class="session-day-list">${items}</ul>
+        </div>`;
+    }).join("");
+    host.innerHTML = rows;
   }
 
   // Cheap line-by-line diff: serialize both payloads as pretty JSON, compare

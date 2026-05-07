@@ -182,14 +182,27 @@ TOOLS: list[dict[str, Any]] = [
 # ---------------------------------------------------------------------------
 
 
-def build_system_prompt(health: dict[str, Any], protocol: dict[str, Any]) -> str:
+def build_system_prompt(
+    health: dict[str, Any],
+    protocol: dict[str, Any],
+    display_name: str | None = None,
+) -> str:
+    """Build Maya's system prompt.
+
+    `display_name` is the patient's name resolved fresh from Supabase
+    (intake_records.payload.name -> auth.users metadata -> email local-part).
+    Pass None when no name is available - the prompt falls back to "the
+    patient" rather than inventing one. The caller MUST NOT pass a name
+    pulled from `protocol.patient`; that field drifts between account
+    runs and once leaked "Christian" into a chat for Andre.
+    """
     ids = ", ".join(exercise_kb.list_ids())
     current_exercises = ", ".join(
         ex.get("name", "") for ex in protocol.get("exercises", [])
     ) or "(none loaded)"
     week = protocol.get("week", "?")
     phase = protocol.get("phase", "rehab")
-    patient = protocol.get("patient", "the patient")
+    patient = (display_name or "").strip() or "the patient"
 
     recent_line = ""
     recent = protocol.get("_recent_set")
@@ -363,6 +376,7 @@ async def chat_stream(
     trigger_executor: TriggerExecutor,
     max_iters: int = 3,
     user_token: str | None = None,
+    display_name: str | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
     """
     Drive a tool-using OpenAI chat completion. Yields the event protocol
@@ -370,7 +384,9 @@ async def chat_stream(
     framing.
 
     `messages` should NOT include the system prompt - this function prepends
-    a freshly-built one.
+    a freshly-built one. `display_name` is sourced fresh from Supabase by
+    the caller (see backend/main.py:/chat); when None, Maya addresses the
+    patient anonymously rather than inventing or recycling a stale name.
     """
     try:
         client = _client()
@@ -379,7 +395,7 @@ async def chat_stream(
         yield {"type": "done"}
         return
 
-    system_prompt = build_system_prompt(health, protocol)
+    system_prompt = build_system_prompt(health, protocol, display_name=display_name)
     convo: list[dict[str, Any]] = [
         {"role": "system", "content": system_prompt},
         *messages,

@@ -326,3 +326,67 @@
   .clinician-queue { max-height: 240px; }
   .clinician-diff { grid-template-columns: 1fr; }
 }
+
+/* Last 7 days of sessions panel (PR-A) */
+.clinician-sessions {
+  margin: 14px 0;
+}
+.clinician-sessions > summary {
+  cursor: pointer;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.clinician-sessions-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.clinician-sessions-empty {
+  color: #6e6e73;
+  font-size: 13px;
+  padding: 8px 0;
+}
+.session-day {
+  border: 1px solid #2a2a2c;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.session-day-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 6px;
+}
+.session-day-counts {
+  font-size: 12px;
+  color: #8e8e93;
+}
+.session-day-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.session-item {
+  display: grid;
+  grid-template-columns: 100px 1fr auto;
+  gap: 8px;
+  font-size: 13px;
+  padding: 4px 0;
+}
+.session-item .session-status {
+  font-weight: 600;
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.4px;
+}
+.session-item.completed .session-status { color: #4ade80; }
+.session-item.in_progress .session-status { color: #facc15; }
+.session-item.planned .session-status { color: #93c5fd; }
+.session-item.skipped .session-status { color: #71717a; }
+.session-item .session-meta {
+  color: #8e8e93;
+  font-size: 12px;
+}

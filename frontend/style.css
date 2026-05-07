@@ -2164,3 +2164,58 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 .plan-gen-continue[hidden] { display: none; }
 .plan-gen-continue:hover { filter: brightness(1.08); }
+
+/* PR-A: "Coach Maya is on it" transient + browse-all UI */
+.coach-working {
+  font-style: italic;
+  opacity: 0.85;
+}
+.browse-all-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.browse-all-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.browse-all-tabs {
+  display: inline-flex;
+  gap: 6px;
+}
+.browse-all-tab {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+}
+.browse-all-tab.active {
+  background: var(--accent);
+  color: #0d1117;
+  border-color: var(--accent);
+}
+.browse-all-filters {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: #6e6e73;
+}
+.browse-all-filters select {
+  margin-left: 4px;
+  font-family: inherit;
+}
+
+.today-session-item.completed { opacity: 0.7; }
+.today-session-item.skipped { opacity: 0.45; text-decoration: line-through; }
+.today-session-status {
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+  margin-left: 4px;
+  color: #6e6e73;
+}
