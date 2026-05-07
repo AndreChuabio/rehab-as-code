@@ -128,7 +128,13 @@ function authedFetch(path, options = {}) {
 // /clinician. The patient/clinician views are completely separate pages so
 // nothing leaks across the role boundary in the DOM. This runs once per
 // auth event; non-clinicians silently stay on the patient page.
+//
+// Override: sessionStorage.asPatient='1' lets a clinician stay on the
+// patient view for testing — set by the "View as patient" button on the
+// clinician dashboard. Cleared on sign-out and on the "Back to dashboard"
+// chip click.
 async function maybeRedirectToClinician() {
+  if (sessionStorage.getItem("asPatient") === "1") return;
   try {
     const res = await authedFetch(`${API_BASE}/me/role`);
     if (!res.ok) return;
@@ -139,6 +145,35 @@ async function maybeRedirectToClinician() {
   } catch (e) {
     console.warn("role check failed", e);
   }
+}
+
+// Render a "Back to dashboard" chip in the auth pill area when a
+// clinician has chosen the "View as patient" override. Lets them flip
+// back without retyping URLs.
+async function maybeRenderBackToDashboard() {
+  if (sessionStorage.getItem("asPatient") !== "1") return;
+  try {
+    const res = await authedFetch(`${API_BASE}/me/role`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.role !== "clinician") {
+      sessionStorage.removeItem("asPatient");
+      return;
+    }
+  } catch (_) {
+    return;
+  }
+  if (document.getElementById("backToDashChip")) return;
+  const chip = document.createElement("button");
+  chip.id = "backToDashChip";
+  chip.type = "button";
+  chip.className = "back-to-dash-chip";
+  chip.textContent = "← Back to clinician dashboard";
+  chip.addEventListener("click", () => {
+    sessionStorage.removeItem("asPatient");
+    window.location.replace("/clinician");
+  });
+  document.body.appendChild(chip);
 }
 
 async function bootstrapAuth() {
@@ -220,6 +255,9 @@ async function bootstrapAuth() {
       // here. Best-effort — failure to look up role just leaves the
       // patient on / which is safe (clinician endpoints are 403-gated).
       maybeRedirectToClinician();
+      // If they're a clinician overriding into patient view, surface a
+      // "Back to dashboard" chip so they can flip back.
+      maybeRenderBackToDashboard();
       // Server-driven state machine: ask the backend whether this patient
       // needs intake / plan-gen / nothing, and route to the right modal.
       refreshPatientState().catch((e) => console.warn("state refresh failed", e));
@@ -349,14 +387,16 @@ async function bootstrapAuth() {
   if (action) {
     action.addEventListener("click", async () => {
       if (pillMode === "signed-in") {
-        // Hard sign-out: clear all storage so we don't keep stale session data,
-        // then reload so the page boots from a clean slate.
+        // Hard sign-out: clear all storage so we don't keep stale session
+        // data, then go to '/' (NOT reload) — reload preserves the URL hash
+        // which was opening the intake modal on the post-logout page.
         try { await window.RehabAuth.signOut(); } catch (_) {}
         try {
           localStorage.removeItem(AUTH_SKIP_KEY);
           localStorage.removeItem("supabaseJwt");
+          sessionStorage.removeItem("asPatient");
         } catch (_) {}
-        window.location.reload();
+        window.location.replace("/");
       } else if (pillMode === "demo") {
         // Escape demo mode — drop the skip flag and re-open the auth overlay
         // so the user can enter their email.
