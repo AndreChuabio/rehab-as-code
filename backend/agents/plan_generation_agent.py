@@ -50,7 +50,11 @@ import user_store  # noqa: E402
 
 from .evaluator import EvaluatorError, signal as evaluator_signal  # noqa: E402
 from .planner import PlannerError, compose as planner_compose  # noqa: E402
-from .researcher import ResearcherError, candidates as researcher_candidates  # noqa: E402
+from .researcher import (  # noqa: E402
+    ResearcherError,
+    candidates as researcher_candidates,
+    compute_library_match,
+)
 from .safety_reviewer import (  # noqa: E402
     SafetyReviewError,
     review as safety_review,
@@ -69,6 +73,77 @@ class PlanGenerationError(RuntimeError):
     Wraps the underlying sub-agent error. /patient/interact catches and
     translates into a 500 with a friendly toast detail.
     """
+
+
+def _coverage_concern(library_match: dict[str, Any]) -> dict[str, Any] | None:
+    """Translate a library_match marker into a clinician-visible concern, or None.
+
+    Two cases produce a concern:
+      * Out-of-scope region (knee + ankle are validated for autodraft today;
+        anything else surfaces a med-severity library_coverage concern and
+        gates the draft to needs_clinician_review).
+      * Within-scope but the patient's week has no exact library file
+        (closest_earlier / lowest_available). Low-severity informational
+        flag so the clinician sees what was actually cited.
+    """
+    if not library_match["in_scope"]:
+        return {
+            "category": "library_coverage",
+            "severity": "med",
+            "summary": (
+                f"Patient body_region={library_match['region']!r} is outside "
+                "the agent pipeline's currently-validated scope (knee + "
+                "ankle). Draft is provided for clinician review only."
+            ),
+            "library_match": library_match,
+        }
+    if library_match["status"] in ("closest_earlier", "lowest_available", "no_files", "no_dir"):
+        return {
+            "category": "library_coverage",
+            "severity": "low",
+            "summary": (
+                f"Library has no exact week-{library_match['requested_week']} "
+                f"match for region={library_match['region']!r}. Researcher "
+                f"used status={library_match['status']!r}, matched_week="
+                f"{library_match['matched_week']}."
+            ),
+            "library_match": library_match,
+        }
+    return None
+
+
+def _resolve_save_status(
+    safety_verdict: dict[str, Any],
+    library_match: dict[str, Any],
+) -> tuple[str, list[dict[str, Any]] | None]:
+    """Map (safety_verdict, library_match) to (save_status, safety_concerns).
+
+    Decision tree (first match wins):
+      * Safety high                     -> needs_clinician_review
+      * Library out-of-scope region     -> needs_clinician_review
+      * Safety med + retries exhausted  -> pending_review (with concerns)
+      * Otherwise                       -> pending_review (clean or
+                                          informational coverage concern only)
+
+    Within-scope library gaps surface as a low-severity concern but do NOT
+    gate to needs_clinician_review on their own - patients on knee + ankle
+    plans still get auto-drafted even when they're between library weeks.
+    """
+    coverage = _coverage_concern(library_match)
+    coverage_list: list[dict[str, Any]] = [coverage] if coverage else []
+    safety_list: list[dict[str, Any]] = list(safety_verdict.get("concerns") or [])
+
+    if safety_verdict["overall_severity"] == "high":
+        return "needs_clinician_review", safety_list + coverage_list
+
+    if not library_match["in_scope"]:
+        return "needs_clinician_review", safety_list + coverage_list
+
+    if safety_verdict["overall_severity"] == "med" and not safety_verdict["ok"]:
+        return "pending_review", safety_list + coverage_list
+
+    merged = safety_list + coverage_list
+    return "pending_review", merged or None
 
 
 def _resolve_phase_and_week(
@@ -145,10 +220,19 @@ class PlanGenerationAgent(PatientAgent):
 
         phase, week = _resolve_phase_and_week(intake, active_payload)
 
+        # Library coverage marker - computed BEFORE the LLM fanout because
+        # it's deterministic and we want to log / route on it regardless
+        # of whether the researcher LLM call later succeeds or fails.
+        library_match = compute_library_match(injury_type, week)
+
         started = time.monotonic()
         logger.info(
-            "plan_generation start token=%s phase=%s week=%s injury=%s",
+            "plan_generation start token=%s phase=%s week=%s injury=%s "
+            "library_match_status=%s library_match_in_scope=%s "
+            "library_match_matched_week=%s",
             token, phase, week, injury_type,
+            library_match["status"], library_match["in_scope"],
+            library_match["matched_week"],
         )
 
         # Fan out: researcher + trend analyst run in parallel. Both are
@@ -192,20 +276,15 @@ class PlanGenerationAgent(PatientAgent):
         except (PlannerError, SafetyReviewError) as exc:
             raise PlanGenerationError(str(exc)) from exc
 
-        # Determine save status from the verdict. Branching is here in
-        # the orchestrator, NOT in the LLM - that's the safety contract.
-        if safety_verdict["overall_severity"] == "high":
-            save_status = "needs_clinician_review"
-            safety_concerns = safety_verdict["concerns"]
-        elif safety_verdict["overall_severity"] == "med" and not safety_verdict["ok"]:
-            # Med after exhausting retries: save as pending_review with
-            # concerns attached so clinicians see what we flagged but
-            # the row sits in the normal queue.
-            save_status = "pending_review"
-            safety_concerns = safety_verdict["concerns"]
-        else:
-            save_status = "pending_review"
-            safety_concerns = None
+        # Determine save status from the safety verdict + library coverage.
+        # Branching is here in the orchestrator, NOT in the LLM - that's the
+        # safety contract. Out-of-scope regions (anything outside knee +
+        # ankle today) gate to needs_clinician_review even on a clean safety
+        # verdict; within-scope week-gaps surface as informational concerns
+        # but don't gate.
+        save_status, safety_concerns = _resolve_save_status(
+            safety_verdict, library_match,
+        )
 
         # Anchor patient name to the canonical Supabase value the same
         # way chat_protocol_drafter does. Belt + suspenders: even if the
@@ -214,6 +293,18 @@ class PlanGenerationAgent(PatientAgent):
         canonical_name = user_store.get_display_name(token)
         if canonical_name:
             draft = {**draft, "patient": canonical_name}
+
+        # Stash the library coverage marker on the draft itself so the
+        # clinician dashboard / audit log can show what was cited without
+        # joining against orchestrator logs. Underscored to mark this as
+        # in-payload metadata, not part of the protocol contract.
+        draft = {
+            **draft,
+            "_meta": {
+                **(draft.get("_meta") or {}),
+                "library_match": library_match,
+            },
+        }
 
         try:
             protocol_id = protocol_repo.save_pending(

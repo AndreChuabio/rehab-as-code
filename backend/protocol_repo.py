@@ -26,20 +26,23 @@ class ProtocolRepoError(RuntimeError):
 
 
 def _conn():
-    dsn = os.getenv("DATABASE_URL", "").strip()
-    if not dsn:
-        raise ProtocolRepoError(
-            "protocol_repo requires DATABASE_URL. "
-            "Set it to the Supabase Postgres connection string."
-        )
+    """Yield a pooled connection (autocommit=False; caller commits explicitly).
+
+    Routes through backend.db.get_conn. Tests monkeypatch this name (see
+    test_review_status.py) so the import stays local to keep the patch
+    surface narrow.
+    """
     try:
-        import psycopg
-        from psycopg.rows import dict_row
+        from db import DbConfigError, get_conn
     except ImportError as exc:
         raise ProtocolRepoError(
-            "protocol_repo requires psycopg. Run: pip install 'psycopg[binary]>=3.2'"
+            "protocol_repo requires backend.db. "
+            "Run: pip install 'psycopg[binary]>=3.2' 'psycopg-pool>=3.2'"
         ) from exc
-    return psycopg.connect(dsn, row_factory=dict_row, autocommit=False)
+    try:
+        return get_conn(autocommit=False)
+    except DbConfigError as exc:
+        raise ProtocolRepoError(str(exc)) from exc
 
 
 def _normalize_payload(value: Any) -> dict:

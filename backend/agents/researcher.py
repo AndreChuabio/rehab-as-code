@@ -36,6 +36,14 @@ logger = logging.getLogger(__name__)
 _DEFAULT_MODEL = "claude-sonnet-4-6"
 _LIBRARY_ROOT = Path(__file__).resolve().parent.parent.parent / "protocols" / "protocol-library"
 
+# Regions the agent pipeline is currently trusted to autodraft for. Files
+# exist for every region in protocols/protocol-library/, but only knee +
+# ankle have been validated against the planner / safety reviewer at the
+# scope Andre + Nikki signed off on (2026-05-07). Drafts for other regions
+# still get generated, but they're routed to needs_clinician_review so a
+# human reads them before activation.
+IN_SCOPE_REGIONS: frozenset[str] = frozenset({"knee", "ankle"})
+
 
 class ResearcherError(RuntimeError):
     """Raised when the researcher cannot produce candidates."""
@@ -174,6 +182,117 @@ def _load_library_files(injury_dir: Path, week: int) -> list[dict[str, Any]]:
     # entry so it can extrapolate from acute-phase prescriptions.
     candidates.sort(key=_file_week)
     return [_read_file(candidates[0])]
+
+
+def compute_library_match(
+    injury_type: str | None,
+    week: int,
+    *,
+    body_region: str | None = None,
+) -> dict[str, Any]:
+    """Resolve which protocol-library file the researcher would use, deterministically.
+
+    Pure function: no Anthropic, no DB, no I/O beyond reading the library
+    directory. Used by the orchestrator to:
+
+      * route out-of-scope-region drafts to needs_clinician_review,
+      * attach a synthetic safety_concern explaining a week-gap to the
+        clinician, and
+      * log KB drift in metrics so we can see when patients are landing
+        on closest_earlier / lowest_available paths often.
+
+    Returned dict shape:
+      status         : str  - one of "exact", "closest_earlier",
+                              "lowest_available", "no_files", "no_dir"
+      requested_week : int
+      matched_week   : int | None  (None for no_files / no_dir)
+      region         : str | None  - body_region resolved from injury_type
+                                    via clinical_taxonomy
+      in_scope       : bool         - True iff region in IN_SCOPE_REGIONS
+      injury_dir     : str | None   - relative path of the resolved
+                                      library subdir (None when not found)
+    """
+    region = body_region
+    if region is None:
+        try:
+            sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+            import clinical_taxonomy as _ct
+            region = _ct.body_region(injury_type)
+        except Exception:
+            region = None
+
+    in_scope = region in IN_SCOPE_REGIONS
+
+    injury_dir = _injury_dir(injury_type)
+    if injury_dir is None:
+        return {
+            "status": "no_dir",
+            "requested_week": week,
+            "matched_week": None,
+            "region": region,
+            "in_scope": in_scope,
+            "injury_dir": None,
+        }
+
+    candidates = sorted(p for p in injury_dir.glob("*.yaml") if p.is_file())
+    rel_dir = str(injury_dir.relative_to(_LIBRARY_ROOT.parent.parent))
+    if not candidates:
+        return {
+            "status": "no_files",
+            "requested_week": week,
+            "matched_week": None,
+            "region": region,
+            "in_scope": in_scope,
+            "injury_dir": rel_dir,
+        }
+
+    def _wk(path: Path) -> int:
+        parts = path.stem.split("-week-")
+        if len(parts) != 2:
+            return 0
+        try:
+            return int(parts[1])
+        except ValueError:
+            return 0
+
+    weeks_present = sorted({_wk(p) for p in candidates if _wk(p) > 0})
+    if not weeks_present:
+        return {
+            "status": "no_files",
+            "requested_week": week,
+            "matched_week": None,
+            "region": region,
+            "in_scope": in_scope,
+            "injury_dir": rel_dir,
+        }
+
+    if week in weeks_present:
+        return {
+            "status": "exact",
+            "requested_week": week,
+            "matched_week": week,
+            "region": region,
+            "in_scope": in_scope,
+            "injury_dir": rel_dir,
+        }
+    earlier = [w for w in weeks_present if w < week]
+    if earlier:
+        return {
+            "status": "closest_earlier",
+            "requested_week": week,
+            "matched_week": max(earlier),
+            "region": region,
+            "in_scope": in_scope,
+            "injury_dir": rel_dir,
+        }
+    return {
+        "status": "lowest_available",
+        "requested_week": week,
+        "matched_week": min(weeks_present),
+        "region": region,
+        "in_scope": in_scope,
+        "injury_dir": rel_dir,
+    }
 
 
 def _read_file(path: Path) -> dict[str, Any]:
