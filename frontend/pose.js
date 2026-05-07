@@ -37,8 +37,12 @@ const EDGES = [
   { a: 11, b: 23, ck: ["trunk_lean"] },                       // left torso
   { a: 12, b: 24, ck: ["trunk_lean"] },                       // right torso
   { a: 23, b: 24, ck: ["hip_drop", "hip_symmetry"] },         // hip line
-  { a: 11, b: 13, ck: [] }, { a: 13, b: 15, ck: [] },         // left arm
-  { a: 12, b: 14, ck: [] }, { a: 14, b: 16, ck: [] },         // right arm
+  // Left arm. shoulder→elbow colored by L shoulder abduction; elbow→wrist by L elbow angle.
+  { a: 11, b: 13, ck: ["L_shoulder_abduction"] },
+  { a: 13, b: 15, ck: ["L_elbow_angle"] },
+  // Right arm. Same pattern, R side.
+  { a: 12, b: 14, ck: ["R_shoulder_abduction"] },
+  { a: 14, b: 16, ck: ["R_elbow_angle"] },
   { a: 23, b: 25, ck: ["L_knee_valgus", "L_knee_depth"] },    // left thigh
   { a: 25, b: 27, ck: ["L_knee_valgus", "L_knee_depth"] },    // left shin
   { a: 24, b: 26, ck: ["R_knee_valgus", "R_knee_depth"] },    // right thigh
@@ -252,6 +256,109 @@ function checkHipSymmetry(lms) {
   return { ...out, id: "hip_symmetry", label: "hip sym" };
 }
 
+function checkShoulderAbduction(side, lms, target, mode) {
+  // Angle at the shoulder formed by hip-shoulder-elbow. Standing with arms
+  // at sides ≈ 0° abduction (hip-shoulder-elbow ≈ 0°, but our angleAt gives
+  // the interior angle so resting position ≈ 180°). Arms overhead ≈ 0°.
+  // We treat "max" mode like a squat depth metric: smaller angle = closer
+  // to overhead = closer to target.
+  const isL = side === "L";
+  const sh    = lms[isL ? L.LEFT_SHOULDER : L.RIGHT_SHOULDER];
+  const hip   = lms[isL ? L.LEFT_HIP      : L.RIGHT_HIP];
+  const elbow = lms[isL ? L.LEFT_ELBOW    : L.RIGHT_ELBOW];
+  if (!visibleEnough(sh, hip, elbow)) return null;
+  const a = angleAt(sh, hip, elbow);
+  if (a == null) return null;
+  // Reuse depthPercent: "max" mode treats hitting target (small angle) as good.
+  const pct = depthPercent(a, target, mode);
+  return {
+    id: `${side}_shoulder_abduction`,
+    label: `${side} shoulder`,
+    value: Math.round(a),
+    unit: "°",
+    target,
+    percent: pct,
+    status: statusFromPercent(pct, mode),
+    jointIdx: isL ? L.LEFT_SHOULDER : L.RIGHT_SHOULDER,
+  };
+}
+
+function checkElbowAngle(side, lms) {
+  // Angle at the elbow (shoulder-elbow-wrist). For wall slides we want this
+  // to stay in 60-120° range — too straight (>150°) means the patient lost
+  // wall contact; too bent (<45°) means they collapsed. Status reflects the
+  // window, not a target percentage.
+  const isL = side === "L";
+  const sh    = lms[isL ? L.LEFT_SHOULDER : L.RIGHT_SHOULDER];
+  const elbow = lms[isL ? L.LEFT_ELBOW    : L.RIGHT_ELBOW];
+  const wrist = lms[isL ? L.LEFT_WRIST    : L.RIGHT_WRIST];
+  if (!visibleEnough(sh, elbow, wrist)) return null;
+  const a = angleAt(elbow, sh, wrist);
+  if (a == null) return null;
+  let status = "good", msg;
+  if (a > 160)      { status = "warn"; msg = `${side === "L" ? "left" : "right"} elbow too straight`; }
+  else if (a < 45)  { status = "warn"; msg = `${side === "L" ? "left" : "right"} elbow over-bent`; }
+  return {
+    id: `${side}_elbow_angle`,
+    label: `${side} elbow`,
+    value: Math.round(a),
+    unit: "°",
+    status,
+    msg,
+    jointIdx: isL ? L.LEFT_ELBOW : L.RIGHT_ELBOW,
+  };
+}
+
+// Calf-raise body-rise tracker. Stateful across frames: holds a baseline
+// hip.y from the first ~1.5s and emits a "value" representing the current
+// rise as a percentage of expected travel. Reset on start() via
+// resetCalfRaiseTracker(). Rep counting for this lives in
+// CalfRaiseRepTracker (separate from the angle-based RepTracker because
+// the kinematic signal is hip-displacement, not joint-angle).
+const calfRaiseState = { baselineY: null, samples: [], peakRise: 0 };
+function resetCalfRaiseTracker() {
+  calfRaiseState.baselineY = null;
+  calfRaiseState.samples = [];
+  calfRaiseState.peakRise = 0;
+}
+function checkCalfRaiseRise(lms) {
+  const lh = lms[L.LEFT_HIP], rh = lms[L.RIGHT_HIP];
+  if (!visibleEnough(lh, rh)) return null;
+  const hipY = (lh.y + rh.y) / 2;
+  if (calfRaiseState.baselineY == null) {
+    calfRaiseState.samples.push(hipY);
+    if (calfRaiseState.samples.length >= 30) {
+      // Use median of samples so a momentary tip-toe at start doesn't
+      // pollute the baseline.
+      const sorted = [...calfRaiseState.samples].sort((a, b) => a - b);
+      calfRaiseState.baselineY = sorted[Math.floor(sorted.length / 2)];
+    }
+    return {
+      id: "calf_rise",
+      label: "rise",
+      value: 0,
+      unit: "%h",
+      status: "idle",
+      msg: "stand still to set baseline",
+    };
+  }
+  // Lower y = higher in frame. Rise = baseline - current (positive when up).
+  const riseFrac = calfRaiseState.baselineY - hipY;
+  // ~5% of frame height is a strong calf raise; ~2% is mild.
+  const pct = Math.max(0, Math.min(100, Math.round((riseFrac / 0.05) * 100)));
+  if (pct > calfRaiseState.peakRise) calfRaiseState.peakRise = pct;
+  let status = "idle";
+  if (pct >= 70) status = "good";
+  else if (pct >= 30) status = "warn";
+  return {
+    id: "calf_rise",
+    label: "calf rise",
+    value: pct,
+    unit: "%",
+    status,
+  };
+}
+
 function checkSway(lms) {
   // Simple instantaneous deviation from baseline (no windowing for spike).
   const lh = lms[L.LEFT_HIP], rh = lms[L.RIGHT_HIP];
@@ -273,21 +380,52 @@ function checkSway(lms) {
 // ---------------------------------------------------------------------------
 // Per-exercise check rosters. `primary` is the headline metric; `checks` is
 // the full pill list (alignment + depth, both knees, etc.).
+//
+// Coverage policy: each id here MUST also exist in knowledge/exercise-library.json
+// — otherwise the form-check button silently fails to render on the patient's
+// chat card. backend/tests/test_pose_coverage.py enforces this invariant on
+// every backend run.
 // ---------------------------------------------------------------------------
 
 const EXERCISES = {
-  mini_squats:             { primary: "L_knee_depth", target: 60,  mode: "max", checks: ["L_knee_depth", "R_knee_depth", "L_knee_valgus", "R_knee_valgus", "trunk_lean"] },
+  // ── Knee / quad-dominant (rep-tracked depth metrics) ────────────────
+  // Mini squat: shallow, 0-45° flexion → 180-135° knee angle. Target 135°.
+  mini_squat:              { primary: "L_knee_depth", target: 135, mode: "max", checks: ["L_knee_depth", "R_knee_depth", "L_knee_valgus", "R_knee_valgus", "trunk_lean"] },
   single_leg_squat:        { primary: "L_knee_depth", target: 75,  mode: "max", checks: ["L_knee_depth", "R_knee_depth", "L_knee_valgus", "R_knee_valgus", "trunk_lean"] },
   wall_sit:                { primary: "L_knee_depth", target: 90,  mode: "max", checks: ["L_knee_depth", "R_knee_depth", "L_knee_valgus", "R_knee_valgus", "trunk_lean"] },
   heel_slides:             { primary: "L_knee_depth", target: 100, mode: "max", checks: ["L_knee_depth", "R_knee_depth"] },
   stationary_bike:         { primary: "L_knee_depth", target: 90,  mode: "max", checks: ["L_knee_depth", "R_knee_depth"] },
   terminal_knee_extension: { primary: "L_knee_depth", target: 0,   mode: "min", checks: ["L_knee_depth", "R_knee_depth"] },
   quad_sets:               { primary: "L_knee_depth", target: 0,   mode: "min", checks: ["L_knee_depth", "R_knee_depth"] },
+
+  // ── Hip extension (glute / hamstring) ───────────────────────────────
   glute_bridge:            { primary: "L_hip_angle",  target: 170, mode: "max_extension", checks: ["L_hip_angle", "R_hip_angle", "hip_symmetry"] },
-  single_leg_balance:      { primary: "hip_drop",     target: null, mode: "sway", checks: ["hip_drop", "sway"] },
+
+  // ── Hamstring / posterior chain. Walking lunge: front-leg knee ~90°,
+  //    trunk upright. Same primitives as a squat but with the rep cycle
+  //    driven by the front knee. Both sides tracked because the patient
+  //    alternates legs across reps. ─────────────────────────────────────
+  ham_walking_lunge:       { primary: "L_knee_depth", target: 90,  mode: "max", checks: ["L_knee_depth", "R_knee_depth", "trunk_lean"] },
+
+  // ── Lower-back stability. Bird dog is a hold, not a rep. We don't try
+  //    to count reps — we just surface real-time alignment so the patient
+  //    sees if their hips drop / spine sags during the hold. ─────────────
+  lb_bird_dog:             { primary: "trunk_lean",   target: null, mode: "hold", checks: ["trunk_lean", "hip_symmetry", "hip_drop"] },
+
+  // ── Calf raises. BlazePose 2D ankle tracking is too noisy for direct
+  //    heel-rise angle, so the rep signal here is the body-vertical-rise
+  //    (hip.y delta) state machine in checkCalfRaiseRise. Trunk-lean
+  //    catches the patient cheating with a forward sway. ─────────────────
+  ankle_calf_raises_double_leg: { primary: "calf_rise", target: null, mode: "rise", checks: ["calf_rise", "trunk_lean"] },
+
+  // ── Shoulder. Wall slides — track shoulder abduction (shoulder-hip-elbow
+  //    angle, "max" mode toward overhead) and elbow flex/ext. Bilateral so
+  //    the patient sees if one side is leading. No rep counting; the slow
+  //    tempo + symmetric motion make the depth-cycle state machine unstable. ─
+  shoulder_wall_slides:    { primary: "L_shoulder_abduction", target: 160, mode: "max", checks: ["L_shoulder_abduction", "R_shoulder_abduction", "L_elbow_angle", "R_elbow_angle"] },
 };
 
-const DEFAULT_EX = EXERCISES.mini_squats;
+const DEFAULT_EX = EXERCISES.mini_squat;
 
 // ---------------------------------------------------------------------------
 // EMA smoothing + visibility timeout. Per-metric exponential moving average
@@ -487,6 +625,11 @@ function runChecks(lms, exId) {
     else if (ckId === "hip_drop")      m = checkHipDrop(lms);
     else if (ckId === "hip_symmetry")  m = checkHipSymmetry(lms);
     else if (ckId === "sway")          m = checkSway(lms);
+    else if (ckId === "L_shoulder_abduction") m = checkShoulderAbduction("L", lms, ex.target, ex.mode);
+    else if (ckId === "R_shoulder_abduction") m = checkShoulderAbduction("R", lms, ex.target, ex.mode);
+    else if (ckId === "L_elbow_angle") m = checkElbowAngle("L", lms);
+    else if (ckId === "R_elbow_angle") m = checkElbowAngle("R", lms);
+    else if (ckId === "calf_rise")     m = checkCalfRaiseRise(lms);
     if (m) out.push(m);
   }
   return { ex, metrics: out };
@@ -808,6 +951,7 @@ async function start(_videoEl, _canvasEl, exerciseId, onPayload, opts = {}) {
   lastVoiceTs       = 0;
 
   resetSmoothing();
+  resetCalfRaiseTracker();
   trackers       = [];
   partialSinceTs = null;
 

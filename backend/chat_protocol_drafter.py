@@ -30,6 +30,8 @@ import logging
 import os
 from typing import Any
 
+import clinical_taxonomy
+import exercise_kb
 import protocol_repo
 
 logger = logging.getLogger(__name__)
@@ -37,6 +39,14 @@ logger = logging.getLogger(__name__)
 
 class ProtocolDraftError(RuntimeError):
     """Raised when a draft protocol cannot be generated or persisted."""
+
+
+# When a draft proposes an exercise outside the patient's body_region the
+# orchestrator raises this with a clinician-readable detail. Surfaced as a
+# 502 toast on /chat. NEVER auto-substituted: the safety net is "fail loud
+# so a clinician sees it," not "swap the exercise behind their back."
+class CrossRegionExerciseError(ProtocolDraftError):
+    """A draft proposed an exercise targeting the wrong body region."""
 
 
 # Flow-specific instructions appended to the base system prompt. Keep these
@@ -64,20 +74,32 @@ _FLOW_INSTRUCTIONS: dict[str, str] = {
 
 _BASE_SYSTEM_PROMPT = """You are a rehabilitation protocol drafter.
 
-You will receive the patient's currently-active protocol (JSON) and a flow-
-specific instruction. Produce a NEW protocol revision as a JSON object that
-will be saved as `pending_review` and queued for clinician approval.
+You will receive the patient's intake (injury type, body region), their
+currently-active protocol (JSON, if any), and a flow-specific instruction.
+Produce a NEW protocol revision as a JSON object that will be saved as
+`pending_review` and queued for clinician approval.
 
 Hard requirements:
 1. Output a single tool call to `propose_protocol` with the new revision.
 2. Preserve the patient name; never invent a different patient.
-3. Each exercise MUST include `name`, `sets`, `reps`, and either `load` or a
+3. INJURY ANCHORING (load-bearing for clinical safety): Every exercise you
+   propose MUST target the patient's stated body_region. Do NOT propose
+   knee exercises for an ankle patient, or shoulder exercises for a low-back
+   patient, even if those exercises appear in the active protocol JSON or
+   the library you know about. If the active protocol contains exercises
+   that do NOT match the patient's body_region, treat that as a data error
+   and replace those exercises with region-appropriate ones from the same
+   phase.
+4. If you cannot find a region-appropriate exercise for the patient's phase,
+   refuse: emit a single exercise named `clinician_review_required` with
+   sets=0, reps=0 and a `summary` explaining why. Do NOT fabricate exercises.
+5. Each exercise MUST include `name`, `sets`, `reps`, and either `load` or a
    load-equivalent field. Include `progression_criteria` and
    `regression_criteria` strings when you can; omit when uncertain rather
    than fabricating.
-4. The `summary` field is a single sentence (<= 30 words) the chat UI shows
+6. The `summary` field is a single sentence (<= 30 words) the chat UI shows
    the patient. Speak like a clinician, not a chatbot.
-5. NEVER write protocol.yaml, open a PR, or call any tool other than
+7. NEVER write protocol.yaml, open a PR, or call any tool other than
    `propose_protocol`. The clinician dashboard is the only path to active.
 """
 
@@ -143,6 +165,8 @@ def _build_user_prompt(
     payload: dict[str, Any],
     prior_protocol: dict[str, Any] | None,
     canonical_patient_name: str | None = None,
+    intake: dict[str, Any] | None = None,
+    body_region: str | None = None,
 ) -> str:
     instruction = _FLOW_INSTRUCTIONS.get(flow, _FLOW_INSTRUCTIONS["checkin"])
     parts: list[str] = [instruction]
@@ -157,6 +181,30 @@ def _build_user_prompt(
             f"field - do NOT use any name that may appear inside the active "
             f'protocol JSON): "{canonical_patient_name}"'
         )
+
+    # INJURY ANCHORING. This is the load-bearing block for clinical safety.
+    # Both injury_type and body_region are pinned at the top of the user
+    # prompt so the model can't drift onto an unrelated region just because
+    # the active protocol JSON contains stale or wrong-region exercises.
+    if intake or body_region:
+        anchor_lines: list[str] = ["Patient injury anchoring (HARD constraint):"]
+        if intake and intake.get("injury_type"):
+            anchor_lines.append(f"  injury_type: {intake['injury_type']}")
+        if body_region:
+            anchor_lines.append(f"  body_region: {body_region}")
+        if intake and intake.get("symptoms"):
+            anchor_lines.append(
+                f"  reported_symptoms: {', '.join(intake.get('symptoms') or [])}"
+            )
+        anchor_lines.append(
+            "Every exercise you propose MUST target the body_region above. "
+            "If the active protocol's exercises target a different region, "
+            "REPLACE them with region-appropriate ones - do not preserve "
+            "wrong-region exercises just because they're in the prior "
+            "protocol. If you can't find a region-appropriate exercise, "
+            "emit `clinician_review_required` per system instructions."
+        )
+        parts.append("\n".join(anchor_lines))
 
     if prior_protocol:
         # Strip our internal _recent_set sentinel before sending to the model.
@@ -219,6 +267,71 @@ def _validate_proposal(proposal: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+# Sentinel name the drafter is instructed to emit when no region-appropriate
+# exercise exists. The validator treats this as a refusal, not a region
+# mismatch - clinicians see the empty draft + summary explaining why.
+_REFUSAL_EXERCISE_NAME = "clinician_review_required"
+
+
+def _validate_region(
+    payload: dict[str, Any],
+    expected_region: str | None,
+) -> None:
+    """Deterministic post-LLM safety net.
+
+    Walks every exercise in the draft and confirms its body_region (looked
+    up via exercise_kb) matches the patient's expected_region. Any mismatch
+    raises CrossRegionExerciseError, which becomes a 502 toast on /chat -
+    we never auto-substitute. The clinician (or the next drafter call) is
+    the recovery path.
+
+    expected_region == None means we couldn't resolve the patient's region
+    from intake at all; in that case we don't enforce - drafting is a
+    judgment call for the clinician. expected_region == "multi" means the
+    intake spans multiple regions and per-exercise enforcement would block
+    legitimate cross-region drafts.
+    """
+    if not expected_region or expected_region == "multi":
+        return
+
+    mismatches: list[dict[str, Any]] = []
+    for ex in payload.get("exercises") or []:
+        ex_id = ex.get("id") or ex.get("name") or ""
+        if ex_id == _REFUSAL_EXERCISE_NAME:
+            # Drafter explicitly refused; that's the safe path, not a bug.
+            continue
+        ex_region = exercise_kb.body_region_for(ex_id)
+        if ex_region is None:
+            # Unknown to the library - free-text custom exercise. Allow it
+            # through; the clinician sees + can reject it. The library is
+            # not exhaustive and refusing here would over-block.
+            continue
+        if ex_region == "multi":
+            continue
+        if ex_region != expected_region:
+            mismatches.append({
+                "exercise": ex_id,
+                "exercise_region": ex_region,
+                "patient_region": expected_region,
+            })
+
+    if mismatches:
+        # PHI-safe log: token / region / exercise id - no symptom text or
+        # patient name. The detail string is what surfaces in the toast.
+        logger.warning(
+            "drafter region mismatch: patient_region=%s n_mismatches=%d",
+            expected_region, len(mismatches),
+        )
+        raise CrossRegionExerciseError(
+            "Drafter proposed exercises outside the patient's body region "
+            f"({expected_region}). Mismatched: "
+            + ", ".join(
+                f"{m['exercise']} ({m['exercise_region']})"
+                for m in mismatches
+            )
+        )
+
+
 def draft_and_save_pending(
     token: str,
     flow: str,
@@ -277,8 +390,35 @@ def draft_and_save_pending(
         )
         canonical_name = None
 
+    # Load intake for injury anchoring. Drafter previously had ZERO knowledge
+    # of injury_type - the model was free to keep proposing whatever was in
+    # the active protocol JSON. Pull intake here and inject into the prompt
+    # plus the deterministic post-LLM validator.
+    intake: dict[str, Any] | None = None
+    try:
+        import user_store as _us  # re-import scoped; cheap.
+        intake = _us.get_intake(token)
+    except Exception as exc:
+        logger.warning(
+            "get_intake failed in drafter for token=%s flow=%s: %s",
+            token, flow, exc,
+        )
+
+    expected_region = clinical_taxonomy.resolve_body_region(
+        (intake or {}).get("injury_type") if intake else None
+    )
+    logger.info(
+        "drafter anchoring token=%s flow=%s body_region=%s injury_present=%s",
+        token, flow, expected_region, bool(intake and intake.get("injury_type")),
+    )
+
     user_prompt = _build_user_prompt(
-        flow, payload, prior_protocol, canonical_patient_name=canonical_name,
+        flow,
+        payload,
+        prior_protocol,
+        canonical_patient_name=canonical_name,
+        intake=intake,
+        body_region=expected_region,
     )
 
     try:
@@ -315,6 +455,13 @@ def draft_and_save_pending(
     # table.
     if canonical_name:
         payload_to_save["patient"] = canonical_name
+
+    # Deterministic body-region validator. Raises CrossRegionExerciseError
+    # if the model emitted any cross-region exercise. The error propagates
+    # up to /chat and surfaces as a clinician-readable toast; we NEVER
+    # auto-substitute - the clinician (or a fresh draft attempt) is the
+    # recovery path.
+    _validate_region(payload_to_save, expected_region)
 
     try:
         protocol_id = protocol_repo.save_pending(

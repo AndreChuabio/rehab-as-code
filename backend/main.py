@@ -484,8 +484,13 @@ def protocol_exercises(user_id: str | None = Depends(optional_user_id)):
     p = fetch_protocol_for_user(user_id) if user_id else fetch_protocol()
     exercises_raw = p.get("exercises", [])
 
-    # Demo fallback: if protocol is still pending or has no exercises, use the snapshot
-    if not exercises_raw:
+    # Demo fallback: ONLY for unauthenticated callers (the public landing
+    # page demo). Authenticated patients with no active protocol get an
+    # empty list - they see the empty-state CTA in the sidebar instead of
+    # inheriting Andre's post-ACL knee demo. Without this gate, an ankle
+    # patient with no protocol would see knee exercises (the bug Andre
+    # caught in the clinician dashboard, 2026-05-06).
+    if not exercises_raw and user_id is None:
         snapshot = Path(__file__).parent.parent / "protocols" / ".demo-snapshots" / "protocol-week4.yaml"
         if snapshot.exists():
             with open(snapshot) as f:

@@ -30,7 +30,9 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import time
+from pathlib import Path
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -47,8 +49,15 @@ _BASE_SYSTEM_PROMPT = (
     "You are a rehabilitation protocol planner. You receive (a) a list of "
     "candidate exercises with citations from the researcher, (b) a triage "
     "decision (progress / hold / regress) from the evaluator with reasons, "
-    "and (c) the patient's intake. Compose a complete draft protocol for "
-    "the patient's next week.\n\n"
+    "(c) the patient's intake, and (d) the patient's body_region.\n\n"
+    "INJURY ANCHORING (load-bearing for clinical safety): every exercise "
+    "you compose MUST target the patient's body_region. Candidates from "
+    "the researcher are already region-filtered; do not introduce any "
+    "exercise outside that list. If the candidate list is empty, refuse: "
+    "emit a single exercise named `clinician_review_required` with sets=0, "
+    "reps=0 and explain why in the patient name field's adjacent context. "
+    "Never fabricate cross-region exercises (no knee work for an ankle "
+    "patient, etc.) even if you know they exist.\n\n"
     "Rules:\n"
     "  1. Use only the candidates the researcher returned. Do not invent.\n"
     "  2. Apply the evaluator's decision uniformly:\n"
@@ -123,10 +132,13 @@ def _build_user_prompt(
     phase: str,
     week: int,
     concerns: list[dict[str, Any]] | None,
+    body_region: str | None = None,
 ) -> str:
     parts: list[str] = [
         f"Target phase: {phase}",
         f"Target week: {week}",
+        f"Body region (HARD constraint - all exercises must target this): "
+        f"{body_region or 'unspecified'}",
     ]
     if intake:
         parts.append("Patient intake:\n" + json.dumps(intake, indent=2, default=str))
@@ -242,8 +254,21 @@ def compose(
     except ImportError as exc:
         raise PlannerError(f"anthropic SDK not installed: {exc}") from exc
 
+    # Resolve body_region for prompt anchoring + post-LLM validation.
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        import clinical_taxonomy as _ct
+        injury_type = (intake or {}).get("injury_type") if intake else None
+        resolved_region = _ct.resolve_body_region(injury_type)
+    except Exception as exc:
+        logger.warning("planner: body_region resolve failed: %s", exc)
+        resolved_region = None
+
     client = anthropic.Anthropic(api_key=api_key)
-    prompt = _build_user_prompt(candidates, signal, intake, phase, week, concerns)
+    prompt = _build_user_prompt(
+        candidates, signal, intake, phase, week, concerns,
+        body_region=resolved_region,
+    )
 
     started = time.monotonic()
     try:
@@ -274,13 +299,77 @@ def compose(
             and getattr(block, "name", "") == "compose_protocol"
         ):
             payload = _validate(dict(block.input or {}))
+            _validate_region(payload, resolved_region, token=token)
             logger.info(
                 "planner ok in %dms in_tokens=%s out_tokens=%s "
-                "n_exercises=%d retry=%s token=%s",
+                "n_exercises=%d retry=%s body_region=%s token=%s",
                 elapsed_ms, in_tokens, out_tokens,
                 len(payload.get("exercises") or []),
-                bool(concerns), token,
+                bool(concerns), resolved_region, token,
             )
             return payload
 
     raise PlannerError("planner returned no compose_protocol tool call")
+
+
+# Sentinel name the planner is instructed to emit when no candidate fits.
+# The validator allows this through so the orchestrator can save the empty
+# refusal draft for clinician review.
+_REFUSAL_EXERCISE_NAME = "clinician_review_required"
+
+
+def _validate_region(
+    payload: dict[str, Any],
+    expected_region: str | None,
+    *,
+    token: str | None = None,
+) -> None:
+    """Deterministic post-LLM safety net mirroring chat_protocol_drafter.
+
+    Walks every exercise and confirms its body_region (looked up via
+    exercise_kb) matches expected_region. Any mismatch raises PlannerError;
+    the orchestrator propagates it as PlanGenerationError so the patient
+    sees a "plan generation failed - try again" toast and the clinician
+    queue is not polluted with cross-region drafts.
+
+    Skips enforcement when expected_region is None (couldn't resolve from
+    intake) or "multi" (legitimately multi-region).
+    """
+    if not expected_region or expected_region == "multi":
+        return
+
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        import exercise_kb as _kb
+    except Exception as exc:
+        logger.warning("planner: exercise_kb import failed: %s", exc)
+        return
+
+    mismatches: list[dict[str, Any]] = []
+    for ex in payload.get("exercises") or []:
+        ex_id = ex.get("id") or ex.get("name") or ""
+        if ex_id == _REFUSAL_EXERCISE_NAME:
+            continue
+        ex_region = _kb.body_region_for(ex_id)
+        if ex_region is None or ex_region == "multi":
+            continue
+        if ex_region != expected_region:
+            mismatches.append({
+                "exercise": ex_id,
+                "exercise_region": ex_region,
+                "patient_region": expected_region,
+            })
+
+    if mismatches:
+        logger.warning(
+            "planner region mismatch token=%s patient_region=%s n_mismatches=%d",
+            token, expected_region, len(mismatches),
+        )
+        raise PlannerError(
+            "Planner proposed exercises outside the patient's body region "
+            f"({expected_region}). Mismatched: "
+            + ", ".join(
+                f"{m['exercise']} ({m['exercise_region']})"
+                for m in mismatches
+            )
+        )
