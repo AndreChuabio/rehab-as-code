@@ -112,7 +112,7 @@ body {
 .agent-btn.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
 .agent-btn.primary:hover:not(:disabled) { filter: brightness(1.1); }
 .agent-btn.secondary { background: var(--surface2); color: var(--text); }
-.agent-btn.secondary:hover:not(:disabled) { background: #232a37; border-color: var(--accent2); }
+.agent-btn.secondary:hover:not(:disabled) { background: var(--surface3); border-color: var(--accent2); }
 .agent-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ── Agent team strip ──────────────────────────────────────────────── */
@@ -177,7 +177,7 @@ body {
 }
 .trigger-btn:hover:not(:disabled) {
   border-color: var(--accent2);
-  background: #232a37;
+  background: var(--surface3);
 }
 .trigger-btn.primary {
   background: var(--accent);
@@ -628,7 +628,7 @@ body {
 .exercise-video-placeholder {
   width: 100%;
   aspect-ratio: 16 / 9;
-  background: #1a1a2e;
+  background: var(--surface3);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -727,7 +727,7 @@ body {
 }
 .exercise-action-btn:hover {
   border-color: var(--accent2);
-  background: #232a37;
+  background: var(--surface3);
 }
 .exercise-action-btn.primary {
   background: var(--accent);
@@ -1036,7 +1036,7 @@ body {
 }
 .quick-action:hover:not(:disabled) {
   border-color: var(--accent2);
-  background: #232a37;
+  background: var(--surface3);
 }
 .quick-action.primary {
   background: rgba(79, 179, 196, 0.12);
@@ -1086,8 +1086,8 @@ body {
   padding-left: 8px;
   animation: traceSlideIn 0.2s ease-out;
 }
-.chat-bubble.agent-trace .trace-event.trace-pr_opened { border-left-color: var(--accent); }
-.chat-bubble.agent-trace .trace-event.trace-agent_completed { border-left-color: var(--accent); }
+.chat-bubble.agent-trace .trace-event.trace-pr_opened { border-left-color: var(--success); }
+.chat-bubble.agent-trace .trace-event.trace-agent_completed { border-left-color: var(--success); }
 .chat-bubble.agent-trace .trace-event.trace-child {
   margin-left: 14px;
   border-left-color: var(--accent2);
@@ -2012,9 +2012,9 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 
 /* "Set password" mini-button on the signed-in pill. */
 .auth-pill-setpw {
-  background: rgba(80, 180, 220, 0.12);
-  border: 1px solid rgba(80, 180, 220, 0.4);
-  color: #50b4dc;
+  background: rgba(79, 179, 196, 0.12);
+  border: 1px solid rgba(79, 179, 196, 0.4);
+  color: var(--accent);
   border-radius: 999px;
   padding: 3px 10px;
   font-size: 11px;
@@ -2022,7 +2022,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   cursor: pointer;
   font-family: inherit;
 }
-.auth-pill-setpw:hover { background: rgba(80, 180, 220, 0.22); }
+.auth-pill-setpw:hover { background: rgba(79, 179, 196, 0.22); }
 .auth-pill-setpw[hidden] { display: none; }
 
 /* Set-password modal */
@@ -2345,7 +2345,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   display: flex;
   gap: 12px;
   font-size: 12px;
-  color: #6e6e73;
+  color: var(--muted);
 }
 .browse-all-filters select {
   margin-left: 4px;
@@ -2359,7 +2359,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   width: 1em;
   text-align: center;
   margin-left: 4px;
-  color: #6e6e73;
+  color: var(--muted);
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -2720,40 +2720,45 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   display: inline-block;
 }
 
-/* State variants -------------------------------------------------------- */
+/* State variants — PR-Q: each state binds to a single semantic token so
+   meaning maps 1:1 to colour. pending = info (--accent2), flagged = warn,
+   approved = success, rejected = danger. */
 .review-pill.review-pill-pending .review-pill-btn {
-  border-color: rgba(80, 180, 220, 0.45);
-  color: #b8d6e8;
+  border-color: var(--accent2);
+  color: var(--accent2);
 }
 .review-pill-pending-dot {
-  background: #50b4dc;
-  box-shadow: 0 0 6px rgba(80, 180, 220, 0.55);
+  background: var(--accent2);
+  box-shadow: 0 0 6px rgba(122, 158, 255, 0.55);
 }
 
 .review-pill.review-pill-flagged .review-pill-btn {
-  border-color: rgba(245, 185, 69, 0.55);
-  color: #f6c97a;
+  background: var(--warn-bg);
+  border-color: var(--warn);
+  color: var(--warn);
 }
 .review-pill-flagged-dot {
-  background: #f5b945;
-  box-shadow: 0 0 6px rgba(245, 185, 69, 0.6);
+  background: var(--warn);
+  box-shadow: 0 0 6px rgba(232, 181, 74, 0.6);
 }
 
 .review-pill.review-pill-approved .review-pill-btn {
-  border-color: rgba(63, 182, 139, 0.55);
-  color: #8be0bd;
+  background: var(--success-bg);
+  border-color: var(--success);
+  color: var(--success);
 }
 .review-pill-approved-dot {
-  background: #3fb68b;
-  box-shadow: 0 0 6px rgba(63, 182, 139, 0.6);
+  background: var(--success);
+  box-shadow: 0 0 6px rgba(95, 208, 154, 0.6);
 }
 
 .review-pill.review-pill-rejected .review-pill-btn {
-  border-color: rgba(255, 107, 122, 0.55);
-  color: #f8a3a3;
+  background: var(--danger-bg);
+  border-color: var(--danger);
+  color: var(--danger);
 }
 .review-pill-rejected-dot {
-  background: #f87171;
+  background: var(--danger);
   box-shadow: 0 0 8px rgba(255, 107, 122, 0.6);
   animation: review-pill-rejected-pulse 1.4s ease-in-out infinite;
 }
@@ -2788,8 +2793,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   align-items: flex-start;
   gap: 10px;
   padding: 10px 12px;
-  background: rgba(80, 180, 220, 0.08);
-  border: 1px solid rgba(80, 180, 220, 0.32);
+  background: rgba(122, 158, 255, 0.08);
+  border: 1px solid rgba(122, 158, 255, 0.32);
   border-radius: 10px;
 }
 .pr-pending-dot {
@@ -2798,8 +2803,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   height: 8px;
   margin-top: 6px;
   border-radius: 50%;
-  background: #50b4dc;
-  box-shadow: 0 0 6px rgba(80, 180, 220, 0.55);
+  background: var(--accent2);
+  box-shadow: 0 0 6px rgba(122, 158, 255, 0.55);
 }
 .pr-pending-copy strong {
   display: block;
@@ -2830,8 +2835,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
    ────────────────────────────────────────────────────────────────────── */
 
 .chat-bubble.triage-alert {
-  background: rgba(245, 185, 69, 0.10);
-  border: 1px solid rgba(245, 185, 69, 0.45);
+  background: var(--warn-bg);
+  border: 1px solid rgba(232, 181, 74, 0.55);
   border-radius: 12px;
   padding: 12px 14px;
   color: var(--text);
@@ -2843,7 +2848,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #f5b945;
+  color: var(--warn);
   margin-bottom: 6px;
 }
 .triage-alert-body {
@@ -2951,12 +2956,12 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   outline: 2px solid var(--accent2);
   outline-offset: 2px;
 }
-.auto-checkin-dot.tone-good   { border-color: var(--accent); color: var(--accent); }
-.auto-checkin-dot.tone-warn   { border-color: var(--warn);   color: var(--warn); }
-.auto-checkin-dot.tone-danger { border-color: var(--danger); color: var(--danger); }
-.auto-checkin-dot.selected.tone-good   { background: var(--accent); color: var(--bg); }
-.auto-checkin-dot.selected.tone-warn   { background: var(--warn);   color: var(--bg); }
-.auto-checkin-dot.selected.tone-danger { background: var(--danger); color: var(--bg); }
+.auto-checkin-dot.tone-good   { border-color: var(--success); color: var(--success); }
+.auto-checkin-dot.tone-warn   { border-color: var(--warn);    color: var(--warn); }
+.auto-checkin-dot.tone-danger { border-color: var(--danger);  color: var(--danger); }
+.auto-checkin-dot.selected.tone-good   { background: var(--success); color: var(--bg); }
+.auto-checkin-dot.selected.tone-warn   { background: var(--warn);    color: var(--bg); }
+.auto-checkin-dot.selected.tone-danger { background: var(--danger);  color: var(--bg); }
 .auto-checkin-dot.selected {
   box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
 }
@@ -3022,7 +3027,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .auto-checkin-logged {
   text-align: center;
   font-size: 14px;
-  color: var(--accent);
+  color: var(--success);
   padding: 10px;
   font-weight: 600;
 }
@@ -3047,11 +3052,13 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 
 /* Top-of-chat "Start today's session" CTA. Renders when
    review_status.state === "recently_approved" AND no completed sessions today.
-   Sits above the chat-empty placeholder, dropped into chatLog. */
+   Sits above the chat-empty placeholder, dropped into chatLog.
+   PR-Q: outer tile uses --success rgba (the protocol was approved — that's
+   a "you can start" cue, not a CTA colour). The button inside stays --accent. */
 .todays-session-cta {
   align-self: stretch;
-  background: linear-gradient(135deg, rgba(63, 182, 139, 0.14), rgba(63, 182, 139, 0.04));
-  border: 1px solid rgba(63, 182, 139, 0.4);
+  background: linear-gradient(135deg, rgba(95, 208, 154, 0.14), rgba(95, 208, 154, 0.04));
+  border: 1px solid rgba(95, 208, 154, 0.4);
   border-radius: 10px;
   padding: 16px 14px;
   display: flex;
@@ -3146,7 +3153,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 .picker-row:hover:not(:disabled) {
   border-color: var(--accent);
-  background: rgba(63, 182, 139, 0.06);
+  background: rgba(79, 179, 196, 0.06);
 }
 .picker-row:focus-visible {
   outline: 2px solid var(--accent);
@@ -3168,12 +3175,12 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   align-items: center;
   justify-content: center;
   font-size: 12px;
-  color: var(--accent);
+  color: var(--success);
   font-weight: 700;
 }
 .picker-row.done .picker-row-check {
-  border-color: var(--accent);
-  background: var(--accent);
+  border-color: var(--success);
+  background: var(--success);
   color: var(--bg);
 }
 .picker-row-name { flex: 1; font-weight: 500; }
@@ -3234,7 +3241,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   color: var(--muted);
 }
 .next-exercise-check {
-  color: var(--accent);
+  color: var(--success);
   font-weight: 700;
 }
 .next-exercise-finished { color: var(--text); }
@@ -3249,11 +3256,13 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   gap: 8px;
 }
 
-/* Workout-complete celebration card. Shown after the final check-in logs. */
+/* Workout-complete celebration card. Shown after the final check-in logs.
+   PR-Q: bound to --success rgba so "you finished a session" reads as
+   completion, distinct from --accent CTAs. */
 .workout-complete-card {
   align-self: stretch;
-  background: linear-gradient(135deg, rgba(63, 182, 139, 0.18), rgba(63, 182, 139, 0.04));
-  border: 1px solid rgba(63, 182, 139, 0.5);
+  background: linear-gradient(135deg, rgba(95, 208, 154, 0.18), rgba(95, 208, 154, 0.04));
+  border: 1px solid rgba(95, 208, 154, 0.5);
   border-radius: 10px;
   padding: 16px 14px;
   display: flex;
