@@ -2397,7 +2397,21 @@ async function togglePoseFormCheck(wrap, item, btn) {
 
   const refSrc = item.ex.generated_video_url || item.ex.video_url || "";
   const voiceOn = poseVoiceEnabled();
-  const { sets: parsedSets, reps: parsedReps } = parseSetsReps(item.ex.default_dose);
+
+  // PR-U1: when this exercise IS in the patient's active protocol, render
+  // the prescribed dose (sets/reps from /protocol/exercises) instead of the
+  // generic library default. _todaysSessionState.exercises is populated
+  // whenever startTodaysSession has run; a missing match means the patient
+  // is exploring the library off-protocol — fall back to library default.
+  // This is a frontend-only override; the backend /pose/session write path
+  // is unchanged.
+  const prescribed = (_todaysSessionState.exercises || []).find(
+    (e) => e && e.id === item.ex.id,
+  ) || null;
+  const effectiveDose = (prescribed && prescribed.default_dose)
+    || item.ex.default_dose
+    || "";
+  const { sets: parsedSets, reps: parsedReps } = parseSetsReps(effectiveDose);
   const totalSets   = Math.max(1, parsedSets || 1);
   const repsPerSet  = parsedReps;  // null when unparseable
 
@@ -2411,7 +2425,8 @@ async function togglePoseFormCheck(wrap, item, btn) {
         <div class="pose-toolbar">
           <div class="pose-title" title="${escapeHtml(item.ex.name)}">
             <span class="pose-title-name">${escapeHtml(item.ex.name)}</span>
-            <span class="pose-title-dose">${escapeHtml(item.ex.default_dose || "")}</span>
+            <span class="pose-title-dose">${escapeHtml(effectiveDose)}</span>
+            ${prescribed ? `<span class="pose-title-prescribed" title="From your active protocol">prescribed</span>` : ""}
           </div>
           <div class="pose-metrics" id="poseMetrics">
             <span class="metric-pill idle">starting camera...</span>

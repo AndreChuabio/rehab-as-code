@@ -1714,6 +1714,22 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   text-overflow: ellipsis;
   max-width: 240px;
 }
+/* PR-U1: render a small pill next to the dose chip when the dose came
+   from the patient's active protocol (vs the library default). Uses the
+   Clinical Twilight success tokens — same family as the "Approved by
+   Dr. A" trust pill so the patient reads "this is from my plan." */
+.pose-title-prescribed {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--success-bg);
+  color: var(--success);
+  border: 1px solid var(--success);
+  white-space: nowrap;
+}
 
 .pose-voice-btn {
   padding: 6px 10px;
