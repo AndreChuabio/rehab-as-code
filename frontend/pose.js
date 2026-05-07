@@ -377,6 +377,27 @@ function checkSway(lms) {
   };
 }
 
+// "Presence" mode: the patient is doing an exercise where 2D BlazePose
+// can't reliably resolve the joint of interest (ankle alphabet, band
+// isolations, lateral hops). Rather than fabricate a degree threshold,
+// we just confirm that landmarks are visible — shoulders + hips at
+// minimum — and surface a single "tracking" pill. The clinician still
+// gets the session row; we just don't claim rep accuracy we can't
+// deliver. Returns null when nothing is visible so the SUT can show
+// "step into the outline" instead of a green check on an empty frame.
+function checkPresence(lms) {
+  const ls = lms[L.LEFT_SHOULDER], rs = lms[L.RIGHT_SHOULDER];
+  const lh = lms[L.LEFT_HIP],      rh = lms[L.RIGHT_HIP];
+  if (!visibleEnough(ls, rs) && !visibleEnough(lh, rh)) return null;
+  return {
+    id: "presence",
+    label: "tracking",
+    value: null,
+    unit: "",
+    status: "good",
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Per-exercise check rosters. `primary` is the headline metric; `checks` is
 // the full pill list (alignment + depth, both knees, etc.).
@@ -492,6 +513,64 @@ const EXERCISES = {
       calf_rise:  "Up onto your toes",
       trunk_lean: "Don't lean forward, stay tall",
     },
+  },
+  // Single-leg variant uses the same calf_rise rep tracker. Sway /
+  // trunk_lean catch the most common compensations: the patient grabs
+  // a wall and leans into it instead of holding their balance.
+  ankle_calf_raises_single_leg: {
+    primary: "calf_rise", target: null, mode: "rise",
+    checks: ["calf_rise", "trunk_lean", "sway"],
+    corrections: {
+      calf_rise:  "Up onto your toe",
+      trunk_lean: "Stay tall, no forward lean",
+      sway:       "Center your weight",
+    },
+  },
+
+  // ── Ankle balance + ROM. The remaining ankle exercises don't have a
+  //    clean rep signal in 2D BlazePose: ankle_alphabet draws letters
+  //    with the foot (joint angles too noisy), the band exercises are
+  //    seated isolations (camera can't reliably resolve foot ROM at
+  //    typical webcam framing), and lateral hops are too fast for a
+  //    single-pose detector. Rather than fabricate a degree threshold,
+  //    we run them in "presence" mode: confirm the patient is in frame
+  //    + tracking, surface trunk_lean / sway when meaningful, and let
+  //    the patient self-pace. The clinician can still see the session
+  //    row in /sessions/today; we just don't claim rep accuracy we can't
+  //    deliver. See checkPresence in runChecks. ──────────────────────────
+  ankle_single_leg_balance: {
+    primary: "sway", target: null, mode: "hold",
+    checks: ["sway", "trunk_lean", "hip_drop"],
+    corrections: {
+      sway:       "Find your center",
+      trunk_lean: "Chest up",
+      hip_drop:   "Level the hips",
+    },
+  },
+  ankle_alphabet: {
+    primary: "presence", target: null, mode: "presence",
+    checks: ["presence"],
+    corrections: { presence: "Stay in frame so I can track you" },
+  },
+  ankle_towel_calf_stretch: {
+    primary: "presence", target: null, mode: "presence",
+    checks: ["presence"],
+    corrections: { presence: "Stay in frame so I can track you" },
+  },
+  ankle_dorsiflexion_band: {
+    primary: "presence", target: null, mode: "presence",
+    checks: ["presence"],
+    corrections: { presence: "Stay in frame so I can track you" },
+  },
+  ankle_eversion_band: {
+    primary: "presence", target: null, mode: "presence",
+    checks: ["presence"],
+    corrections: { presence: "Stay in frame so I can track you" },
+  },
+  ankle_lateral_hops: {
+    primary: "presence", target: null, mode: "presence",
+    checks: ["presence"],
+    corrections: { presence: "Stay in frame so I can track you" },
   },
 
   // ── Shoulder. Wall slides — track shoulder abduction (shoulder-hip-elbow
@@ -713,6 +792,7 @@ function runChecks(lms, exId) {
     else if (ckId === "L_elbow_angle") m = checkElbowAngle("L", lms);
     else if (ckId === "R_elbow_angle") m = checkElbowAngle("R", lms);
     else if (ckId === "calf_rise")     m = checkCalfRaiseRise(lms);
+    else if (ckId === "presence")      m = checkPresence(lms);
     if (m) out.push(m);
   }
   return { ex, metrics: out };
