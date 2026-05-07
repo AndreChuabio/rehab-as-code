@@ -27,6 +27,7 @@
   let queue = [];
   let selectedId = null;
   let pendingAction = null; // 'approve' | 'reject'
+  let currentPatientToken = null; // for raw-context audit logging
 
   async function bootstrap() {
     if (!window.RehabAuth) {
@@ -97,6 +98,22 @@
     $("rejectBtn")?.addEventListener("click", () => beginAction("reject"));
     $("notesCancel")?.addEventListener("click", cancelAction);
     $("notesConfirm")?.addEventListener("click", confirmAction);
+
+    // Raw-context disclosure logging. Toggling the <details open> emits
+    // a server log line so we can audit accidental PHI reveals. Token
+    // UUIDs only — never the patient name.
+    $("rawContextDetails")?.addEventListener("toggle", () => {
+      if (!$("rawContextDetails")?.open) return;
+      logRawContextRevealed();
+    });
+
+    // Narrator retry: re-fetch the current protocol detail. Used when
+    // narrator_status === "sdk_error" so the clinician can retry without
+    // losing their place in the queue.
+    $("narratorRetry")?.addEventListener("click", () => {
+      if (!selectedId) return;
+      selectItem(selectedId);
+    });
   }
 
   async function loadQueue() {
@@ -190,6 +207,11 @@
     if ($("detailEmpty")) $("detailEmpty").hidden = true;
     if ($("detailBody")) $("detailBody").hidden = false;
 
+    // Stash on the closure so the raw-context toggle handler knows which
+    // patient token + reviewer to log on disclosure. We hold tokens
+    // (UUIDs) only — never the patient_name.
+    currentPatientToken = detail.patient?.token || null;
+
     const target = detail.target || {};
     const active = detail.active;
     const patient = detail.patient || {};
@@ -201,6 +223,16 @@
     const created = target.created_at ? new Date(target.created_at).toLocaleString() : "";
     $("detailSub").textContent = `${phase}${week != null ? ` · wk ${week}` : ""} · by ${agent}${created ? ` · ${created}` : ""}`;
 
+    // Patient-at-a-glance card. Server computes the structured summary +
+    // pain trend so the frontend doesn't denormalize. Falls back to a
+    // hidden card if the backend predates this endpoint shape.
+    renderPatientSummary(detail.patient_summary, detail.pain_trend);
+
+    // Raw context lives behind a <details> toggle, defaulting to closed.
+    // user-select:none on the <pre> to disrupt accidental Cmd-C; this is
+    // friction, not security — DevTools defeats it. The goal is "no
+    // accidental clipboard PHI on a queue scroll-by".
+    if ($("rawContextDetails")) $("rawContextDetails").open = false;
     $("detailContext").textContent = JSON.stringify({
       intake: patient.intake,
       recent_sessions: patient.recent_sessions,
@@ -244,26 +276,16 @@
     }
 
     // AI-generated diff narration. The backend returns:
-    //   * a string when Haiku produced a usable summary
-    //   * null when the model errored / was disabled / had nothing to say
-    //   * the field absent entirely on patient self-fetch (clinician-only)
-    // We treat absent same as null for rendering — the muted fallback is
-    // honest about the AI tool being offline rather than pretending it
-    // ran successfully.
-    const narratorBlock = $("narratorSummary");
-    const narratorBody = $("narratorSummaryBody");
-    if (narratorBlock && narratorBody) {
-      const summary = detail.narrator_summary;
-      if (typeof summary === "string" && summary.trim()) {
-        narratorBody.textContent = summary;
-        narratorBody.classList.remove("narrator-summary-fallback");
-        narratorBlock.hidden = false;
-      } else {
-        narratorBody.textContent = "Summary unavailable, see diff below.";
-        narratorBody.classList.add("narrator-summary-fallback");
-        narratorBlock.hidden = false;
-      }
-    }
+    //   * narrator_summary: text on success, null otherwise
+    //   * narrator_status: one of "no_diff" | "no_api_key" | "sdk_error"
+    //                      | "empty_response" | "ok"
+    //   * both fields absent entirely on patient self-fetch (clinician-only)
+    // We render four distinct micro-states based on status so the
+    // clinician knows WHY the summary is missing instead of seeing a
+    // single generic "Summary unavailable" string.
+    const safetyConcernsExist = ((target.safety_concerns || []).filter(Boolean).length > 0)
+      || target.status === "needs_clinician_review";
+    renderNarrator(detail.narrator_summary, detail.narrator_status, safetyConcernsExist);
 
     $("diffProposed").innerHTML = renderDiffPane(target.payload || {}, active && active.payload, "right");
     $("diffActive").innerHTML = renderDiffPane(active && active.payload, target.payload || {}, "left");
@@ -337,6 +359,219 @@
         </div>`;
     }).join("");
     host.innerHTML = rows;
+  }
+
+  // ── Patient-at-a-glance card ──────────────────────────────────────────
+  //
+  // Renders the structured summary computed by GET /protocols/{id}. We
+  // accept a `summary` object and an oldest-first `painTrend` list and
+  // populate a fixed-shape card. Missing fields hide their row; we don't
+  // render "—" placeholders that read as broken UI.
+  //
+  // Colour scale for pain levels follows a 3-band scheme: green ≤3,
+  // amber 4-6, red ≥7. Number is ALWAYS displayed alongside the colour
+  // chip so the card remains readable for colour-blind reviewers.
+  function renderPatientSummary(summary, painTrend) {
+    const block = $("patientSummary");
+    if (!block) return;
+    if (!summary) {
+      block.hidden = true;
+      return;
+    }
+    block.hidden = false;
+
+    // Identity row.
+    $("psName").textContent = summary.display_name || "(no name on file)";
+    if (summary.age != null) {
+      $("psAge").textContent = `· ${summary.age}`;
+      $("psAge").hidden = false;
+    } else {
+      $("psAge").hidden = true;
+    }
+
+    if (summary.body_region) {
+      $("psRegion").textContent = String(summary.body_region).replace("_", " ");
+      $("psRegion").hidden = false;
+    } else {
+      $("psRegion").hidden = true;
+    }
+
+    // Injury / phase row.
+    $("psInjury").textContent = summary.injury_type || "Injury type not recorded";
+    if (summary.post_op_days != null) {
+      $("psPostOp").textContent = `· ${summary.post_op_days} days post-op`;
+      $("psPostOp").hidden = false;
+    } else {
+      $("psPostOp").hidden = true;
+    }
+    if (summary.phase) {
+      const wk = summary.week != null ? `, week ${summary.week}` : "";
+      $("psPhase").textContent = `Phase: ${summary.phase}${wk}`;
+      $("psPhase").hidden = false;
+    } else {
+      $("psPhase").hidden = true;
+    }
+
+    // Pain row. We pull the most-recent pain_level from painTrend.
+    // No trend, no row — keeps the card honest about what we know.
+    const painRow = $("psPainRow");
+    const trend = Array.isArray(painTrend) ? painTrend : [];
+    if (trend.length > 0) {
+      const latest = trend[trend.length - 1];
+      $("psPainNum").textContent = `${latest.level}/10`;
+      $("psPainNum").className = "patient-summary-pain-num " + painBandClass(latest.level);
+      $("psPainBar").innerHTML = renderPainBar(latest.level);
+      $("psTrend").innerHTML = renderPainTrend(trend);
+      painRow.hidden = false;
+    } else {
+      painRow.hidden = true;
+    }
+
+    // Symptoms / goals chips. Truncate gracefully — the card is meant
+    // for a 3-second scan, not a wall of text.
+    const symptoms = Array.isArray(summary.symptoms) ? summary.symptoms : [];
+    const goals = Array.isArray(summary.goals) ? summary.goals : [];
+    if (symptoms.length > 0) {
+      $("psSymptomsVal").textContent = symptoms.slice(0, 4).join(", ")
+        + (symptoms.length > 4 ? `, +${symptoms.length - 4} more` : "");
+      $("psSymptoms").hidden = false;
+    } else {
+      $("psSymptoms").hidden = true;
+    }
+    if (goals.length > 0) {
+      $("psGoalsVal").textContent = goals.slice(0, 3).join(", ")
+        + (goals.length > 3 ? `, +${goals.length - 3} more` : "");
+      $("psGoals").hidden = false;
+    } else {
+      $("psGoals").hidden = true;
+    }
+  }
+
+  function painBandClass(level) {
+    if (level >= 7) return "pain-high";
+    if (level >= 4) return "pain-mid";
+    return "pain-low";
+  }
+
+  function renderPainBar(level) {
+    // 10 dots; first N filled, rest empty. Coloured by band so the bar
+    // and the number reinforce each other visually.
+    const filled = Math.max(0, Math.min(10, Number(level) || 0));
+    const cls = painBandClass(filled);
+    let dots = "";
+    for (let i = 0; i < 10; i++) {
+      dots += `<span class="pain-dot ${i < filled ? cls : "pain-empty"}"></span>`;
+    }
+    return dots;
+  }
+
+  function renderPainTrend(trend) {
+    // "Trend: 6 → 4 (last 5 check-ins)" — uses ASCII arrow to stay
+    // emoji-free per project rule. Direction inferred from first vs last.
+    if (trend.length < 2) {
+      return `<span class="pain-trend-cap">Trend:</span> single reading`;
+    }
+    const first = trend[0].level;
+    const last = trend[trend.length - 1].level;
+    const arrow = last < first ? "↘" : (last > first ? "↗" : "→");
+    const cap = `<span class="pain-trend-cap">Trend:</span>`;
+    return `${cap} ${arrow} ${first} → ${last} (last ${trend.length} check-in${trend.length === 1 ? "" : "s"})`;
+  }
+
+  // ── Narrator status switch ────────────────────────────────────────────
+  //
+  // Four micro-states map to four user-facing surfaces. Old behaviour
+  // collapsed every non-ok case to "Summary unavailable, see diff below"
+  // which made it impossible to tell from the screen whether the model
+  // errored, the key was unset, or the diff was empty.
+  function renderNarrator(summary, status, safetyConcernsExist) {
+    const block = $("narratorSummary");
+    const body = $("narratorSummaryBody");
+    const label = $("narratorSummaryLabel");
+    const retry = $("narratorRetry");
+    const noDiffBlock = $("narratorNoDiff");
+    if (!block || !body || !noDiffBlock) return;
+
+    body.classList.remove("narrator-summary-fallback");
+    body.classList.remove("narrator-summary-error");
+    body.classList.remove("narrator-summary-info");
+    if (retry) retry.hidden = true;
+    noDiffBlock.hidden = true;
+
+    // Backwards-compat: when the backend predates narrator_status, fall
+    // back to the old "summary present == ok" semantics.
+    let effectiveStatus = status;
+    if (!effectiveStatus) {
+      effectiveStatus = (typeof summary === "string" && summary.trim()) ? "ok" : "empty_response";
+    }
+
+    switch (effectiveStatus) {
+      case "ok": {
+        if (label) label.textContent = "AI-generated summary";
+        body.textContent = (typeof summary === "string" && summary.trim())
+          ? summary
+          : "(empty)";
+        block.hidden = false;
+        return;
+      }
+      case "no_diff": {
+        // Hide the narrator block entirely. If safety concerns exist,
+        // surface a one-liner pointing the clinician at them.
+        block.hidden = true;
+        if (safetyConcernsExist) {
+          noDiffBlock.textContent = "No protocol changes — review the safety flag below.";
+          noDiffBlock.hidden = false;
+        }
+        return;
+      }
+      case "no_api_key": {
+        if (label) label.textContent = "AI-generated summary — offline";
+        body.textContent = "AI summary unavailable — Anthropic key not configured.";
+        body.classList.add("narrator-summary-info");
+        block.hidden = false;
+        return;
+      }
+      case "sdk_error": {
+        if (label) label.textContent = "AI-generated summary — error";
+        body.textContent = "AI summary couldn't reach the model. Diff is below.";
+        body.classList.add("narrator-summary-error");
+        if (retry) retry.hidden = false;
+        block.hidden = false;
+        return;
+      }
+      case "empty_response":
+      default: {
+        if (label) label.textContent = "AI-generated summary — unavailable";
+        body.textContent = "AI summary couldn't be produced for this diff. See below.";
+        body.classList.add("narrator-summary-fallback");
+        block.hidden = false;
+        return;
+      }
+    }
+  }
+
+  // ── Raw context disclosure audit ──────────────────────────────────────
+  //
+  // Toggling the <details open> writes a console line + a server-side
+  // log line so we have a record of who looked at the raw JSON. Token
+  // UUID only — patient name is intentionally not logged. This is
+  // friction + logging, not access control. RLS still gates the
+  // underlying data.
+  function logRawContextRevealed() {
+    if (!currentPatientToken) return;
+    console.info("clinician revealed raw context", {
+      target_token: currentPatientToken,
+    });
+    try {
+      authedFetch(`${API_BASE}/audit/raw-context-revealed`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target_token: currentPatientToken }),
+      }).catch(() => {});
+    } catch (_) {
+      // Endpoint might not exist on older deploys; the console line
+      // stays as the local audit trail until the backend lands.
+    }
   }
 
   // Cheap line-by-line diff: serialize both payloads as pretty JSON, compare
