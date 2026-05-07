@@ -72,9 +72,30 @@ _SYSTEM_PROMPT = (
 # Bounded loosely; Vercel functions recycle long before this matters.
 _CACHE: dict[tuple[str, str], str] = {}
 
+# Default retry count for empty-text responses from Haiku. Empty / blank
+# is a transient failure mode on small diffs; one retry clears the bulk
+# of cases without paying noticeably more in latency or cost. Override
+# via DIFF_NARRATOR_RETRY_ON_EMPTY for staging eval. sdk_error and
+# overlong are NOT retried — those are persistent failure modes.
+_DEFAULT_RETRY_ON_EMPTY = 1
+
 
 def _model() -> str:
     return os.getenv("DIFF_NARRATOR_MODEL", _DEFAULT_MODEL)
+
+
+def _retry_on_empty() -> int:
+    raw = os.getenv("DIFF_NARRATOR_RETRY_ON_EMPTY", "").strip()
+    if not raw:
+        return _DEFAULT_RETRY_ON_EMPTY
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        logger.warning(
+            "invalid DIFF_NARRATOR_RETRY_ON_EMPTY=%r, using default %d",
+            raw, _DEFAULT_RETRY_ON_EMPTY,
+        )
+        return _DEFAULT_RETRY_ON_EMPTY
 
 
 def _build_user_prompt(
@@ -232,67 +253,94 @@ def summarize(
         recent_sessions or [],
     )
 
-    started = time.monotonic()
-    try:
-        resp = client.messages.create(
-            model=_model(),
-            max_tokens=_MAX_TOKENS,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_prompt}],
-        )
-    except Exception as exc:
-        # Anthropic SDK raises a hierarchy: APIError, RateLimitError,
-        # APIConnectionError, etc. We don't discriminate here — the
-        # surface behavior is "transient, may succeed on retry", which
-        # is what the UI's Retry pill tests.
+    # Retry loop: only the empty-response branch retries. sdk_error and
+    # overlong are persistent failure modes — retrying them masks real
+    # problems (network, rate limit, runaway prompt) and the UI's Retry
+    # pill is the right surface for clinician-driven re-attempts.
+    total_attempts = _retry_on_empty() + 1
+    for attempt in range(total_attempts):
+        started = time.monotonic()
+        try:
+            resp = client.messages.create(
+                model=_model(),
+                max_tokens=_MAX_TOKENS,
+                system=_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": user_prompt}],
+            )
+        except Exception as exc:
+            # Anthropic SDK raises a hierarchy: APIError, RateLimitError,
+            # APIConnectionError, etc. Surface as sdk_error without retry.
+            elapsed_ms = int((time.monotonic() - started) * 1000)
+            logger.warning(
+                "diff_narrator anthropic call failed in %dms: %s "
+                "protocol_id=%s clinician_id=%s",
+                elapsed_ms, exc, protocol_id, clinician_id,
+            )
+            return None, "sdk_error"
+
         elapsed_ms = int((time.monotonic() - started) * 1000)
-        logger.warning(
-            "diff_narrator anthropic call failed in %dms: %s "
+
+        # Pull the text block. Haiku may return tool calls or thinking
+        # blocks in future SDK versions; defensively extract the first
+        # text block.
+        text = ""
+        for block in resp.content or []:
+            if getattr(block, "type", None) == "text":
+                text = (getattr(block, "text", "") or "").strip()
+                if text:
+                    break
+
+        if not text:
+            # Empty / blank text is the retryable case. If we have
+            # attempts left, log + continue. If we've exhausted, return
+            # empty_response so the UI shows the right micro-state.
+            if attempt < total_attempts - 1:
+                logger.warning(
+                    "diff_narrator retry_on_empty attempt=%d/%d "
+                    "protocol_id=%s clinician_id=%s",
+                    attempt + 1, total_attempts, protocol_id, clinician_id,
+                )
+                continue
+            logger.warning(
+                "diff_narrator empty response after %d attempts in %dms "
+                "protocol_id=%s clinician_id=%s",
+                total_attempts, elapsed_ms, protocol_id, clinician_id,
+            )
+            return None, "empty_response"
+
+        if len(text) > _MAX_CHARS:
+            # Don't truncate — clinicians shouldn't see a sentence cut in
+            # half. Overlong is a different failure mode than empty (the
+            # model produced text, just too much) and isn't transient, so
+            # no retry. Surfaced as empty_response to keep the UI states
+            # consolidated; consider splitting if we want a distinct
+            # micro-copy for "model rambled."
+            logger.warning(
+                "diff_narrator overlong response (%d chars) in %dms "
+                "attempt=%d/%d protocol_id=%s clinician_id=%s",
+                len(text), elapsed_ms, attempt + 1, total_attempts,
+                protocol_id, clinician_id,
+            )
+            return None, "empty_response"
+
+        if cache_key[1]:
+            _CACHE[cache_key] = text
+
+        # Success. Log timing + token counts + attempt number ONLY. Never
+        # the narration text. attempts=N lets us watch retry rate via
+        # Vercel logs without PHI exposure.
+        usage = getattr(resp, "usage", None)
+        in_tokens = getattr(usage, "input_tokens", None) if usage else None
+        out_tokens = getattr(usage, "output_tokens", None) if usage else None
+        logger.info(
+            "diff_narrator ok in %dms attempts=%d in_tokens=%s out_tokens=%s "
             "protocol_id=%s clinician_id=%s",
-            elapsed_ms, exc, protocol_id, clinician_id,
+            elapsed_ms, attempt + 1, in_tokens, out_tokens,
+            protocol_id, clinician_id,
         )
-        return None, "sdk_error"
+        return text, "ok"
 
-    elapsed_ms = int((time.monotonic() - started) * 1000)
-
-    # Pull the text block. Haiku may return tool calls or thinking blocks
-    # in future SDK versions; defensively extract the first text block.
-    text = ""
-    for block in resp.content or []:
-        if getattr(block, "type", None) == "text":
-            text = (getattr(block, "text", "") or "").strip()
-            if text:
-                break
-
-    if not text:
-        logger.warning(
-            "diff_narrator empty response in %dms "
-            "protocol_id=%s clinician_id=%s",
-            elapsed_ms, protocol_id, clinician_id,
-        )
-        return None, "empty_response"
-
-    if len(text) > _MAX_CHARS:
-        # Don't truncate — clinicians shouldn't see a sentence cut in half.
-        # An overlong response is a model failure mode in the same family
-        # as empty: usable narration was not produced.
-        logger.warning(
-            "diff_narrator overlong response (%d chars) in %dms "
-            "protocol_id=%s clinician_id=%s",
-            len(text), elapsed_ms, protocol_id, clinician_id,
-        )
-        return None, "empty_response"
-
-    if cache_key[1]:
-        _CACHE[cache_key] = text
-
-    # Success. Log timing + token counts ONLY. Never the narration text.
-    usage = getattr(resp, "usage", None)
-    in_tokens = getattr(usage, "input_tokens", None) if usage else None
-    out_tokens = getattr(usage, "output_tokens", None) if usage else None
-    logger.info(
-        "diff_narrator ok in %dms in_tokens=%s out_tokens=%s "
-        "protocol_id=%s clinician_id=%s",
-        elapsed_ms, in_tokens, out_tokens, protocol_id, clinician_id,
-    )
-    return text, "ok"
+    # Defensive: the loop should always return inside its body. If we
+    # reach here, the retry budget was 0 and the first attempt fell
+    # through somehow — treat as empty_response.
+    return None, "empty_response"
