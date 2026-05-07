@@ -1799,15 +1799,30 @@ function setPoseVoiceEnabled(on) {
 
 let _poseVoiceObj = null;
 
+// Voice preference order (PR-J spec): macOS Samantha, Windows Aria,
+// Chrome Google US English. Falls back to first English voice, then any
+// voice. Override via localStorage.poseVoiceURI (set to a voice's URI).
+// The voice list loads asynchronously in some browsers — pickVoice()
+// returns null on that first call and retries each time.
 function pickVoice() {
   if (_poseVoiceObj) return _poseVoiceObj;
   const voices = window.speechSynthesis?.getVoices?.() || [];
   if (!voices.length) return null;
+  const override = (typeof localStorage !== "undefined")
+    ? localStorage.getItem("poseVoiceURI") : null;
+  if (override) {
+    const match = voices.find((v) => v.voiceURI === override);
+    if (match) { _poseVoiceObj = match; return _poseVoiceObj; }
+  }
+  const tryMatch = (re) =>
+    voices.find((v) => v.lang.startsWith("en") && re.test(v.name));
   _poseVoiceObj =
-    voices.find((v) =>
-      v.lang.startsWith("en") &&
-      /samantha|victoria|google us english|female/i.test(v.name)
-    ) || voices.find((v) => v.lang.startsWith("en")) || voices[0];
+    tryMatch(/samantha/i) ||
+    tryMatch(/microsoft aria|aria/i) ||
+    tryMatch(/google us english/i) ||
+    tryMatch(/victoria|female/i) ||
+    voices.find((v) => v.lang.startsWith("en")) ||
+    voices[0];
   return _poseVoiceObj;
 }
 
@@ -1822,6 +1837,119 @@ function speakCue(text) {
   if (v) u.voice = v;
   window.speechSynthesis.speak(u);
 }
+
+// Like speakCue but cancels any in-flight utterance first so the new cue
+// lands immediately. Used by the guided wrapper for time-critical
+// correction cues that must beat the next frame's update.
+function speakNow(text) {
+  if (!text) return;
+  if (!poseVoiceEnabled()) return;
+  if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) return;
+  try { window.speechSynthesis.cancel(); } catch (_) {}
+  const u = new SpeechSynthesisUtterance(String(text));
+  u.rate   = 1.1;
+  u.pitch  = 1.0;
+  u.volume = 0.95;
+  const v = pickVoice();
+  if (v) u.voice = v;
+  window.speechSynthesis.speak(u);
+}
+
+// Parse "3 x 10", "3x10", "3 sets x 10 reps", "10 reps" → {sets, reps}.
+// Defaults to {sets: 1, reps: null} when ambiguous; the guided flow falls
+// back to single-set if reps are unknown so we never trap the patient in
+// an unending set.
+function parseSetsReps(doseStr) {
+  if (!doseStr) return { sets: 1, reps: null };
+  const s = String(doseStr);
+  const m = s.match(/(\d+)\s*[x×]\s*(\d+)/i);
+  if (m) return { sets: parseInt(m[1], 10), reps: parseInt(m[2], 10) };
+  const repsOnly = s.match(/(\d+)\s*rep/i);
+  if (repsOnly) return { sets: 1, reps: parseInt(repsOnly[1], 10) };
+  return { sets: 1, reps: null };
+}
+
+// Pronounce a small int as a word ("one", "two") for the count cue.
+const _NUM_WORDS_GUIDED = [
+  "zero","one","two","three","four","five","six","seven","eight","nine","ten",
+  "eleven","twelve","thirteen","fourteen","fifteen","sixteen","seventeen",
+  "eighteen","nineteen","twenty",
+];
+function spokenCount(n) {
+  return _NUM_WORDS_GUIDED[n] || String(n);
+}
+
+// Pure correction-throttle decision. Given a list of check transitions
+// emitted by pose.js this frame, the per-exercise corrections map, and a
+// stateful throttle record, returns the cue to speak (or null). Mutates
+// `state.spokenKeys` (Set) and `state.lastCueTs` on hit.
+//
+// Throttle rules (PR-J spec):
+//   * Same correctionKey speaks at most once per rep.
+//   * Distinct cues are gapped by `gapMs` so they don't trample each other.
+//   * Picks the FIRST eligible transition with a known cue, so a single
+//     payload yields at most one spoken cue.
+//
+// Pure / DOM-free so the tests under frontend/tests can exercise it.
+function decideCorrectionCue(state, transitions, corrections, nowTs, gapMs) {
+  if (!transitions || !transitions.length) return null;
+  if (nowTs - (state.lastCueTs || 0) < gapMs) return null;
+  for (const t of transitions) {
+    const key = t.correctionKey;
+    if (!key) continue;
+    if (state.spokenKeys.has(key)) continue;
+    const cue = corrections?.[key];
+    if (!cue) continue;
+    state.spokenKeys.add(key);
+    state.lastCueTs = nowTs;
+    return { key, cue, status: t.to };
+  }
+  return null;
+}
+
+// Per-rep boundary: clear the dedupe set when a rep finishes (inRep flips
+// true → false). The wrapper calls this so the next rep can re-speak the
+// same correction if the form error recurs.
+function rolloverRepThrottle(state, prevInRep, nextInRep) {
+  if (prevInRep && !nextInRep) state.spokenKeys.clear();
+}
+
+// Expose pure helpers for the node-side test harness.
+if (typeof window !== "undefined") {
+  window.__poseGuidedHelpers = {
+    parseSetsReps,
+    spokenCount,
+    decideCorrectionCue,
+    rolloverRepThrottle,
+  };
+}
+
+// Required-landmarks gate for the preflight overlay. Maps each check id
+// back to the joints it needs visible so we can disable/enable Start
+// based on what's actually trackable for THIS exercise.
+function landmarksRequiredFor(exId) {
+  const ex = window.PoseFormCheck?.EXERCISES?.[exId];
+  const set = new Set([11, 12, 23, 24]);  // shoulders + hips always
+  if (!ex) return [...set];
+  for (const c of ex.checks) {
+    if (c === "L_knee_depth" || c === "L_knee_valgus") { set.add(25); set.add(27); }
+    if (c === "R_knee_depth" || c === "R_knee_valgus") { set.add(26); set.add(28); }
+    if (c === "L_hip_angle") { set.add(25); }
+    if (c === "R_hip_angle") { set.add(26); }
+    if (c === "L_shoulder_abduction" || c === "L_elbow_angle") { set.add(13); set.add(15); }
+    if (c === "R_shoulder_abduction" || c === "R_elbow_angle") { set.add(14); set.add(16); }
+  }
+  return [...set];
+}
+
+// PR-J guided-mode constants. Surfaced here so tests / smoke scripts can
+// reference them without re-grepping the function body.
+const GUIDED = {
+  PREFLIGHT_DETECTED_HOLD_MS: 2000,  // landmark-stability hold before Start enables
+  REST_SECONDS_DEFAULT:       30,
+  CORRECTION_BUBBLE_MS:       1500,
+  CORRECTION_GAP_MS:          900,   // min gap between two distinct correction utterances
+};
 
 // ── Pose set telemetry (POST /pose/session) ─────────────────────────────────
 
