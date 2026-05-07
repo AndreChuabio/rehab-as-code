@@ -28,6 +28,7 @@
   let selectedId = null;
   let pendingAction = null; // 'approve' | 'reject'
   let currentPatientToken = null; // for raw-context audit logging
+  let riskLoaded = false;
 
   async function bootstrap() {
     if (!window.RehabAuth) {
@@ -78,6 +79,16 @@
 
   function bindHandlers() {
     $("queueRefresh")?.addEventListener("click", loadQueue);
+    $("riskRefresh")?.addEventListener("click", (e) => {
+      e.stopPropagation();
+      loadRiskCohort();
+    });
+    // Lazy-load when the risk panel is expanded the first time.
+    $("riskCohortPanel")?.addEventListener("toggle", (e) => {
+      if (e.target.open && !riskLoaded) {
+        loadRiskCohort();
+      }
+    });
     $("clinicianSignout")?.addEventListener("click", async () => {
       try { await window.RehabAuth.signOut(); } catch (_) {}
       try {
@@ -128,6 +139,62 @@
       return;
     }
     renderQueue();
+  }
+
+  async function loadRiskCohort() {
+    const list = $("riskList");
+    const empty = $("riskEmpty");
+    const count = $("riskCount");
+    if (!list) return;
+    list.innerHTML = '<li class="clinician-risk-loading">Loading…</li>';
+    let patients = [];
+    try {
+      const res = await authedFetch(`${API_BASE}/clinician/risk-cohort`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      patients = data.patients || [];
+    } catch (e) {
+      console.error("risk cohort load failed", e);
+      list.innerHTML = "";
+      if (empty) {
+        empty.hidden = false;
+        empty.textContent = `Couldn't load risk cohort: ${e.message}`;
+      }
+      return;
+    }
+    riskLoaded = true;
+    list.innerHTML = "";
+
+    // Show high + med up top; suppress low to keep the panel focused on
+    // patients who actually need attention.
+    const visible = patients.filter((p) => p.band === "high" || p.band === "med");
+    if (count) count.textContent = String(visible.length);
+
+    if (visible.length === 0) {
+      if (empty) {
+        empty.hidden = false;
+        empty.textContent = "No at-risk patients in the active cohort.";
+      }
+      return;
+    }
+    if (empty) empty.hidden = true;
+
+    for (const p of visible) {
+      const li = document.createElement("li");
+      li.className = `clinician-risk-row clinician-risk-${p.band}`;
+      const topFactor = (p.factors && p.factors[0]) || null;
+      li.innerHTML = `
+        <div class="clinician-risk-head">
+          <span class="clinician-risk-pill clinician-risk-pill-${p.band}">${escapeHtml(p.band)}</span>
+          <span class="clinician-risk-name">${escapeHtml(p.patient_name || "Unnamed patient")}</span>
+        </div>
+        <div class="clinician-risk-meta">
+          ${p.injury_category ? `<span class="clinician-risk-injury">${escapeHtml(p.injury_category)}</span>` : ""}
+          ${topFactor ? `<span class="clinician-risk-factor">${escapeHtml(topFactor.summary || topFactor.rule)}</span>` : ""}
+        </div>
+      `;
+      list.appendChild(li);
+    }
   }
 
   function renderQueue() {

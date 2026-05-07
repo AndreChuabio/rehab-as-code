@@ -869,6 +869,50 @@ def list_pending_protocols(
     return {"pending": out}
 
 
+@app.get("/clinician/risk-cohort")
+def list_risk_cohort(
+    days: int = Query(21, ge=1, le=90),
+    limit: int = Query(500, ge=1, le=1000),
+    user_id: str = Depends(require_clinician_id),
+):
+    """Adherence-risk cohort for the clinician dashboard.
+
+    Pulls every patient active in the last `days` days, runs the
+    deterministic heuristic from `ml.adherence.predict.score`, sorts by
+    risk descending, and returns the cohort.
+
+    PHI: response includes `token` (auth.uid()) and `patient_name`. The
+    endpoint is gated on `require_clinician_id` so only authenticated
+    clinicians can read it. Backend logs only token-hash + band per
+    patient (see ml.adherence.predict.score).
+
+    Layer: today the response always carries `layer="heuristic"`. When a
+    trained model lands in ml/adherence/artifacts/, predict.score flips
+    to layer="xgb" without changing this endpoint.
+    """
+    import user_store
+    from ml.adherence import predict
+
+    tokens = user_store.list_active_tokens(days=days, limit=limit)
+    scored: list[dict] = []
+    for token in tokens:
+        try:
+            scored.append(predict.score(token))
+        except Exception as exc:
+            # Surface, don't hide. Skip the patient and keep the cohort
+            # rendering rather than 500-ing the whole dashboard - one
+            # bad row shouldn't blind clinicians to the rest.
+            logger.exception(
+                "risk-cohort: scoring failed for one patient: %s", exc,
+            )
+    scored.sort(key=lambda r: r.get("risk", 0), reverse=True)
+    return {
+        "patients": scored,
+        "scored_at": datetime.now(timezone.utc).isoformat(),
+        "window_days": days,
+    }
+
+
 @app.get("/protocols/{protocol_id}")
 def get_protocol_detail(
     protocol_id: str,

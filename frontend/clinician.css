@@ -888,3 +888,117 @@
   font-style: italic;
   margin-left: 6px;
 }
+
+/* Adherence risk cohort panel - lives under the pending-review queue.
+   Heuristic-backed today; ml/adherence/predict.score swaps in a trained
+   model later without changing the UI surface. */
+.clinician-risk {
+  margin-top: 16px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.clinician-risk-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.clinician-risk-summary::-webkit-details-marker { display: none; }
+.clinician-risk-summary::before {
+  content: "\25B8";
+  font-size: 11px;
+  color: var(--muted);
+  transition: transform 120ms ease;
+}
+.clinician-risk[open] > .clinician-risk-summary::before {
+  transform: rotate(90deg);
+}
+.clinician-risk-label {
+  font-weight: 600;
+  color: var(--text);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  font-size: 11px;
+}
+.clinician-risk-count {
+  margin-left: auto;
+  margin-right: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.clinician-risk-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.clinician-risk-row {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.clinician-risk-high {
+  border-left: 3px solid var(--danger);
+}
+.clinician-risk-med {
+  border-left: 3px solid var(--warn);
+}
+.clinician-risk-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+}
+.clinician-risk-name {
+  color: var(--text);
+  font-weight: 500;
+}
+.clinician-risk-pill {
+  display: inline-block;
+  padding: 1px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-radius: 4px;
+}
+.clinician-risk-pill-high {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+.clinician-risk-pill-med {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.clinician-risk-pill-low {
+  background: var(--surface3);
+  color: var(--muted);
+}
+.clinician-risk-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.clinician-risk-injury + .clinician-risk-factor::before {
+  content: "\00B7";
+  margin-right: 6px;
+  color: var(--border-strong);
+}
+.clinician-risk-factor {
+  font-style: italic;
+}
+.clinician-risk-empty,
+.clinician-risk-loading {
+  margin-top: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+}

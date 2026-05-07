@@ -1,0 +1,2 @@
+# Trained model artifacts land here as model_<YYYYMMDD>.joblib (date-suffixed,
+# never overwritten). See ../../README.md for the swap protocol.
