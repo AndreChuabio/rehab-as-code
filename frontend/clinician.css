@@ -2,8 +2,8 @@
 
 .clinician-body {
   margin: 0;
-  background: #0f1216;
-  color: #e6e8eb;
+  background: var(--bg);
+  color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
   min-height: 100vh;
   display: flex;
@@ -15,8 +15,8 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 24px;
-  border-bottom: 1px solid #1f242b;
-  background: #121620;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
 
 .clinician-header-title {
@@ -32,14 +32,15 @@
 }
 
 .clinician-badge {
-  background: #2c4a76;
-  color: #cfe1ff;
+  background: rgba(122, 158, 255, 0.18);
+  color: var(--accent2);
   padding: 3px 10px;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  border: 1px solid rgba(122, 158, 255, 0.35);
 }
 
 .clinician-header-meta {
@@ -47,32 +48,32 @@
   align-items: center;
   gap: 12px;
   font-size: 13px;
-  color: #93a0b3;
+  color: var(--muted);
 }
 
 .clinician-signout {
   background: transparent;
-  border: 1px solid #2a323d;
-  color: #c5cdd9;
+  border: 1px solid var(--border);
+  color: var(--text);
   padding: 5px 10px;
   border-radius: 6px;
   font-size: 12px;
   cursor: pointer;
 }
-.clinician-signout:hover { background: #1a2029; }
+.clinician-signout:hover { background: var(--surface3); }
 
 .clinician-as-patient {
   background: transparent;
-  border: 1px solid #4a90e2;
-  color: #88b6f0;
+  border: 1px solid var(--accent2);
+  color: var(--accent2);
   padding: 5px 10px;
   border-radius: 6px;
   font-size: 12px;
   cursor: pointer;
 }
 .clinician-as-patient:hover {
-  background: rgba(74, 144, 226, 0.12);
-  color: #b6d2f7;
+  background: rgba(122, 158, 255, 0.12);
+  color: var(--text-strong);
 }
 
 .clinician-main {
@@ -83,8 +84,8 @@
 }
 
 .clinician-queue {
-  border-right: 1px solid #1f242b;
-  background: #11151c;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -93,8 +94,8 @@
 .clinician-queue-header {
   padding: 12px 16px;
   font-size: 13px;
-  color: #93a0b3;
-  border-bottom: 1px solid #1f242b;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -103,12 +104,12 @@
 .clinician-refresh {
   background: transparent;
   border: none;
-  color: #93a0b3;
+  color: var(--muted);
   font-size: 16px;
   cursor: pointer;
   padding: 0 4px;
 }
-.clinician-refresh:hover { color: #e6e8eb; }
+.clinician-refresh:hover { color: var(--text); }
 
 .clinician-queue-list {
   list-style: none;
@@ -120,13 +121,13 @@
 
 .queue-item {
   padding: 12px 16px;
-  border-bottom: 1px solid #1a1f27;
+  border-bottom: 1px solid var(--border);
   cursor: pointer;
 }
-.queue-item:hover { background: #161b24; }
+.queue-item:hover { background: var(--surface3); }
 .queue-item.selected {
-  background: #1c2533;
-  border-left: 3px solid #4a90e2;
+  background: var(--surface2);
+  border-left: 3px solid var(--accent2);
   padding-left: 13px;
 }
 
@@ -137,14 +138,14 @@
 
 .queue-item-meta {
   font-size: 12px;
-  color: #93a0b3;
+  color: var(--muted);
   margin-top: 3px;
 }
 
 .clinician-queue-empty {
   padding: 32px 16px;
   text-align: center;
-  color: #6b7785;
+  color: var(--muted);
   font-size: 13px;
 }
 
@@ -155,7 +156,7 @@
 }
 
 .clinician-detail-empty {
-  color: #6b7785;
+  color: var(--muted);
   font-size: 14px;
   padding: 80px 24px;
   text-align: center;
@@ -174,7 +175,7 @@
 }
 
 .clinician-detail-sub {
-  color: #93a0b3;
+  color: var(--muted);
   font-size: 13px;
 }
 
@@ -192,14 +193,14 @@
   cursor: pointer;
 }
 
-.btn-approve { background: #2d6a4f; color: #fff; }
-.btn-approve:hover:not(:disabled) { background: #34835f; }
-.btn-reject { background: transparent; border-color: #6a3a3a; color: #f5a3a3; }
-.btn-reject:hover:not(:disabled) { background: #2a1a1a; }
-.btn-cancel { background: transparent; border-color: #2a323d; color: #c5cdd9; }
-.btn-cancel:hover:not(:disabled) { background: #1a2029; }
-.btn-confirm { background: #4a90e2; color: #fff; }
-.btn-confirm:hover:not(:disabled) { background: #5da0ed; }
+.btn-approve { background: var(--success); color: var(--bg); }
+.btn-approve:hover:not(:disabled) { filter: brightness(1.1); }
+.btn-reject { background: transparent; border-color: var(--danger); color: var(--danger); }
+.btn-reject:hover:not(:disabled) { background: var(--danger-bg); }
+.btn-cancel { background: transparent; border-color: var(--border); color: var(--text); }
+.btn-cancel:hover:not(:disabled) { background: var(--surface3); }
+.btn-confirm { background: var(--accent); color: var(--bg); }
+.btn-confirm:hover:not(:disabled) { filter: brightness(1.1); }
 
 .btn-approve:disabled, .btn-reject:disabled, .btn-cancel:disabled, .btn-confirm:disabled {
   opacity: 0.5;
@@ -207,8 +208,8 @@
 }
 
 .clinician-context {
-  background: #161b24;
-  border: 1px solid #1f242b;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 8px 14px;
   margin-bottom: 18px;
@@ -217,7 +218,7 @@
 .clinician-context summary {
   cursor: pointer;
   font-size: 13px;
-  color: #93a0b3;
+  color: var(--muted);
   padding: 4px 0;
 }
 
@@ -225,7 +226,7 @@
   margin: 8px 0 0 0;
   font-size: 12px;
   font-family: ui-monospace, SF Mono, Menlo, monospace;
-  color: #c5cdd9;
+  color: var(--text);
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -245,8 +246,8 @@
    colours) and hide rows for which the field is missing rather than
    render "—" placeholders that read as broken UI. */
 .patient-summary {
-  background: #141a24;
-  border: 1px solid #1f2735;
+  background: var(--surface2);
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 14px 18px;
   margin-bottom: 18px;
@@ -272,40 +273,40 @@
 .patient-summary-name {
   font-size: 16px;
   font-weight: 600;
-  color: #e6e8eb;
+  color: var(--text);
 }
 
 .patient-summary-age {
   font-size: 13px;
-  color: #93a0b3;
+  color: var(--muted);
 }
 
 .patient-summary-region {
-  background: #1f2c3f;
-  color: #b8d2f5;
+  background: rgba(122, 158, 255, 0.12);
+  color: var(--accent2);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 3px 10px;
   border-radius: 999px;
-  border: 1px solid #2c3e5a;
+  border: 1px solid rgba(122, 158, 255, 0.32);
 }
 
 .patient-summary-injury {
   font-size: 13px;
-  color: #c5cdd9;
+  color: var(--text);
 }
 
 .patient-summary-postop {
-  color: #93a0b3;
+  color: var(--muted);
   margin-left: 6px;
 }
 
 .patient-summary-phase {
   font-size: 12px;
-  color: #93a0b3;
-  background: #161e2a;
+  color: var(--muted);
+  background: var(--surface);
   padding: 3px 8px;
   border-radius: 4px;
 }
@@ -323,7 +324,7 @@
 
 .patient-summary-pain-cap {
   font-size: 12px;
-  color: #93a0b3;
+  color: var(--muted);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -332,9 +333,9 @@
   font-size: 15px;
   font-weight: 600;
 }
-.patient-summary-pain-num.pain-low { color: #6ad999; }
-.patient-summary-pain-num.pain-mid { color: #d9b566; }
-.patient-summary-pain-num.pain-high { color: #f5a3a3; }
+.patient-summary-pain-num.pain-low  { color: var(--success); }
+.patient-summary-pain-num.pain-mid  { color: var(--warn); }
+.patient-summary-pain-num.pain-high { color: var(--danger); }
 
 .patient-summary-pain-bar {
   display: inline-flex;
@@ -347,16 +348,16 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #2a323d;
+  background: var(--border);
 }
-.pain-dot.pain-low  { background: #4a8c66; }
-.pain-dot.pain-mid  { background: #a07a3a; }
-.pain-dot.pain-high { background: #a04545; }
-.pain-dot.pain-empty { background: #2a323d; }
+.pain-dot.pain-low   { background: rgba(95, 208, 154, 0.7); }
+.pain-dot.pain-mid   { background: rgba(232, 181, 74, 0.7); }
+.pain-dot.pain-high  { background: rgba(255, 107, 122, 0.7); }
+.pain-dot.pain-empty { background: var(--border); }
 
 .patient-summary-trend {
   font-size: 12px;
-  color: #93a0b3;
+  color: var(--muted);
 }
 .pain-trend-cap {
   text-transform: uppercase;
@@ -373,17 +374,17 @@
 .patient-summary-symptoms,
 .patient-summary-goals {
   font-size: 13px;
-  color: #c5cdd9;
+  color: var(--text);
 }
 
 .patient-summary-meta-cap {
-  color: #93a0b3;
+  color: var(--muted);
   margin-right: 6px;
   font-size: 12px;
 }
 
 .patient-summary-meta-val {
-  color: #c5cdd9;
+  color: var(--text);
 }
 
 /* Data-integrity banner. Amber accent — sits between the green
@@ -394,10 +395,14 @@
    forward; this banner surfaces existing rows that pre-date PR-F).
    The block is a <details> element so the mismatch list collapses
    away after the clinician reads it. */
+/* Data-integrity banner — amber. PR-Q: 3px left --warn rail on
+   --warn-bg fill so it sits between the green patient-summary card and
+   the red safety-concerns block. "Review the data, this looks stale"
+   instead of "patient safety risk". */
 .data-integrity {
-  background: #2a2418;
-  border: 1px solid #6a5a2a;
-  border-left: 3px solid var(--warn, #e3a845);
+  background: var(--warn-bg);
+  border: 1px solid var(--warn-bg);
+  border-left: 3px solid var(--warn);
   border-radius: 6px;
   padding: 10px 14px;
   margin-bottom: 16px;
@@ -418,7 +423,7 @@
 
 .data-integrity-label {
   font-size: 11px;
-  color: var(--warn, #e3a845);
+  color: var(--warn);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-weight: 700;
@@ -426,9 +431,10 @@
 
 .data-integrity-toggle {
   font-size: 11px;
-  color: #b8a268;
+  color: var(--warn);
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  opacity: 0.8;
 }
 
 .data-integrity[open] .data-integrity-toggle::after {
@@ -445,17 +451,17 @@
 .data-integrity-row {
   font-size: 13px;
   line-height: 1.45;
-  color: #e6dabd;
+  color: var(--text);
 }
 
 .data-integrity-cap {
-  color: #b8a268;
+  color: var(--warn);
   font-weight: 600;
   margin-right: 6px;
 }
 
 .data-integrity-val {
-  color: #f1e3bf;
+  color: var(--text-strong);
 }
 
 .data-integrity-list {
@@ -473,14 +479,14 @@
   gap: 8px;
   align-items: baseline;
   font-size: 12px;
-  background: #1f1a10;
-  border: 1px solid #4a3f1f;
+  background: rgba(232, 181, 74, 0.08);
+  border: 1px solid rgba(232, 181, 74, 0.28);
   border-radius: 4px;
   padding: 4px 8px;
 }
 
 .data-integrity-loc {
-  color: #d9b566;
+  color: var(--warn);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   font-weight: 700;
@@ -488,14 +494,15 @@
 }
 
 .data-integrity-ex {
-  color: #e6e8eb;
+  color: var(--text);
   font-family: ui-monospace, "SF Mono", Menlo, monospace;
 }
 
 .data-integrity-region {
-  color: #b8a268;
+  color: var(--warn);
   text-align: right;
   font-size: 11px;
+  opacity: 0.85;
 }
 
 /* Safety review concerns block. Sits ABOVE the narrator summary so a
@@ -504,24 +511,31 @@
    stripe so a flagged row visually carries through from list to detail.
    When status is `needs_clinician_review`, the block adds a heavier
    red background to make sign-off requirement unambiguous. */
+/* Safety concerns banner — clinical urgency. PR-Q: bound to the danger
+   token system. The needs_clinician_review variant uses 2px top --danger
+   border + full text-strong copy so sign-off requirement is unambiguous. */
 .safety-concerns {
-  background: #2a1a1f;
-  border: 1px solid #6a3a3a;
-  border-left: 3px solid #d96a6a;
+  background: var(--danger-bg);
+  border: 1px solid var(--danger);
+  border-top-width: 2px;
   border-radius: 6px;
   padding: 12px 16px;
   margin-bottom: 16px;
 }
 
 .safety-concerns.safety-flagged {
-  background: #3a1a1f;
-  border-color: #c94a4a;
-  border-left-width: 4px;
+  background: var(--danger-bg);
+  border-color: var(--danger);
+  border-top-width: 3px;
+}
+
+.safety-concerns.safety-flagged .safety-concern .safety-detail {
+  color: var(--text-strong);
 }
 
 .safety-concerns-label {
   font-size: 11px;
-  color: #f5a3a3;
+  color: var(--danger);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   margin-bottom: 8px;
@@ -538,8 +552,8 @@
 }
 
 .safety-concern {
-  background: #1f1217;
-  border: 1px solid #4a2a2a;
+  background: rgba(255, 107, 122, 0.08);
+  border: 1px solid rgba(255, 107, 122, 0.32);
   border-radius: 4px;
   padding: 8px 10px;
   display: grid;
@@ -551,7 +565,7 @@
 .safety-concern .safety-check {
   font-size: 12px;
   font-weight: 600;
-  color: #e6e8eb;
+  color: var(--text);
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -565,41 +579,41 @@
 }
 
 .safety-concern.safety-high .safety-severity {
-  background: #c94a4a;
-  color: #fff;
+  background: var(--danger);
+  color: var(--text-strong);
 }
 .safety-concern.safety-med .safety-severity {
-  background: #d99a4a;
-  color: #1a1308;
+  background: var(--warn);
+  color: var(--bg);
 }
 .safety-concern.safety-low .safety-severity {
-  background: #5a5a5a;
-  color: #e6e8eb;
+  background: var(--surface3);
+  color: var(--text);
 }
 
 .safety-concern .safety-detail {
   grid-column: 1 / -1;
   font-size: 13px;
   line-height: 1.45;
-  color: #e6c8c8;
+  color: var(--text);
 }
 
 /* Queue: visually mark flagged rows so the dashboard advertises the
    high-severity ones at a glance. The red border-left mirrors what the
    detail pane shows so flagged status is consistent across views. */
 .queue-item-flagged {
-  border-left: 3px solid #d96a6a !important;
+  border-left: 3px solid var(--danger) !important;
   padding-left: 13px;
-  background: #1f1217;
+  background: rgba(255, 107, 122, 0.06);
 }
 .queue-item-flagged.selected {
-  background: #2a1a1f;
+  background: var(--danger-bg);
 }
 
 .queue-flag-badge {
   display: inline-block;
-  background: #c94a4a;
-  color: #fff;
+  background: var(--danger);
+  color: var(--text-strong);
   font-size: 9px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -611,13 +625,14 @@
 
 /* AI-generated diff narration. Sits directly below the safety block so
    the clinician scans flags first, narration second, raw diff third.
-   Visually distinct from the diff panes (warmer background, larger
-   readable type) and labelled "AI-generated summary" so there's no
-   ambiguity that this is model output, not a human note. */
+   PR-Q: rebound to the dedicated AI tokens (--ai-bg, --ai-accent) so
+   the warm tan visually distinguishes "AI authored this text" from
+   human-entered data on the rest of the dashboard. The label colour
+   matches the left rail so the AI provenance reads at a glance. */
 .narrator-summary {
-  background: #1a2030;
-  border: 1px solid #2c3a55;
-  border-left: 3px solid #6a8cd9;
+  background: var(--ai-bg);
+  border: 1px solid var(--ai-bg);
+  border-left: 3px solid var(--ai-accent);
   border-radius: 6px;
   padding: 12px 16px;
   margin-bottom: 16px;
@@ -632,7 +647,7 @@
 
 .narrator-summary-label {
   font-size: 11px;
-  color: #93a0b3;
+  color: var(--ai-accent);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   font-weight: 600;
@@ -640,8 +655,8 @@
 
 .narrator-retry {
   background: transparent;
-  border: 1px solid #4a90e2;
-  color: #88b6f0;
+  border: 1px solid var(--accent2);
+  color: var(--accent2);
   padding: 3px 10px;
   border-radius: 999px;
   font-size: 11px;
@@ -651,40 +666,40 @@
   cursor: pointer;
 }
 .narrator-retry:hover {
-  background: rgba(74, 144, 226, 0.12);
-  color: #b6d2f7;
+  background: rgba(122, 158, 255, 0.12);
+  color: var(--text-strong);
 }
 
 .narrator-summary-body {
   font-size: 14px;
   line-height: 1.5;
-  color: #e6e8eb;
+  color: var(--text);
 }
 
 .narrator-summary-body.narrator-summary-fallback {
-  color: #6f7a8a;
+  color: var(--muted);
   font-style: italic;
 }
 
 .narrator-summary-body.narrator-summary-info {
-  color: #93a0b3;
+  color: var(--muted);
 }
 
 .narrator-summary-body.narrator-summary-error {
-  color: #d9a08a;
+  color: var(--danger);
 }
 
 /* Inline note shown when narrator_status == "no_diff" AND a safety
    concern is flagged. Narrator block is hidden in that case; this
    one-liner still points the clinician at the safety block. */
 .narrator-no-diff {
-  background: #161b24;
-  border: 1px solid #1f242b;
-  border-left: 3px solid #6a8cd9;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--ai-accent);
   border-radius: 4px;
   padding: 8px 12px;
   margin-bottom: 14px;
-  color: #93a0b3;
+  color: var(--muted);
   font-size: 13px;
   font-style: italic;
 }
@@ -697,8 +712,8 @@
 }
 
 .clinician-diff-col {
-  background: #11151c;
-  border: 1px solid #1f242b;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 12px;
   min-height: 200px;
@@ -706,7 +721,7 @@
 
 .clinician-diff-label {
   font-size: 12px;
-  color: #93a0b3;
+  color: var(--muted);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   margin-bottom: 8px;
@@ -718,18 +733,25 @@
   font-family: ui-monospace, SF Mono, Menlo, monospace;
   white-space: pre-wrap;
   word-break: break-word;
-  color: #c5cdd9;
+  color: var(--text);
   line-height: 1.5;
 }
 
-.diff-added       { background: rgba(80, 200, 120, 0.18); display: inline-block; width: 100%; }
-.diff-removed     { background: rgba(220, 80, 80, 0.18);  display: inline-block; width: 100%; }
-.diff-changed-old { background: rgba(220, 150, 80, 0.18); display: inline-block; width: 100%; }
-.diff-changed-new { background: rgba(80, 180, 220, 0.18); display: inline-block; width: 100%; }
+/* Diff highlight semantics:
+     added       → success (new content)
+     removed     → danger  (deleted content)
+     changed-old → warn    (the "before" line of a change)
+     changed-new → accent  (the "after" line; CTA/teal)
+   Tokens chosen so a clinician scanning a protocol diff reads colour as
+   meaning, not arbitrary palette. */
+.diff-added       { background: rgba(95, 208, 154, 0.18);  display: inline-block; width: 100%; }
+.diff-removed     { background: rgba(255, 107, 122, 0.18); display: inline-block; width: 100%; }
+.diff-changed-old { background: rgba(232, 181, 74, 0.18);  display: inline-block; width: 100%; }
+.diff-changed-new { background: rgba(79, 179, 196, 0.22);  display: inline-block; width: 100%; }
 
 .clinician-notes {
-  background: #161b24;
-  border: 1px solid #1f242b;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 14px;
   margin-bottom: 18px;
@@ -738,15 +760,15 @@
 .clinician-notes label {
   display: block;
   font-size: 13px;
-  color: #93a0b3;
+  color: var(--muted);
   margin-bottom: 6px;
 }
 
 .clinician-notes textarea {
   width: 100%;
-  background: #0f1216;
-  border: 1px solid #2a323d;
-  color: #e6e8eb;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
   border-radius: 4px;
   padding: 8px 10px;
   font-family: inherit;
@@ -763,7 +785,7 @@
 }
 
 #notesRequired {
-  color: #f5a3a3;
+  color: var(--danger);
   font-size: 12px;
 }
 
@@ -774,11 +796,11 @@
   padding: 10px 14px;
   border-radius: 6px;
   font-size: 13px;
-  box-shadow: 0 4px 14px rgba(0,0,0,0.4);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
   z-index: 100;
 }
-.clinician-toast.ok    { background: #2d6a4f; color: #fff; }
-.clinician-toast.error { background: #6a3a3a; color: #fff; }
+.clinician-toast.ok    { background: var(--success); color: var(--bg); }
+.clinician-toast.error { background: var(--danger);  color: var(--text-strong); }
 
 @media (max-width: 768px) {
   .clinician-main { grid-template-columns: 1fr; }
@@ -801,12 +823,12 @@
   gap: 10px;
 }
 .clinician-sessions-empty {
-  color: #6e6e73;
+  color: var(--muted);
   font-size: 13px;
   padding: 8px 0;
 }
 .session-day {
-  border: 1px solid #2a2a2c;
+  border: 1px solid var(--border);
   border-radius: 8px;
   padding: 10px 12px;
 }
@@ -818,7 +840,7 @@
 }
 .session-day-counts {
   font-size: 12px;
-  color: #8e8e93;
+  color: var(--muted);
 }
 .session-day-list {
   list-style: none;
@@ -841,11 +863,11 @@
   font-size: 11px;
   letter-spacing: 0.4px;
 }
-.session-item.completed .session-status { color: #4ade80; }
-.session-item.in_progress .session-status { color: #facc15; }
-.session-item.planned .session-status { color: #93c5fd; }
-.session-item.skipped .session-status { color: #71717a; }
+.session-item.completed   .session-status { color: var(--success); }
+.session-item.in_progress .session-status { color: var(--warn); }
+.session-item.planned     .session-status { color: var(--accent2); }
+.session-item.skipped     .session-status { color: var(--muted); }
 .session-item .session-meta {
-  color: #8e8e93;
+  color: var(--muted);
   font-size: 12px;
 }
