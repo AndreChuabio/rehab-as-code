@@ -778,11 +778,19 @@ function escapeHtml(s) {
 }
 
 function applyStepLocks() {
-  const locked = !intakeComplete;
+  // Quick-action buttons used to be gated behind a localStorage
+  // `rehab_intake_complete` flag, which only flipped to true when the
+  // server returned state="ready" (intake done AND a clinician has
+  // approved a protocol). That left every authed user in the
+  // "needs_plan" state stuck with three disabled buttons that rendered
+  // but didn't fire on click. The state machine is now server-driven
+  // (/patient/me/intake-status) and each handler routes itself, so the
+  // pre-emptive client-side lock is redundant. Always unlock; let
+  // navigateTo() + the handlers decide what to do based on live state.
   ["generatePlanBtn", "exerciseBtn", "triggerCheckinBtn"].forEach((id) => {
     const btn = document.getElementById(id);
     if (!btn) return;
-    btn.disabled = locked;
+    btn.disabled = false;
   });
 }
 
@@ -1932,12 +1940,21 @@ async function togglePoseFormCheck(wrap, item, btn) {
   if (btn.dataset.state === "on") {
     window.PoseFormCheck.stop();
     btn.dataset.state = "off";
-    btn.textContent = "Form Check";
+    btn.textContent = "Start guided form-check";
     document.body.classList.remove("pose-active");
-    // Restore demo video by re-running switchGalleryItem on the active idx
-    const activeIdx = Array.from(wrap.querySelectorAll(".gallery-thumb-btn"))
-      .findIndex((b) => b.classList.contains("active"));
-    switchGalleryItem(activeIdx >= 0 ? activeIdx : 0);
+    // Gallery cards: restore the active thumbnail's demo video.
+    // Chat cards (renderExerciseCard): no thumbnail strip, so we just
+    // swap the live-camera content back to the original placeholder.
+    if (wrap.classList.contains("exercise-card")) {
+      videoWrap.innerHTML = `<span class="video-placeholder-text">Add to today to load video</span>`;
+      videoWrap.className = "exercise-video-placeholder";
+      // keep id="galleryVideoWrap" so a re-toggle still finds it
+      videoWrap.id = "galleryVideoWrap";
+    } else {
+      const activeIdx = Array.from(wrap.querySelectorAll(".gallery-thumb-btn"))
+        .findIndex((b) => b.classList.contains("active"));
+      switchGalleryItem(activeIdx >= 0 ? activeIdx : 0);
+    }
     return;
   }
 
@@ -2313,7 +2330,52 @@ function renderExerciseCard(card) {
     </div>
   `;
   log.appendChild(wrap);
+  attachChatCardFormCheckBtn(wrap, card);
   scrollChatLog();
+}
+
+// Attach the "Start guided form-check" button to a chat-rendered exercise
+// card (the static card produced by renderExerciseCard, distinct from the
+// gallery cards in renderExerciseGallery). Form-check used to live on the
+// gallery only — that meant the symptom-adjustment Wall Sit card in chat
+// rendered with cues + "Add to today" but no path into the pose feature.
+// PR-A dropped the ?pose=1 URL flag; this wires the chat-card surface so
+// every supported exercise (PoseFormCheck.EXERCISES key) gets the CTA on
+// every render. Camera permission is requested at click time, not on
+// page load.
+function attachChatCardFormCheckBtn(wrap, card) {
+  if (!window.PoseFormCheck) {
+    console.warn("PoseFormCheck not loaded - pose.js failed to initialize");
+    return;
+  }
+  const exId = card.id || card.name;
+  if (!exId || !window.PoseFormCheck.EXERCISES?.[exId]) return;
+  const actions = wrap.querySelector(".exercise-actions");
+  if (!actions || actions.querySelector(".pose-form-check-btn")) return;
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "pose-form-check-btn";
+  btn.dataset.state = "off";
+  btn.textContent = "Start guided form-check";
+  btn.title = "Use your webcam for live rep + alignment feedback";
+  // togglePoseFormCheck expects a `wrap` whose internal #galleryVideoWrap
+  // is replaced with the camera frame. Chat cards don't have that
+  // structure; we build a single-item shim so the existing toggle logic
+  // works unchanged. The shim's #galleryVideoWrap replaces the
+  // .exercise-video-placeholder block on this card.
+  const item = {
+    ex: card,
+    genUrl: card.generated_video_url || "",
+    ytId: card.youtube_id || "",
+    watchUrl: card.youtube_watch_url || "",
+    thumb: card.thumbnail_url || "",
+  };
+  // Tag the placeholder so togglePoseFormCheck can find it via the same
+  // #galleryVideoWrap selector used for gallery cards.
+  const placeholder = wrap.querySelector(".exercise-video-placeholder");
+  if (placeholder) placeholder.id = "galleryVideoWrap";
+  btn.onclick = () => togglePoseFormCheck(wrap, item, btn);
+  actions.insertBefore(btn, actions.firstChild);
 }
 
 function revealVideoOnCard(wrap) {
