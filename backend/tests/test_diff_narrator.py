@@ -4,10 +4,13 @@ narrator_summary integration.
 Anthropic is mocked end-to-end — we never hit the real API. The goal of
 these tests is the behavior contract:
 
-  * happy path: returns the model's text
-  * empty diff: returns None without calling the model
-  * Anthropic error: returns None (caller falls back), no exception
-  * endpoint shape: clinician sees narrator_summary, patient self-fetch does not
+  * happy path: returns (text, "ok")
+  * empty diff: returns (None, "no_diff") without calling the model
+  * missing API key: returns (None, "no_api_key")
+  * Anthropic error: returns (None, "sdk_error") — no exception leaks
+  * empty / overlong response: returns (None, "empty_response")
+  * endpoint shape: clinician sees narrator_summary + narrator_status +
+                    patient_summary; patient self-fetch sees none of these
   * endpoint auth: 401 without bearer
 """
 from __future__ import annotations
@@ -87,9 +90,13 @@ def _clear_narrator_cache() -> None:
 # ---------------------------------------------------------------------------
 # diff_narrator.summarize() unit tests
 # ---------------------------------------------------------------------------
+#
+# summarize() now returns (text | None, status). status is one of:
+#   "ok" | "no_diff" | "no_api_key" | "sdk_error" | "empty_response"
+# Each test pins one of those branches.
 
 
-def test_summarize_happy_path_returns_model_text(monkeypatch):
+def test_summarize_happy_path_returns_text_and_ok_status(monkeypatch):
     _clear_narrator_cache()
     expected = (
         "Bumps stationary bike from 8 to 12 minutes and adds a yellow-band "
@@ -99,7 +106,7 @@ def test_summarize_happy_path_returns_model_text(monkeypatch):
     fake = _stub_anthropic(monkeypatch, response_text=expected)
 
     import diff_narrator
-    result = diff_narrator.summarize(
+    text, status = diff_narrator.summarize(
         active_payload={"week": 1, "exercises": [{"name": "bike", "sets": 1, "reps": 8}]},
         proposed_payload={"week": 2, "exercises": [{"name": "bike", "sets": 1, "reps": 12}]},
         intake_payload={"injury_type": "knee", "name": "Test Patient"},
@@ -111,7 +118,8 @@ def test_summarize_happy_path_returns_model_text(monkeypatch):
         clinician_id="clinician-uuid",
     )
 
-    assert result == expected
+    assert text == expected
+    assert status == "ok"
     # Confirm we hit Haiku 4.5 with the right system prompt and a single
     # user message that includes both payloads.
     assert fake.last_kwargs is not None
@@ -136,23 +144,25 @@ def test_summarize_caches_by_id_pair(monkeypatch):
         active_id="A",
         proposed_id="B",
     )
-    first = diff_narrator.summarize(**args)
+    first_text, first_status = diff_narrator.summarize(**args)
     # Mutate fake to prove cache hit (would return different text if called)
     fake._response_text = "should-not-appear"
-    second = diff_narrator.summarize(**args)
+    second_text, second_status = diff_narrator.summarize(**args)
 
-    assert first == "cached narration"
-    assert second == "cached narration"
+    assert first_text == "cached narration"
+    assert second_text == "cached narration"
+    assert first_status == "ok"
+    assert second_status == "ok"
 
 
-def test_summarize_returns_none_for_empty_diff(monkeypatch):
+def test_summarize_returns_no_diff_status_for_identical_payloads(monkeypatch):
     _clear_narrator_cache()
     fake = _stub_anthropic(monkeypatch, response_text="should not be called")
 
     import diff_narrator
     # Identical payloads -> no diff -> no narration, no model call.
     payload = {"week": 1, "exercises": [{"name": "x", "sets": 1, "reps": 1}]}
-    result = diff_narrator.summarize(
+    text, status = diff_narrator.summarize(
         active_payload=payload,
         proposed_payload=payload,
         intake_payload=None,
@@ -161,16 +171,17 @@ def test_summarize_returns_none_for_empty_diff(monkeypatch):
         active_id="A",
         proposed_id="A",
     )
-    assert result is None
+    assert text is None
+    assert status == "no_diff"
     assert fake.last_kwargs is None
 
 
-def test_summarize_returns_none_when_anthropic_raises(monkeypatch):
+def test_summarize_returns_sdk_error_status_when_anthropic_raises(monkeypatch):
     _clear_narrator_cache()
     _stub_anthropic(monkeypatch, raise_exc=RuntimeError("boom"))
 
     import diff_narrator
-    result = diff_narrator.summarize(
+    text, status = diff_narrator.summarize(
         active_payload={"week": 1},
         proposed_payload={"week": 2, "exercises": [{"name": "x", "sets": 1, "reps": 1}]},
         intake_payload=None,
@@ -179,16 +190,17 @@ def test_summarize_returns_none_when_anthropic_raises(monkeypatch):
         active_id="A",
         proposed_id="B",
     )
-    assert result is None
+    assert text is None
+    assert status == "sdk_error"
 
 
-def test_summarize_returns_none_for_overlong_response(monkeypatch):
+def test_summarize_returns_empty_response_status_for_overlong_text(monkeypatch):
     _clear_narrator_cache()
     too_long = "x" * 600
     _stub_anthropic(monkeypatch, response_text=too_long)
 
     import diff_narrator
-    result = diff_narrator.summarize(
+    text, status = diff_narrator.summarize(
         active_payload={"week": 1},
         proposed_payload={"week": 2, "exercises": [{"name": "x", "sets": 1, "reps": 1}]},
         intake_payload=None,
@@ -197,15 +209,37 @@ def test_summarize_returns_none_for_overlong_response(monkeypatch):
         active_id="A",
         proposed_id="B",
     )
-    assert result is None
+    assert text is None
+    assert status == "empty_response"
 
 
-def test_summarize_returns_none_when_api_key_missing(monkeypatch):
+def test_summarize_returns_empty_response_status_for_blank_text(monkeypatch):
+    """An empty string from the model is functionally the same as
+    overlong: the clinician got no usable summary. Both collapse to
+    `empty_response` so the UI shows one consistent micro-state."""
+    _clear_narrator_cache()
+    _stub_anthropic(monkeypatch, response_text="")
+
+    import diff_narrator
+    text, status = diff_narrator.summarize(
+        active_payload={"week": 1},
+        proposed_payload={"week": 2, "exercises": [{"name": "x", "sets": 1, "reps": 1}]},
+        intake_payload=None,
+        last_5_checkins=None,
+        recent_sessions=None,
+        active_id="A",
+        proposed_id="B",
+    )
+    assert text is None
+    assert status == "empty_response"
+
+
+def test_summarize_returns_no_api_key_status(monkeypatch):
     _clear_narrator_cache()
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
 
     import diff_narrator
-    result = diff_narrator.summarize(
+    text, status = diff_narrator.summarize(
         active_payload={"week": 1},
         proposed_payload={"week": 2, "exercises": [{"name": "x", "sets": 1, "reps": 1}]},
         intake_payload=None,
@@ -214,11 +248,13 @@ def test_summarize_returns_none_when_api_key_missing(monkeypatch):
         active_id="A",
         proposed_id="B",
     )
-    assert result is None
+    assert text is None
+    assert status == "no_api_key"
 
 
 # ---------------------------------------------------------------------------
-# GET /protocols/{id} integration: narrator_summary visibility
+# GET /protocols/{id} integration: narrator_summary + narrator_status +
+# patient_summary visibility
 # ---------------------------------------------------------------------------
 
 
@@ -305,6 +341,102 @@ def test_protocol_detail_includes_narrator_for_clinician(
     body = resp.json()
     assert "narrator_summary" in body
     assert body["narrator_summary"] == "Bike 8->12 min reflects pain trending down."
+    # PR-G: narrator_status now sits alongside the summary so the
+    # frontend can disambiguate failure modes.
+    assert body.get("narrator_status") == "ok"
+
+
+def test_protocol_detail_narrator_status_no_diff_when_payloads_match(
+    authed_clinician_client, monkeypatch,
+):
+    """Identical active/proposed -> narrator_status='no_diff' -> body=None.
+    This is the case Andre saw in production when stale drafts had been
+    superseded but still appeared in the queue."""
+    _clear_narrator_cache()
+    import protocol_repo
+
+    same_payload = {"week": 1, "phase": "acute",
+                    "exercises": [{"name": "bike", "sets": 1, "reps": 8}]}
+    target = {
+        "id": _PROTO_ID,
+        "token": _PATIENT_TOKEN,
+        "parent_id": None,
+        "payload": same_payload,
+        "status": "pending_review",
+        "created_by_agent": "test",
+        "created_at": datetime(2026, 5, 6, 12, 0, tzinfo=timezone.utc),
+        "reviewed_by": None,
+        "reviewed_at": None,
+        "review_notes": None,
+    }
+    active = dict(target)
+    active["id"] = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    active["status"] = "active"
+    monkeypatch.setattr(protocol_repo, "get",
+                        lambda pid: target if pid == _PROTO_ID else None)
+    monkeypatch.setattr(protocol_repo, "get_active",
+                        lambda tok: active if tok == _PATIENT_TOKEN else None)
+    _stub_user_store(monkeypatch)
+    # Anthropic must NOT be called on no_diff. Wire a tripwire.
+    _stub_anthropic(monkeypatch, raise_exc=AssertionError("must not call Haiku for no_diff"))
+    monkeypatch.setattr("main.is_clinician", lambda uid: True)
+
+    resp = authed_clinician_client.get(f"/protocols/{_PROTO_ID}")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body.get("narrator_summary") is None
+    assert body.get("narrator_status") == "no_diff"
+
+
+def test_protocol_detail_narrator_status_sdk_error(
+    authed_clinician_client, monkeypatch,
+):
+    """SDK raises -> status='sdk_error'. Frontend renders Retry pill."""
+    _clear_narrator_cache()
+    _stub_protocol_repo(monkeypatch)
+    _stub_user_store(monkeypatch)
+    _stub_anthropic(monkeypatch, raise_exc=RuntimeError("anthropic 503"))
+    monkeypatch.setattr("main.is_clinician", lambda uid: True)
+
+    resp = authed_clinician_client.get(f"/protocols/{_PROTO_ID}")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body.get("narrator_summary") is None
+    assert body.get("narrator_status") == "sdk_error"
+
+
+def test_protocol_detail_narrator_status_empty_response(
+    authed_clinician_client, monkeypatch,
+):
+    """Model returned >500 chars -> status='empty_response'."""
+    _clear_narrator_cache()
+    _stub_protocol_repo(monkeypatch)
+    _stub_user_store(monkeypatch)
+    _stub_anthropic(monkeypatch, response_text="x" * 600)
+    monkeypatch.setattr("main.is_clinician", lambda uid: True)
+
+    resp = authed_clinician_client.get(f"/protocols/{_PROTO_ID}")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body.get("narrator_summary") is None
+    assert body.get("narrator_status") == "empty_response"
+
+
+def test_protocol_detail_narrator_status_no_api_key(
+    authed_clinician_client, monkeypatch,
+):
+    """ANTHROPIC_API_KEY unset -> status='no_api_key'."""
+    _clear_narrator_cache()
+    _stub_protocol_repo(monkeypatch)
+    _stub_user_store(monkeypatch)
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr("main.is_clinician", lambda uid: True)
+
+    resp = authed_clinician_client.get(f"/protocols/{_PROTO_ID}")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body.get("narrator_summary") is None
+    assert body.get("narrator_status") == "no_api_key"
 
 
 def test_protocol_detail_omits_narrator_for_patient_self_fetch(
@@ -325,6 +457,9 @@ def test_protocol_detail_omits_narrator_for_patient_self_fetch(
     assert "narrator_summary" not in body, (
         "patient self-fetch should not include the AI-generated summary"
     )
+    assert "narrator_status" not in body
+    assert "patient_summary" not in body
+    assert "pain_trend" not in body
 
 
 def test_protocol_detail_rejects_unauthenticated(unauthed_client):

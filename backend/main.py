@@ -783,6 +783,10 @@ def get_protocol_detail(
 
     # AI-generated diff narration: clinician-only. Patients self-fetching
     # don't need the meta-explanation, and skipping the call saves cost.
+    # We expose BOTH narrator_summary (the text) and narrator_status (an
+    # enum: no_diff | no_api_key | sdk_error | empty_response | ok) so
+    # the dashboard can render a disambiguated micro-state per failure
+    # mode instead of one generic "Summary unavailable" string.
     if requester_is_clinician:
         import diff_narrator
         # Filter session_history down to actual symptom / pain check-ins
@@ -796,7 +800,7 @@ def get_protocol_detail(
         ][-5:]
         proposed_id = str(target.get("id") or protocol_id)
         active_id = str(active_for_diff["id"]) if active_for_diff else None
-        narration = diff_narrator.summarize(
+        narration, narrator_status = diff_narrator.summarize(
             active_payload=(active_for_diff or {}).get("payload") if active_for_diff else None,
             proposed_payload=target.get("payload"),
             intake_payload=intake,
@@ -808,8 +812,106 @@ def get_protocol_detail(
             clinician_id=user_id,
         )
         response["narrator_summary"] = narration
+        response["narrator_status"] = narrator_status
+
+        # Patient-at-a-glance: structured summary + last-5 pain trend.
+        # Computed server-side so the frontend doesn't have to denormalize.
+        # Clinician-only: this collates PHI (name, age, injury_type) into
+        # a single payload, so it follows the same gate as the narrator.
+        response["patient_summary"] = _build_patient_summary(
+            intake=intake,
+            target_payload=target.get("payload") or {},
+        )
+        response["pain_trend"] = _build_pain_trend(recent_sessions)
 
     return response
+
+
+def _build_patient_summary(
+    *,
+    intake: dict | None,
+    target_payload: dict,
+) -> dict:
+    """Compose the at-a-glance card for the clinician dashboard.
+
+    Pulls from the patient's intake (display_name, age, injury_type,
+    surgery_date, symptoms, goals) plus the proposed protocol payload
+    (phase, week) plus the clinical_taxonomy resolver (body_region).
+    Computes post_op_days from surgery_date when present.
+
+    PHI note: this dict is returned over the wire, so the same gate
+    (clinician role) that protects narrator_summary protects it. Never
+    write the contents to logs.
+    """
+    import clinical_taxonomy
+
+    intake = intake or {}
+    display_name = intake.get("name")
+    age = intake.get("age")
+    injury_type = intake.get("injury_type")
+    surgery_date = intake.get("surgery_date")
+    symptoms = intake.get("symptoms") or []
+    goals = intake.get("goals") or []
+
+    # body_region uses the deterministic-first map; classify_freetext()
+    # is intentionally NOT used here so the at-a-glance card stays
+    # synchronous + free. A null badge is fine; the clinician sees the
+    # raw injury_type underneath.
+    try:
+        body_region = clinical_taxonomy.body_region(injury_type)
+    except Exception:  # noqa: BLE001 — taxonomy is best-effort here
+        body_region = None
+
+    post_op_days = None
+    if surgery_date:
+        try:
+            # surgery_date is "YYYY-MM-DD" from the intake schema. If a
+            # patient or agent typed something weirder, just leave it
+            # blank rather than crash the whole detail call.
+            sd = datetime.strptime(str(surgery_date)[:10], "%Y-%m-%d").date()
+            today = datetime.now(timezone.utc).date()
+            post_op_days = max(0, (today - sd).days)
+        except (ValueError, TypeError):
+            post_op_days = None
+
+    return {
+        "display_name": display_name,
+        "age": age,
+        "injury_type": injury_type,
+        "body_region": body_region,
+        "phase": target_payload.get("phase"),
+        "week": target_payload.get("week"),
+        "post_op_days": post_op_days,
+        "symptoms": symptoms,
+        "goals": goals,
+    }
+
+
+def _build_pain_trend(recent_sessions: list[dict]) -> list[dict]:
+    """Return up to 5 most-recent pain-level check-ins, oldest-first.
+
+    The session_history store mixes pain check-ins, symptom check-ins,
+    and set-completion entries. We keep only entries with a numeric
+    pain_level and surface (date, level) pairs for the dashboard's
+    sparkline-equivalent.
+    """
+    if not recent_sessions:
+        return []
+    pain_entries: list[dict] = []
+    for entry in recent_sessions:
+        level = entry.get("pain_level")
+        if level is None:
+            continue
+        try:
+            level_int = int(level)
+        except (TypeError, ValueError):
+            continue
+        date = entry.get("recorded_at") or entry.get("created_at") or ""
+        # Keep just the date prefix (YYYY-MM-DD) for the chip render.
+        date_str = str(date)[:10] if date else ""
+        pain_entries.append({"date": date_str, "level": level_int})
+    # Last 5, oldest -> newest.
+    return pain_entries[-5:]
 
 
 def _serialize_protocol_row(row: dict | None) -> dict | None:
@@ -883,6 +985,34 @@ def reject_protocol(
         "reviewed_at": result["reviewed_at"].isoformat()
         if result.get("reviewed_at") else None,
     }
+
+
+class RawContextRevealedRequest(BaseModel):
+    target_token: str
+
+
+@app.post("/audit/raw-context-revealed")
+def audit_raw_context_revealed(
+    req: RawContextRevealedRequest,
+    user_id: str = Depends(current_user_id),
+):
+    """Audit log: a clinician opened the raw-JSON context disclosure.
+
+    Triggered by the <details> toggle on the clinician dashboard. Writes
+    a single server-side log line containing the reviewer + target UUIDs
+    only. Patient name is intentionally NOT logged.
+
+    Clinician-only — patients have no UI path that hits this endpoint.
+    The role check 403s non-clinicians so accidental hits don't pollute
+    the audit log.
+    """
+    if not is_clinician(user_id):
+        raise HTTPException(status_code=403, detail="clinician role required")
+    logger.info(
+        "audit clinician_revealed_raw_context reviewer_id=%s target_token=%s",
+        user_id, req.target_token,
+    )
+    return {"logged": True}
 
 
 # -------------------------------------------------------------------------
