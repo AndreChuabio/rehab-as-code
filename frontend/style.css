@@ -2800,3 +2800,171 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   .review-pill { top: 50px; right: 12px; }
   .review-pill-panel { max-width: calc(100vw - 24px); }
 }
+
+/* ── Auto check-in card (PR-N) ──────────────────────────────────────────
+   Rendered into chatLog after a guided pose-form-check session. Mobile-
+   first: must render legibly at 375px. Pain/RPE dots are tap targets at
+   ≥32x32px (40x40 default, 36x36 on narrow screens). */
+.auto-checkin-card {
+  align-self: stretch;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 14px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex-shrink: 0;
+  animation: fadeIn 0.2s ease-out;
+}
+.auto-checkin-header { display: flex; align-items: center; }
+.auto-checkin-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+.auto-checkin-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-areas: "label value" "scale scale";
+  row-gap: 6px;
+  column-gap: 8px;
+  align-items: center;
+}
+.auto-checkin-row .auto-checkin-label { grid-area: label; }
+.auto-checkin-row .auto-checkin-value { grid-area: value; }
+.auto-checkin-row .auto-checkin-scale { grid-area: scale; }
+.auto-checkin-row.notes {
+  grid-template-columns: 1fr;
+  grid-template-areas: "label" "scale";
+}
+.auto-checkin-label {
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.auto-checkin-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  min-width: 1.5ch;
+  text-align: right;
+}
+.auto-checkin-scale {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.auto-checkin-dot {
+  width: 40px;
+  height: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  transition: transform 0.06s ease-out, box-shadow 0.12s ease-out;
+}
+.auto-checkin-dot:hover { transform: scale(1.05); }
+.auto-checkin-dot:focus-visible {
+  outline: 2px solid var(--accent2);
+  outline-offset: 2px;
+}
+.auto-checkin-dot.tone-good   { border-color: var(--accent); color: var(--accent); }
+.auto-checkin-dot.tone-warn   { border-color: var(--warn);   color: var(--warn); }
+.auto-checkin-dot.tone-danger { border-color: var(--danger); color: var(--danger); }
+.auto-checkin-dot.selected.tone-good   { background: var(--accent); color: #0d1117; }
+.auto-checkin-dot.selected.tone-warn   { background: var(--warn);   color: #0d1117; }
+.auto-checkin-dot.selected.tone-danger { background: var(--danger); color: #0d1117; }
+.auto-checkin-dot.selected {
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.08);
+}
+
+.auto-checkin-notes-input {
+  width: 100%;
+  background: #0d1117;
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+}
+.auto-checkin-notes-input:focus {
+  outline: none;
+  border-color: var(--accent2);
+}
+
+.auto-checkin-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.auto-checkin-submit {
+  background: var(--accent);
+  color: #0d1117;
+  border: 1px solid var(--accent);
+  padding: 10px 16px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 40px;
+  transition: filter 0.12s ease-out;
+}
+.auto-checkin-submit:hover:not(:disabled) { filter: brightness(1.1); }
+.auto-checkin-submit:disabled { opacity: 0.6; cursor: progress; }
+
+.auto-checkin-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 13px;
+}
+.auto-checkin-status.error {
+  background: rgba(248, 113, 113, 0.08);
+  border: 1px solid var(--danger);
+  color: var(--danger);
+}
+.auto-checkin-retry {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  padding: 4px 10px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.auto-checkin-logged {
+  text-align: center;
+  font-size: 14px;
+  color: var(--accent);
+  padding: 10px;
+  font-weight: 600;
+}
+
+@media (max-width: 480px) {
+  .auto-checkin-card { padding: 12px; }
+  .auto-checkin-dot {
+    width: 36px;
+    height: 36px;
+    min-width: 36px;
+    min-height: 36px;
+    font-size: 11px;
+  }
+  .auto-checkin-scale { gap: 4px; }
+}

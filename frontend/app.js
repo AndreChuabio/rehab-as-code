@@ -2071,6 +2071,11 @@ const GUIDED = {
 // JWT source as /chat and /protocol. Kept the helper removed so there's no
 // drift between two ways of building the Authorization header.
 
+// Returns { ok: boolean, sessionId: string|null, worstStatus: string|null }
+// — the auto-checkin card uses this to decide whether to render and to
+// pre-fill the pain dot. We deliberately do NOT show the card on failure:
+// the workout wasn't recorded server-side, so a check-in here would be
+// orphan data (PR-N spec: no silent fallbacks).
 async function postPoseSession(exercise, repsHistory, warnings, repSummary) {
   const startedAt = new Date(
     Date.now() - Math.max(60_000, repsHistory.length * 4_000)
@@ -2105,13 +2110,20 @@ async function postPoseSession(exercise, repsHistory, warnings, repSummary) {
     });
     if (res.status === 401) {
       showToast("Set not logged — sign in to save your progress", "info");
-      return;
+      return { ok: false, sessionId: null, worstStatus: null };
     }
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const out = await res.json().catch(() => ({}));
     showToast("Set logged — Maya can see it now", "info");
+    return {
+      ok: true,
+      sessionId: out.session_id || null,
+      worstStatus: out.worst_status || null,
+    };
   } catch (e) {
     console.warn("postPoseSession failed:", e);
     showToast(`Set log failed: ${e.message}`, "error");
+    return { ok: false, sessionId: null, worstStatus: null };
   }
 }
 
@@ -2469,7 +2481,20 @@ async function togglePoseFormCheck(wrap, item, btn) {
     if (!guided.submitted) {
       guided.submitted = true;
       const repSummary = { repCount: totalReps };
-      postPoseSession(item.ex, guided.repsHistoryAll, guided.warningsAll, repSummary);
+      // Chain the auto check-in card off the /pose/session POST. We only
+      // render the card on success: a failed POST means the workout
+      // wasn't recorded, and a check-in linked to a missing session is
+      // orphan data (PR-N: no silent fallbacks).
+      postPoseSession(
+        item.ex, guided.repsHistoryAll, guided.warningsAll, repSummary,
+      ).then((result) => {
+        if (!result || !result.ok) return;
+        renderAutoCheckinCard({
+          sessionId: result.sessionId,
+          worstStatus: result.worstStatus,
+          exerciseName: item.ex.name || item.ex.id,
+        });
+      });
     }
   }
 
@@ -2980,6 +3005,193 @@ function revealVideoOnCard(wrap) {
 function scrollChatLog() {
   const log = document.getElementById("chatLog");
   if (log) log.scrollTop = log.scrollHeight;
+}
+
+// ── Auto check-in card (PR-N) ────────────────────────────────────────────────
+//
+// Rendered after a guided pose-form-check session completes and the
+// /pose/session POST returns success. Pre-fills the pain dot from the
+// just-finished set's worst rep (bad -> 5, warn -> 3, else -> 1) and the
+// RPE dot at 5. Patient adjusts via clickable scales, optionally adds a
+// note, and clicks "Log this check-in" -> POST /checkins. Card persists
+// in chat scroll until the patient interacts (no auto-dismiss).
+
+const AUTO_CHECKIN_PAIN_PREFILL = { bad: 5, warn: 3, good: 1 };
+const AUTO_CHECKIN_RPE_DEFAULT = 5;
+const AUTO_CHECKIN_NOTES_MAX = 200;  // UI cap; backend sanitizes/truncates to 500
+
+function renderAutoCheckinCard({ sessionId, worstStatus, exerciseName }) {
+  const log = document.getElementById("chatLog");
+  if (!log) return;
+
+  const initialPain =
+    AUTO_CHECKIN_PAIN_PREFILL[worstStatus] ?? AUTO_CHECKIN_PAIN_PREFILL.good;
+  const state = {
+    pain: initialPain,
+    rpe: AUTO_CHECKIN_RPE_DEFAULT,
+    notes: "",
+    sessionId: sessionId || null,
+    submitted: false,
+  };
+
+  const card = document.createElement("div");
+  card.className = "auto-checkin-card";
+  card.setAttribute("role", "group");
+  card.setAttribute("aria-label", "Post-set check-in");
+
+  const exLabel = exerciseName ? ` after ${escapeHtml(exerciseName)}` : "";
+
+  card.innerHTML = `
+    <div class="auto-checkin-header">
+      <span class="auto-checkin-title">Set complete${exLabel}. How did that feel?</span>
+    </div>
+
+    <div class="auto-checkin-row">
+      <label class="auto-checkin-label">Pain right now (0-10)</label>
+      <div class="auto-checkin-scale" data-scale="pain" role="radiogroup" aria-label="Pain level"></div>
+      <span class="auto-checkin-value" data-value="pain">${initialPain}</span>
+    </div>
+
+    <div class="auto-checkin-row">
+      <label class="auto-checkin-label">Effort (RPE 1-10)</label>
+      <div class="auto-checkin-scale" data-scale="rpe" role="radiogroup" aria-label="Effort level"></div>
+      <span class="auto-checkin-value" data-value="rpe">${AUTO_CHECKIN_RPE_DEFAULT}</span>
+    </div>
+
+    <div class="auto-checkin-row notes">
+      <label class="auto-checkin-label" for="autoCheckinNotes">Notes (optional)</label>
+      <input id="autoCheckinNotes" class="auto-checkin-notes-input" type="text"
+             maxlength="${AUTO_CHECKIN_NOTES_MAX}"
+             placeholder="Anything to flag for Maya?" />
+    </div>
+
+    <div class="auto-checkin-actions">
+      <button class="auto-checkin-submit" type="button">Log this check-in</button>
+    </div>
+    <div class="auto-checkin-status" hidden></div>
+  `;
+
+  // Build pain scale (0-10) and rpe scale (1-10). Each dot is a tap
+  // target ≥32x32 (CSS).
+  const buildScale = (key, min, max, initial) => {
+    const wrap = card.querySelector(`[data-scale="${key}"]`);
+    for (let i = min; i <= max; i++) {
+      const dot = document.createElement("button");
+      dot.type = "button";
+      dot.className = `auto-checkin-dot ${classForPain(key, i)}`;
+      dot.setAttribute("role", "radio");
+      dot.setAttribute("aria-label", `${key} ${i}`);
+      dot.setAttribute("aria-checked", String(i === initial));
+      dot.dataset.value = String(i);
+      if (i === initial) dot.classList.add("selected");
+      dot.addEventListener("click", () => {
+        if (state.submitted) return;
+        state[key] = i;
+        wrap.querySelectorAll(".auto-checkin-dot").forEach((d) => {
+          const isSel = Number(d.dataset.value) === i;
+          d.classList.toggle("selected", isSel);
+          d.setAttribute("aria-checked", String(isSel));
+        });
+        const valEl = card.querySelector(`[data-value="${key}"]`);
+        if (valEl) valEl.textContent = String(i);
+      });
+      wrap.appendChild(dot);
+    }
+  };
+  buildScale("pain", 0, 10, initialPain);
+  buildScale("rpe", 1, 10, AUTO_CHECKIN_RPE_DEFAULT);
+
+  const notesInput = card.querySelector("#autoCheckinNotes");
+  notesInput.addEventListener("input", () => {
+    state.notes = notesInput.value;
+  });
+
+  const submitBtn = card.querySelector(".auto-checkin-submit");
+  const statusEl = card.querySelector(".auto-checkin-status");
+
+  const renderRetry = (errMsg) => {
+    statusEl.hidden = false;
+    statusEl.className = "auto-checkin-status error";
+    statusEl.innerHTML = "";
+    const msg = document.createElement("span");
+    msg.textContent = errMsg || "Couldn't save check-in. Try again.";
+    statusEl.appendChild(msg);
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "auto-checkin-retry";
+    retry.textContent = "Retry";
+    retry.addEventListener("click", () => {
+      statusEl.hidden = true;
+      doSubmit();
+    });
+    statusEl.appendChild(retry);
+    submitBtn.disabled = false;
+    submitBtn.textContent = "Log this check-in";
+  };
+
+  const renderLogged = () => {
+    state.submitted = true;
+    // Replace card body with a single confirmation row using Unicode check.
+    card.innerHTML = `<div class="auto-checkin-logged">Logged. ✓</div>`;
+  };
+
+  async function doSubmit() {
+    submitBtn.disabled = true;
+    submitBtn.textContent = "Saving...";
+    statusEl.hidden = true;
+    try {
+      const res = await postAutoCheckin({
+        pain_level: state.pain,
+        rpe: state.rpe,
+        notes: state.notes ? state.notes.slice(0, AUTO_CHECKIN_NOTES_MAX) : null,
+        associated_session_id: state.sessionId,
+      });
+      if (res.status === 401) {
+        showToast("Sign in to save your check-in", "info");
+        renderRetry("Sign in to save your check-in.");
+        return;
+      }
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        console.warn("postAutoCheckin failed:", res.status, txt);
+        renderRetry();
+        return;
+      }
+      renderLogged();
+      showToast("Check-in logged", "info");
+    } catch (e) {
+      console.warn("postAutoCheckin threw:", e);
+      renderRetry();
+    }
+  }
+
+  submitBtn.addEventListener("click", doSubmit);
+
+  log.appendChild(card);
+  scrollChatLog();
+  return card;
+}
+
+// Color class for a scale dot. Pain: 0-2 good (green), 3-6 warn (amber),
+// 7-10 danger (red). RPE: same shape — low effort green, high red.
+function classForPain(key, value) {
+  if (key === "pain") {
+    if (value <= 2) return "tone-good";
+    if (value <= 6) return "tone-warn";
+    return "tone-danger";
+  }
+  // rpe: 1-3 good, 4-7 warn, 8-10 danger
+  if (value <= 3) return "tone-good";
+  if (value <= 7) return "tone-warn";
+  return "tone-danger";
+}
+
+async function postAutoCheckin(payload) {
+  return authedFetch(`${API_BASE}/checkins`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
 }
 
 // "Coach Maya is on it" transient. Quick-action buttons + sendChat() both
