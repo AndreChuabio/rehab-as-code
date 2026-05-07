@@ -386,6 +386,118 @@
   color: #c5cdd9;
 }
 
+/* Data-integrity banner. Amber accent — sits between the green
+   patient-summary card and the red safety-concerns block. Signals
+   "review the data, this looks stale" rather than "patient safety
+   risk". Catches historical protocols whose exercise body_region
+   doesn't match the patient's injury (PR-F prevents this going
+   forward; this banner surfaces existing rows that pre-date PR-F).
+   The block is a <details> element so the mismatch list collapses
+   away after the clinician reads it. */
+.data-integrity {
+  background: #2a2418;
+  border: 1px solid #6a5a2a;
+  border-left: 3px solid var(--warn, #e3a845);
+  border-radius: 6px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+}
+
+.data-integrity-summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  outline: none;
+}
+
+.data-integrity-summary::-webkit-details-marker {
+  display: none;
+}
+
+.data-integrity-label {
+  font-size: 11px;
+  color: var(--warn, #e3a845);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-weight: 700;
+}
+
+.data-integrity-toggle {
+  font-size: 11px;
+  color: #b8a268;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.data-integrity[open] .data-integrity-toggle::after {
+  content: " (collapse)";
+}
+
+.data-integrity-body {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.data-integrity-row {
+  font-size: 13px;
+  line-height: 1.45;
+  color: #e6dabd;
+}
+
+.data-integrity-cap {
+  color: #b8a268;
+  font-weight: 600;
+  margin-right: 6px;
+}
+
+.data-integrity-val {
+  color: #f1e3bf;
+}
+
+.data-integrity-list {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.data-integrity-item {
+  display: grid;
+  grid-template-columns: 70px 1fr 80px;
+  gap: 8px;
+  align-items: baseline;
+  font-size: 12px;
+  background: #1f1a10;
+  border: 1px solid #4a3f1f;
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+.data-integrity-loc {
+  color: #d9b566;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-weight: 700;
+  font-size: 10px;
+}
+
+.data-integrity-ex {
+  color: #e6e8eb;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+.data-integrity-region {
+  color: #b8a268;
+  text-align: right;
+  font-size: 11px;
+}
+
 /* Safety review concerns block. Sits ABOVE the narrator summary so a
    clinician sees what the SafetyReviewAgent flagged before any other
    content. Red accent on the left edge mirrors the queue-item-flagged

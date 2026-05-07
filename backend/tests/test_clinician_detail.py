@@ -166,6 +166,11 @@ def test_patient_summary_present_for_clinician(authed_clinician_client, monkeypa
 
     summary = body.get("patient_summary")
     assert summary is not None, "clinician response should include patient_summary"
+    # PR-I: data_integrity diagnostic ships alongside patient_summary.
+    assert "data_integrity" in body, (
+        "clinician response should include data_integrity (PR-I)"
+    )
+    assert body["data_integrity"]["status"] in {"ok", "region_mismatch"}
     assert summary["display_name"] == "Christian Reyes"
     assert summary["age"] == 34
     assert summary["injury_type"] == "ACL reconstruction"
@@ -302,6 +307,8 @@ def test_patient_self_fetch_omits_clinician_only_fields(
     assert "pain_trend" not in body
     assert "narrator_summary" not in body
     assert "narrator_status" not in body
+    # PR-I: data_integrity is also clinician-only.
+    assert "data_integrity" not in body
 
 
 # ---------------------------------------------------------------------------

@@ -89,6 +89,33 @@
           </div>
         </section>
 
+        <!-- Data-integrity banner. Amber accent, visually between the
+             green patient-summary card and the red safety-concerns block.
+             Surfaces when the protocol contains exercises whose body
+             region doesn't match the patient's injury — catches the
+             historical inconsistency that PR-F prevents going forward. -->
+        <details class="data-integrity" id="dataIntegrity" hidden>
+          <summary class="data-integrity-summary">
+            <span class="data-integrity-label">Data integrity warning</span>
+            <span class="data-integrity-toggle">Click to inspect</span>
+          </summary>
+          <div class="data-integrity-body">
+            <div class="data-integrity-row" id="diIntakeRow">
+              <span class="data-integrity-cap">Patient injury:</span>
+              <span class="data-integrity-val" id="diIntake"></span>
+            </div>
+            <div class="data-integrity-row" id="diActiveRow" hidden>
+              <span class="data-integrity-cap">Active protocol contains:</span>
+              <span class="data-integrity-val" id="diActiveRegions"></span>
+            </div>
+            <div class="data-integrity-row" id="diProposedRow" hidden>
+              <span class="data-integrity-cap">Proposed protocol contains:</span>
+              <span class="data-integrity-val" id="diProposedRegions"></span>
+            </div>
+            <ul class="data-integrity-list" id="diMismatchList"></ul>
+          </div>
+        </details>
+
         <details class="clinician-context" id="rawContextDetails">
           <summary>Show raw context</summary>
           <pre id="detailContext" class="raw-context-pre"></pre>

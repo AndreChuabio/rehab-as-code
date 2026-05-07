@@ -228,6 +228,11 @@
     // hidden card if the backend predates this endpoint shape.
     renderPatientSummary(detail.patient_summary, detail.pain_trend);
 
+    // Data-integrity banner (amber). Catches stale protocols where the
+    // exercise body_region doesn't match the patient's injury. Hidden
+    // on status === "ok"; populated when status === "region_mismatch".
+    renderDataIntegrity(detail.data_integrity, detail.patient_summary);
+
     // Raw context lives behind a <details> toggle, defaulting to closed.
     // user-select:none on the <pre> to disrupt accidental Cmd-C; this is
     // friction, not security — DevTools defeats it. The goal is "no
@@ -476,6 +481,69 @@
     const arrow = last < first ? "↘" : (last > first ? "↗" : "→");
     const cap = `<span class="pain-trend-cap">Trend:</span>`;
     return `${cap} ${arrow} ${first} → ${last} (last ${trend.length} check-in${trend.length === 1 ? "" : "s"})`;
+  }
+
+  // ── Data-integrity banner ─────────────────────────────────────────────
+  //
+  // Renders the amber "data integrity" banner when the backend reports a
+  // region mismatch between intake.injury_type and the exercises in the
+  // active or proposed protocol. Status `ok` (or absent) hides it
+  // entirely. Status `region_mismatch` shows: patient injury, regions
+  // present in active, regions present in proposed, and a collapsible
+  // list of the offending exercise ids.
+  //
+  // Visually distinct from the red safety-concerns block (PR-C) and the
+  // green patient-summary card. The colour signals "data hygiene" not
+  // "patient safety", so the clinician knows it's a review-the-staleness
+  // prompt rather than a safety-block.
+  function renderDataIntegrity(integrity, summary) {
+    const block = $("dataIntegrity");
+    if (!block) return;
+    if (!integrity || integrity.status !== "region_mismatch") {
+      block.hidden = true;
+      block.open = false;
+      return;
+    }
+
+    const expected = integrity.expected_region
+      ? String(integrity.expected_region).replace("_", " ")
+      : "unknown";
+    const injuryType = (summary && summary.injury_type) || "(injury type not on file)";
+    $("diIntake").textContent = `${expected} (${injuryType})`;
+
+    const activeRegions = Array.isArray(integrity.active_regions) ? integrity.active_regions : [];
+    const proposedRegions = Array.isArray(integrity.proposed_regions) ? integrity.proposed_regions : [];
+
+    const fmt = (regions) => regions.map((r) => String(r).replace("_", " ")).join(", ");
+    if (activeRegions.length > 0) {
+      $("diActiveRegions").textContent = `${fmt(activeRegions)} exercises`;
+      $("diActiveRow").hidden = false;
+    } else {
+      $("diActiveRow").hidden = true;
+    }
+    if (proposedRegions.length > 0) {
+      $("diProposedRegions").textContent = `${fmt(proposedRegions)} exercises`;
+      $("diProposedRow").hidden = false;
+    } else {
+      $("diProposedRow").hidden = true;
+    }
+
+    const list = $("diMismatchList");
+    const mismatches = Array.isArray(integrity.mismatches) ? integrity.mismatches : [];
+    if (list) {
+      list.innerHTML = mismatches.map((m) => {
+        const loc = escapeHtml(m.location || "?");
+        const exId = escapeHtml(m.exercise_id || "(unnamed)");
+        const region = escapeHtml(String(m.actual_region || "").replace("_", " "));
+        return `<li class="data-integrity-item">
+          <span class="data-integrity-loc">${loc}</span>
+          <span class="data-integrity-ex">${exId}</span>
+          <span class="data-integrity-region">${region}</span>
+        </li>`;
+      }).join("");
+    }
+
+    block.hidden = false;
   }
 
   // ── Narrator status switch ────────────────────────────────────────────

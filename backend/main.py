@@ -824,7 +824,126 @@ def get_protocol_detail(
         )
         response["pain_trend"] = _build_pain_trend(recent_sessions)
 
+        # Data-integrity warning. Cross-checks the patient's expected
+        # body_region (derived from intake.injury_type) against every
+        # exercise in BOTH the active and proposed payloads. PR-F anchors
+        # *new* drafts; this catches *historical* inconsistency that's
+        # already on disk. Clinician-only diagnostic.
+        response["data_integrity"] = _build_data_integrity(
+            intake=intake,
+            active_payload=(active_for_diff or {}).get("payload") if active_for_diff else None,
+            proposed_payload=target.get("payload"),
+            patient_token=target["token"],
+        )
+
     return response
+
+
+def _build_data_integrity(
+    *,
+    intake: dict | None,
+    active_payload: dict | None,
+    proposed_payload: dict | None,
+    patient_token: str,
+) -> dict:
+    """Detect body-region mismatches between intake.injury_type and the
+    exercises in the active + proposed protocol payloads.
+
+    Returns a structured payload the clinician dashboard can render as an
+    amber "data integrity" banner. Status is `region_mismatch` when any
+    exercise's body_region differs from the patient's expected region (and
+    is not `multi`); otherwise `ok`.
+
+    No false positives when the expected region is unknowable. If
+    intake.injury_type is missing or doesn't resolve via the deterministic
+    taxonomy, expected_region is None and status stays `ok` — the banner
+    suppresses on the frontend.
+
+    PHI hygiene: logs token + status enum + counts only. Never logs
+    injury_type or exercise ids.
+    """
+    import clinical_taxonomy
+    import exercise_kb
+
+    intake = intake or {}
+    injury_type = intake.get("injury_type")
+
+    # Deterministic-first resolver. We intentionally skip the LLM fallback
+    # (classify_freetext) because the dashboard call needs to stay
+    # synchronous and free; a null expected_region just means "we don't
+    # know what to expect, so don't flag."
+    try:
+        expected_region = clinical_taxonomy.body_region(injury_type)
+    except Exception:  # noqa: BLE001 — taxonomy is best-effort here
+        expected_region = None
+
+    def _regions_for(payload: dict | None) -> tuple[list[str], list[dict]]:
+        """Walk a payload's exercises, return (unique_regions, mismatches)."""
+        if not payload:
+            return [], []
+        seen: list[str] = []
+        seen_set: set[str] = set()
+        mismatches_local: list[dict] = []
+        for ex in payload.get("exercises") or []:
+            ex_id = ex.get("id") or ex.get("name") or ""
+            if not ex_id:
+                continue
+            ex_region = exercise_kb.body_region_for(ex_id)
+            if ex_region is None:
+                # Unknown to the library — same posture as the drafter
+                # validator: don't flag, the clinician can still see the
+                # exercise in the diff and reject if they want to.
+                continue
+            if ex_region not in seen_set:
+                seen_set.add(ex_region)
+                seen.append(ex_region)
+            # Mismatch detection only runs when we have something to
+            # compare against. `multi` per-exercise means the exercise
+            # legitimately spans regions; never flag those.
+            if expected_region and expected_region != "multi" and ex_region != "multi":
+                if ex_region != expected_region:
+                    mismatches_local.append({
+                        "exercise_id": str(ex_id),
+                        "actual_region": ex_region,
+                    })
+        return seen, mismatches_local
+
+    active_regions, active_mismatches = _regions_for(active_payload)
+    proposed_regions, proposed_mismatches = _regions_for(proposed_payload)
+
+    mismatches: list[dict] = []
+    for m in active_mismatches:
+        mismatches.append({"location": "active", **m})
+    for m in proposed_mismatches:
+        mismatches.append({"location": "proposed", **m})
+
+    # When we don't know what the expected region is, never raise a
+    # mismatch — that would manufacture false positives on intakes we
+    # haven't classified yet.
+    if not expected_region:
+        status = "ok"
+        mismatches = []
+    else:
+        status = "region_mismatch" if mismatches else "ok"
+
+    logger.info(
+        "data_integrity token=%s status=%s expected=%s "
+        "active_regions=%d proposed_regions=%d mismatches=%d",
+        patient_token,
+        status,
+        expected_region or "unknown",
+        len(active_regions),
+        len(proposed_regions),
+        len(mismatches),
+    )
+
+    return {
+        "status": status,
+        "expected_region": expected_region,
+        "active_regions": active_regions,
+        "proposed_regions": proposed_regions,
+        "mismatches": mismatches,
+    }
 
 
 def _build_patient_summary(
