@@ -5,6 +5,7 @@ uvicorn[standard]
 anthropic
 openai>=2.30
 psycopg[binary]>=3.2
+psycopg-pool>=3.2
 pyjwt>=2.10
 httpx
 python-dotenv

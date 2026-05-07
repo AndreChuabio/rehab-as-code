@@ -198,18 +198,17 @@ def is_clinician(user_id: str | None) -> bool:
     """
     if not user_id:
         return False
-    dsn = os.getenv("DATABASE_URL", "").strip()
-    if not dsn:
-        return False
     try:
-        import psycopg
+        from db import DbConfigError, get_conn
     except ImportError:
         return False
     try:
-        with psycopg.connect(dsn, autocommit=True) as conn, conn.cursor() as cur:
+        with get_conn(autocommit=True) as conn, conn.cursor() as cur:
             cur.execute("SELECT 1 FROM clinicians WHERE user_id = %s LIMIT 1",
                         (user_id,))
             return cur.fetchone() is not None
+    except DbConfigError:
+        return False
     except Exception as exc:
         logger.warning("is_clinician check failed: %s", exc)
         return False

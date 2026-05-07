@@ -595,12 +595,17 @@ def _pg_dsn() -> str:
 
 
 def _pg_conn():
-    """Open a connection. Caller is responsible for `with` / close."""
-    import psycopg
-    from psycopg.rows import dict_row
+    """Yield a pooled connection (autocommit=True for legacy single-statement writes).
+
+    Routes through backend.db.get_conn so every PG read shares one pool
+    across the FastAPI process. Tests monkeypatch this name directly
+    (see test_display_name.py), so the get_conn import stays inside the
+    function body to keep the patch surface narrow.
+    """
+    from db import get_conn
 
     _pg_init()
-    return psycopg.connect(_pg_dsn(), row_factory=dict_row, autocommit=True)
+    return get_conn(autocommit=True)
 
 
 def _pg_init() -> None:

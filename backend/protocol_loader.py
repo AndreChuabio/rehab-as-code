@@ -152,21 +152,13 @@ def _fetch_active_from_supabase(token: str) -> dict | None:
     payload) are logged and treated as None so the request path keeps
     working under the flag.
     """
-    dsn = os.getenv("DATABASE_URL", "").strip()
-    if not dsn:
-        logger.warning(
-            "PROTOCOL_SOURCE=supabase but DATABASE_URL not set; falling back"
-        )
-        return None
     try:
-        import psycopg
-        from psycopg.rows import dict_row
+        from db import DbConfigError, get_conn
     except ImportError:
-        logger.warning("psycopg not installed; supabase read path disabled")
+        logger.warning("backend.db not installed; supabase read path disabled")
         return None
     try:
-        with psycopg.connect(dsn, row_factory=dict_row, autocommit=True) as conn, \
-                conn.cursor() as cur:
+        with get_conn(autocommit=True) as conn, conn.cursor() as cur:
             cur.execute(
                 "SELECT payload FROM protocols "
                 "WHERE token = %s AND status = 'active' "
@@ -174,6 +166,9 @@ def _fetch_active_from_supabase(token: str) -> dict | None:
                 (token,),
             )
             row = cur.fetchone()
+    except DbConfigError as exc:
+        logger.warning("PROTOCOL_SOURCE=supabase but %s; falling back", exc)
+        return None
     except Exception as exc:
         logger.exception("supabase protocol fetch failed: %s", exc)
         return None
