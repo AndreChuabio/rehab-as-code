@@ -49,12 +49,29 @@ class _FakeResponse:
 
 class _FakeAnthropicClient:
     """Stand-in for anthropic.Anthropic. Captures the last call args
-    and either returns a stub response or raises a configured exception."""
+    and either returns a stub response, raises a configured exception,
+    or — when `response_sequence` is supplied — pops the next item per
+    invocation. The sequence form is what lets us pin retry behavior:
+    e.g. `["", "valid text"]` proves a retry-on-empty turned into a
+    success; `["", ""]` proves we exhaust retries and return
+    empty_response.
 
-    def __init__(self, response_text: str | None = None, raise_exc: Exception | None = None) -> None:
+    `call_count` tracks how many times `messages.create` was invoked so
+    tests can assert "exactly 1" (no retry) or "exactly 2" (retried
+    once). `last_kwargs` keeps the most recent call's kwargs for
+    introspection."""
+
+    def __init__(
+        self,
+        response_text: str | None = None,
+        raise_exc: Exception | None = None,
+        response_sequence: list[Any] | None = None,
+    ) -> None:
         self._response_text = response_text
         self._raise_exc = raise_exc
+        self._response_sequence = list(response_sequence) if response_sequence else None
         self.last_kwargs: dict[str, Any] | None = None
+        self.call_count = 0
 
         class _Messages:
             def __init__(inner) -> None:
@@ -62,6 +79,19 @@ class _FakeAnthropicClient:
 
             def create(inner, **kwargs):
                 self.last_kwargs = kwargs
+                self.call_count += 1
+                # Sequence mode wins when supplied. Each entry is either
+                # a string (response text) or an Exception (raise it).
+                if self._response_sequence is not None:
+                    if not self._response_sequence:
+                        raise AssertionError(
+                            "response_sequence exhausted; test wired "
+                            "fewer responses than the SUT requested."
+                        )
+                    nxt = self._response_sequence.pop(0)
+                    if isinstance(nxt, Exception):
+                        raise nxt
+                    return _FakeResponse(nxt)
                 if self._raise_exc is not None:
                     raise self._raise_exc
                 return _FakeResponse(self._response_text or "")
@@ -69,12 +99,25 @@ class _FakeAnthropicClient:
         self.messages = _Messages()
 
 
-def _stub_anthropic(monkeypatch, *, response_text: str | None = None, raise_exc: Exception | None = None) -> _FakeAnthropicClient:
+def _stub_anthropic(
+    monkeypatch,
+    *,
+    response_text: str | None = None,
+    raise_exc: Exception | None = None,
+    response_sequence: list[Any] | None = None,
+) -> _FakeAnthropicClient:
     """Patch anthropic.Anthropic to return our fake. Each test gets a
-    fresh client so call captures don't bleed across tests."""
+    fresh client so call captures don't bleed across tests.
+
+    Pass `response_sequence` for retry tests; pass `response_text` /
+    `raise_exc` for the simpler single-response cases."""
     import anthropic
 
-    fake = _FakeAnthropicClient(response_text=response_text, raise_exc=raise_exc)
+    fake = _FakeAnthropicClient(
+        response_text=response_text,
+        raise_exc=raise_exc,
+        response_sequence=response_sequence,
+    )
     monkeypatch.setattr(anthropic, "Anthropic", lambda api_key=None: fake)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key-not-real")
     return fake
@@ -216,9 +259,14 @@ def test_summarize_returns_empty_response_status_for_overlong_text(monkeypatch):
 def test_summarize_returns_empty_response_status_for_blank_text(monkeypatch):
     """An empty string from the model is functionally the same as
     overlong: the clinician got no usable summary. Both collapse to
-    `empty_response` so the UI shows one consistent micro-state."""
+    `empty_response` so the UI shows one consistent micro-state.
+
+    Note: with retry-on-empty=1 (default), the SUT now makes 2 calls
+    before returning empty_response. The fake's `response_text=""`
+    returns "" on every call, so both attempts yield empty and the
+    final return is empty_response — same observable contract."""
     _clear_narrator_cache()
-    _stub_anthropic(monkeypatch, response_text="")
+    fake = _stub_anthropic(monkeypatch, response_text="")
 
     import diff_narrator
     text, status = diff_narrator.summarize(
@@ -232,6 +280,115 @@ def test_summarize_returns_empty_response_status_for_blank_text(monkeypatch):
     )
     assert text is None
     assert status == "empty_response"
+    # Pin the retry budget contract: empty -> 1 retry -> 2 total calls.
+    assert fake.call_count == 2
+
+
+def test_summarize_retries_once_on_empty_response_then_succeeds(monkeypatch):
+    """First Haiku call returns "", retry returns valid text. SUT must
+    return that text + ok status. Pins the core retry-on-empty
+    behavior — without retry, this case would surface as
+    empty_response and the clinician would lose the summary on every
+    transient blank."""
+    _clear_narrator_cache()
+    expected = "Adds yellow-band TKE; recovery score climbed 65 to 78 last week."
+    fake = _stub_anthropic(
+        monkeypatch,
+        response_sequence=["", expected],
+    )
+
+    import diff_narrator
+    text, status = diff_narrator.summarize(
+        active_payload={"week": 1, "exercises": [{"name": "tke", "sets": 1, "reps": 8}]},
+        proposed_payload={"week": 2, "exercises": [{"name": "tke", "sets": 2, "reps": 10}]},
+        intake_payload=None,
+        last_5_checkins=None,
+        recent_sessions=None,
+        active_id="A",
+        proposed_id="B",
+    )
+    assert text == expected
+    assert status == "ok"
+    assert fake.call_count == 2
+
+
+def test_summarize_does_not_retry_on_sdk_error(monkeypatch):
+    """sdk_error is a persistent failure mode (network, rate limit,
+    config). Retrying it would mask real problems and pay 2x the time
+    on every outage. Must call exactly once and surface sdk_error."""
+    _clear_narrator_cache()
+    fake = _stub_anthropic(
+        monkeypatch,
+        response_sequence=[RuntimeError("anthropic 503"), "should-not-be-reached"],
+    )
+
+    import diff_narrator
+    text, status = diff_narrator.summarize(
+        active_payload={"week": 1},
+        proposed_payload={"week": 2, "exercises": [{"name": "x", "sets": 1, "reps": 1}]},
+        intake_payload=None,
+        last_5_checkins=None,
+        recent_sessions=None,
+        active_id="A",
+        proposed_id="B",
+    )
+    assert text is None
+    assert status == "sdk_error"
+    # Critical: the second response in the sequence must remain unused.
+    # If retry leaks into sdk_error, this drops to 2 and the test fails
+    # — that's the contract we're pinning.
+    assert fake.call_count == 1
+
+
+def test_summarize_returns_empty_response_after_retry_exhausted(monkeypatch):
+    """Both attempts return blank — the model is genuinely confused on
+    this diff. Must exhaust the retry budget and surface
+    empty_response so the UI's amber banner renders."""
+    _clear_narrator_cache()
+    fake = _stub_anthropic(
+        monkeypatch,
+        response_sequence=["", ""],
+    )
+
+    import diff_narrator
+    text, status = diff_narrator.summarize(
+        active_payload={"week": 1},
+        proposed_payload={"week": 2, "exercises": [{"name": "x", "sets": 1, "reps": 1}]},
+        intake_payload=None,
+        last_5_checkins=None,
+        recent_sessions=None,
+        active_id="A",
+        proposed_id="B",
+    )
+    assert text is None
+    assert status == "empty_response"
+    assert fake.call_count == 2
+
+
+def test_summarize_retry_count_configurable_via_env(monkeypatch):
+    """DIFF_NARRATOR_RETRY_ON_EMPTY=2 -> 3 total attempts. Lets staging
+    eval crank up retries without redeploying. Cap at the env value;
+    don't infinite-loop on a stuck model."""
+    _clear_narrator_cache()
+    monkeypatch.setenv("DIFF_NARRATOR_RETRY_ON_EMPTY", "2")
+    fake = _stub_anthropic(
+        monkeypatch,
+        response_sequence=["", "", "third-time-lucky"],
+    )
+
+    import diff_narrator
+    text, status = diff_narrator.summarize(
+        active_payload={"week": 1},
+        proposed_payload={"week": 2, "exercises": [{"name": "x", "sets": 1, "reps": 1}]},
+        intake_payload=None,
+        last_5_checkins=None,
+        recent_sessions=None,
+        active_id="A",
+        proposed_id="B",
+    )
+    assert text == "third-time-lucky"
+    assert status == "ok"
+    assert fake.call_count == 3
 
 
 def test_summarize_returns_no_api_key_status(monkeypatch):
