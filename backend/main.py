@@ -721,16 +721,33 @@ def list_pending_protocols(
 @app.get("/protocols/{protocol_id}")
 def get_protocol_detail(
     protocol_id: str,
-    user_id: str = Depends(require_clinician_id),
+    user_id: str = Depends(current_user_id),
 ):
     """Single protocol with the patient's currently-active row alongside,
-    for diff rendering. Returns 404 if not found."""
+    for diff rendering. Returns 404 if not found.
+
+    Access:
+      * Clinicians (rows in `clinicians` table) can fetch any protocol —
+        the dashboard needs cross-patient read for review.
+      * A patient may fetch their own protocol (target.token == user_id);
+        anyone else gets 403.
+
+    Response shape adds `narrator_summary` only for clinicians. Patients
+    see the protocol data but not the AI-generated diff narration —
+    that's a clinician-facing review tool, and skipping the call saves
+    Haiku cost on patient self-fetch.
+    """
     import protocol_repo
     import user_store
 
     target = protocol_repo.get(protocol_id)
     if not target:
         raise HTTPException(status_code=404, detail="protocol not found")
+
+    requester_is_clinician = is_clinician(user_id)
+    if not requester_is_clinician and target["token"] != user_id:
+        raise HTTPException(status_code=403, detail="not authorized for this protocol")
+
     active = protocol_repo.get_active(target["token"])
     if active and active["id"] == target["id"]:
         # The target is itself the active row — no separate "previous active"
@@ -739,19 +756,49 @@ def get_protocol_detail(
         active_for_diff = active
 
     user = user_store.load_user(target["token"]) or {}
-    return {
+    intake = user.get("intake")
+    recent_sessions = user_store.get_session_history(target["token"], limit=20)
+
+    response: dict = {
         "target": _serialize_protocol_row(target),
         "active": _serialize_protocol_row(active_for_diff) if active_for_diff else None,
         "patient": {
             "token": target["token"],
-            "patient_name": user.get("patient_name") or (
-                user.get("intake") or {}
-            ).get("name"),
-            "intake": user.get("intake"),
-            "recent_sessions": user_store.get_session_history(
-                target["token"], limit=5),
+            "patient_name": user.get("patient_name") or (intake or {}).get("name"),
+            "intake": intake,
+            "recent_sessions": recent_sessions[-5:],
         },
     }
+
+    # AI-generated diff narration: clinician-only. Patients self-fetching
+    # don't need the meta-explanation, and skipping the call saves cost.
+    if requester_is_clinician:
+        import diff_narrator
+        # Filter session_history down to actual symptom / pain check-ins
+        # (the same store mixes set-completion entries and check-ins).
+        checkins = [
+            s for s in recent_sessions
+            if s.get("kind") == "checkin"
+            or s.get("pain_level") is not None
+            or s.get("symptom_text")
+            or s.get("checkin_text")
+        ][-5:]
+        proposed_id = str(target.get("id") or protocol_id)
+        active_id = str(active_for_diff["id"]) if active_for_diff else None
+        narration = diff_narrator.summarize(
+            active_payload=(active_for_diff or {}).get("payload") if active_for_diff else None,
+            proposed_payload=target.get("payload"),
+            intake_payload=intake,
+            last_5_checkins=checkins,
+            recent_sessions=recent_sessions[-7:],
+            active_id=active_id,
+            proposed_id=proposed_id,
+            protocol_id=proposed_id,
+            clinician_id=user_id,
+        )
+        response["narrator_summary"] = narration
+
+    return response
 
 
 def _serialize_protocol_row(row: dict | None) -> dict | None:
