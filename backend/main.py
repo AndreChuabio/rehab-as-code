@@ -1042,6 +1042,86 @@ class ChatRequest(BaseModel):
     history: list[ChatTurn] = []
 
 
+def _last_pose_metrics(user_id: str) -> dict | None:
+    """Return the most-recent completed session's pose_metrics, or None.
+
+    Used as Phase F context for the symptom classifier so it can correlate
+    a complaint ("knee buckled on lunges") with the most recent observed
+    form quality. Best-effort: any DB error returns None; we don't want a
+    failed pose-metrics lookup to block the chat path.
+    """
+    try:
+        import session_repo as _sr
+        rows = _sr.list_recent(token=user_id, days=2)
+    except Exception as exc:
+        logger.info("last_pose_metrics lookup failed user=%s: %s", user_id, exc)
+        return None
+    completed = [
+        r for r in rows
+        if r.get("status") == "completed" and r.get("pose_metrics")
+    ]
+    if not completed:
+        return None
+    return completed[-1].get("pose_metrics")
+
+
+def _clinician_attention_writer_factory(user_id: str):
+    """Build a coach_chat.ClinicianAttentionWriter bound to this patient.
+
+    On a clinician-attention symptom verdict, clone the patient's current
+    active protocol payload (if any) and persist a needs_clinician_review
+    row with safety_concerns set to the classifier output. The clinician
+    dashboard already shows these rows at the top of the queue with a red
+    banner (see PR-C). Returns the new pending row id.
+
+    Cloning rather than synthesizing a fresh payload means the diff view
+    on /clinician renders "no exercise change, but this needs your eyes" -
+    which is the right framing: the agent isn't proposing a regression,
+    it's escalating a red flag.
+    """
+    async def _writer(triage: dict, message_text: str) -> str:
+        active = fetch_protocol_for_user(user_id) or {}
+        # Drop the in-memory _recent_set bag so it doesn't leak into the
+        # persisted payload (it's a runtime overlay, not protocol state).
+        payload = {k: v for k, v in active.items() if not k.startswith("_")}
+        if not payload:
+            payload = {
+                "patient": "unknown",
+                "phase": "rehab",
+                "week": 0,
+                "exercises": [],
+                "_synthetic": True,
+            }
+        concerns = [{
+            "check": "symptom-classifier",
+            "severity": "high",
+            "detail": (
+                f"Patient message: {message_text}\n\n"
+                f"Classifier reasoning: {triage.get('reasoning', '')}"
+            ),
+        }]
+        loop = asyncio.get_running_loop()
+        from protocol_repo import save_pending
+        pending_id = await loop.run_in_executor(
+            None,
+            lambda: save_pending(
+                user_id,
+                payload,
+                created_by_agent="symptom_classifier",
+                status="needs_clinician_review",
+                safety_concerns=concerns,
+            ),
+        )
+        # Log only the id, severity, and that we wrote — never the message.
+        logger.info(
+            "clinician_attention row written user=%s pending_id=%s",
+            user_id, pending_id,
+        )
+        return pending_id
+
+    return _writer
+
+
 def _chat_trigger_executor_factory(user_id: str):
     """Bind a chat-tool trigger executor to the authenticated patient.
 
@@ -1102,6 +1182,8 @@ async def chat(req: ChatRequest, user_id: str = Depends(current_user_id)):
     messages.append({"role": "user", "content": req.message})
 
     trigger_executor = _chat_trigger_executor_factory(user_id)
+    clinician_attention_writer = _clinician_attention_writer_factory(user_id)
+    last_pose_metrics = _last_pose_metrics(user_id)
 
     async def gen():
         try:
@@ -1112,6 +1194,9 @@ async def chat(req: ChatRequest, user_id: str = Depends(current_user_id)):
                 trigger_executor=trigger_executor,
                 user_token=user_id,
                 display_name=display_name,
+                session_id=req.session_id,
+                last_pose_metrics=last_pose_metrics,
+                clinician_attention_writer=clinician_attention_writer,
             ):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as exc:
