@@ -30,14 +30,16 @@ async function navigateToIntake() {
     // init failure is handled in bootstrapAuth (toast + overlay); fall through
     // to legacy chat so the page is still walkable.
   }
-  const authed = !!window.RehabAuth?.getJwt?.();
-  if (authed) {
-    // refreshPatientState picks the right modal (#intakeModal vs #planGenModal)
-    // based on server state. Don't second-guess by opening intake unconditionally.
-    refreshPatientState().catch((e) => console.warn("state refresh failed", e));
-  } else {
-    triggerIntake();
+  // Sync state in the background so the trust pill / sidebar reflect reality.
+  if (window.RehabAuth?.getJwt?.()) {
+    refreshPatientState({ openModalIfNeeded: false })
+      .catch((e) => console.warn("state refresh failed", e));
   }
+  // Always open the intake surface on explicit click. Server state may say
+  // needs_plan (intake row exists) but a click on Start intake means the user
+  // wants to redo or extend their intake — likely a new injury or correction.
+  // Don't silently no-op; honour the click.
+  triggerIntake();
 }
 
 function navigateTo(step) {
@@ -2810,6 +2812,7 @@ const chatHistory = [];
 const CHAT_TOOL_GLYPH = {
   recommend_exercise:        "video",
   list_phase_exercises:      "library",
+  start_intake_tool:         "intake \u2192 captured",
   fire_symptom_trigger:      "symptom \u2192 review queue",
   fire_intake_trigger:       "intake reset",
   fire_checkin_trigger:      "check-in \u2192 review queue",
