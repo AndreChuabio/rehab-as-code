@@ -2061,6 +2061,21 @@ function renderPoseSession(container, repsHistory, repSummary) {
   `;
 }
 
+// PR-J guided exercise mode.
+//
+// Wraps PoseFormCheck.start() with a multi-set state machine + audio
+// coaching layer. Pose detection / rep counting / skeleton drawing all
+// stay in pose.js — this function owns the UX shell:
+//   * preflight overlay (camera permission + landmark-stability gate)
+//   * set/rep counter overlay (large, mobile-first)
+//   * correction bubble + TTS (per-rep dedupe via decideCorrectionCue)
+//   * status pulse indicator (good/warn/bad)
+//   * rest countdown overlay with circular progress ring
+//   * tap-when-ready between-set overlay
+//   * workout-complete summary + POST /pose/session
+//
+// Voice driver: pose.js receives suppressInternalVoice: true so the
+// wrapper owns all spoken cues (counts, corrections, set-complete, rest).
 async function togglePoseFormCheck(wrap, item, btn) {
   const videoWrap = wrap.querySelector("#galleryVideoWrap");
   if (!videoWrap) return;
@@ -2070,13 +2085,10 @@ async function togglePoseFormCheck(wrap, item, btn) {
     btn.dataset.state = "off";
     btn.textContent = "Start guided form-check";
     document.body.classList.remove("pose-active");
-    // Gallery cards: restore the active thumbnail's demo video.
-    // Chat cards (renderExerciseCard): no thumbnail strip, so we just
-    // swap the live-camera content back to the original placeholder.
+    try { window.speechSynthesis?.cancel?.(); } catch (_) {}
     if (wrap.classList.contains("exercise-card")) {
       videoWrap.innerHTML = `<span class="video-placeholder-text">Add to today to load video</span>`;
       videoWrap.className = "exercise-video-placeholder";
-      // keep id="galleryVideoWrap" so a re-toggle still finds it
       videoWrap.id = "galleryVideoWrap";
     } else {
       const activeIdx = Array.from(wrap.querySelectorAll(".gallery-thumb-btn"))
@@ -2099,11 +2111,12 @@ async function togglePoseFormCheck(wrap, item, btn) {
   }
   document.body.classList.add("pose-active");
 
-  // Side-by-side: keep the Sora reference video looping next to the live
-  // webcam + skeleton overlay. Patient mirrors the demo while the model
-  // tracks them.
   const refSrc = item.ex.generated_video_url || item.ex.video_url || "";
   const voiceOn = poseVoiceEnabled();
+  const { sets: parsedSets, reps: parsedReps } = parseSetsReps(item.ex.default_dose);
+  const totalSets   = Math.max(1, parsedSets || 1);
+  const repsPerSet  = parsedReps;  // null when unparseable
+
   videoWrap.innerHTML = `
     <div class="pose-split">
       <div class="pose-split-ref">
@@ -2120,28 +2133,88 @@ async function togglePoseFormCheck(wrap, item, btn) {
             <span class="metric-pill idle">starting camera...</span>
           </div>
           <button class="pose-voice-btn" id="poseVoiceBtn" data-on="${voiceOn ? "1" : "0"}" title="Voice cues">
-            ${voiceOn ? "🔊 Voice" : "🔇 Voice"}
+            ${voiceOn ? "Voice on" : "Voice off"}
           </button>
-          <button class="pose-fullscreen-btn" id="poseFullscreenBtn" title="Toggle fullscreen">⛶</button>
+          <button class="pose-fullscreen-btn" id="poseFullscreenBtn" title="Toggle fullscreen">[ ]</button>
         </div>
         <div class="pose-warnings" id="poseWarnings" hidden></div>
         <div class="pose-stage" id="poseStage">
           <video id="poseVideo" playsinline muted autoplay></video>
           <canvas id="poseCanvas" class="pose-overlay-canvas"></canvas>
+          <div class="pose-frame-guide" aria-hidden="true"></div>
+          <div class="pose-overlay" id="poseGuidedOverlay">
+            <div class="pose-overlay-set" id="poseSetLabel"></div>
+            <div class="pose-overlay-rep" id="poseRepLabel"></div>
+            <div class="pose-overlay-pulse" id="poseStatusPulse" data-status="idle" aria-hidden="true"></div>
+            <div class="pose-correction-bubble" id="poseCorrectionBubble" hidden></div>
+            <div class="pose-rest-overlay" id="poseRestOverlay" hidden>
+              <div class="pose-rest-ring">
+                <svg viewBox="0 0 100 100" aria-hidden="true">
+                  <circle cx="50" cy="50" r="45" class="pose-rest-ring-track"></circle>
+                  <circle cx="50" cy="50" r="45" class="pose-rest-ring-fill" id="poseRestRingFill"></circle>
+                </svg>
+                <div class="pose-rest-count" id="poseRestCount">30</div>
+              </div>
+              <div class="pose-rest-label">Rest</div>
+            </div>
+            <div class="pose-between-overlay" id="poseBetweenOverlay" hidden>
+              <div class="pose-between-title" id="poseBetweenTitle">Set 2 of 3</div>
+              <div class="pose-between-sub">Tap when ready</div>
+              <button class="pose-between-go" id="poseBetweenGoBtn" type="button">Start set</button>
+            </div>
+            <div class="pose-done-overlay" id="poseDoneOverlay" hidden>
+              <div class="pose-done-title">Workout complete</div>
+              <div class="pose-done-sub" id="poseDoneSub"></div>
+              <button class="pose-done-close" id="poseDoneCloseBtn" type="button">Done</button>
+            </div>
+            <div class="pose-preflight" id="posePreflight">
+              <div class="pose-preflight-card">
+                <div class="pose-preflight-title">${escapeHtml(item.ex.name)}</div>
+                <div class="pose-preflight-cues">
+                  <ul>${(item.ex.cues || []).slice(0, 3).map((c) => `<li>${escapeHtml(c)}</li>`).join("")}</ul>
+                </div>
+                <div class="pose-preflight-help">
+                  Position your camera waist-high, about 8 feet away. Make sure your full body is visible inside the outline.
+                </div>
+                <div class="pose-preflight-status" id="posePreflightStatus">Waiting for camera...</div>
+                <button class="pose-preflight-go" id="posePreflightGoBtn" type="button" disabled>Start</button>
+              </div>
+            </div>
+          </div>
         </div>
         <div class="pose-session-card" id="poseSession" hidden></div>
       </div>
     </div>
   `;
-  const root        = videoWrap.querySelector("#poseRoot");
-  const fsBtn       = videoWrap.querySelector("#poseFullscreenBtn");
-  const voiceBtn    = videoWrap.querySelector("#poseVoiceBtn");
-  const metricsEl   = videoWrap.querySelector("#poseMetrics");
-  const warningsEl  = videoWrap.querySelector("#poseWarnings");
-  const sessionEl   = videoWrap.querySelector("#poseSession");
-  const repsHistory = [];
-  const warningsAcc = [];
-  let posted = false;
+
+  const root         = videoWrap.querySelector("#poseRoot");
+  const fsBtn        = videoWrap.querySelector("#poseFullscreenBtn");
+  const voiceBtn     = videoWrap.querySelector("#poseVoiceBtn");
+  const metricsEl    = videoWrap.querySelector("#poseMetrics");
+  const warningsEl   = videoWrap.querySelector("#poseWarnings");
+  const sessionEl    = videoWrap.querySelector("#poseSession");
+  const setLabel     = videoWrap.querySelector("#poseSetLabel");
+  const repLabel     = videoWrap.querySelector("#poseRepLabel");
+  const pulseEl      = videoWrap.querySelector("#poseStatusPulse");
+  const correctionEl = videoWrap.querySelector("#poseCorrectionBubble");
+  const restOverlay  = videoWrap.querySelector("#poseRestOverlay");
+  const restCount    = videoWrap.querySelector("#poseRestCount");
+  const restRing     = videoWrap.querySelector("#poseRestRingFill");
+  const betweenOl    = videoWrap.querySelector("#poseBetweenOverlay");
+  const betweenTitle = videoWrap.querySelector("#poseBetweenTitle");
+  const betweenGo    = videoWrap.querySelector("#poseBetweenGoBtn");
+  const doneOverlay  = videoWrap.querySelector("#poseDoneOverlay");
+  const doneSub      = videoWrap.querySelector("#poseDoneSub");
+  const doneClose    = videoWrap.querySelector("#poseDoneCloseBtn");
+  const preflightEl  = videoWrap.querySelector("#posePreflight");
+  const preflightSt  = videoWrap.querySelector("#posePreflightStatus");
+  const preflightGo  = videoWrap.querySelector("#posePreflightGoBtn");
+  const videoEl      = videoWrap.querySelector("#poseVideo");
+  const canvasEl     = videoWrap.querySelector("#poseCanvas");
+  const stageEl      = videoWrap.querySelector("#poseStage");
+  // Show the fit-to-frame guide while preflight is up.
+  stageEl.classList.add("pose-stage--preflight");
+
   fsBtn.onclick = () => {
     if (document.fullscreenElement) document.exitFullscreen();
     else root.requestFullscreen?.();
@@ -2150,7 +2223,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
     const next = !poseVoiceEnabled();
     setPoseVoiceEnabled(next);
     voiceBtn.dataset.on = next ? "1" : "0";
-    voiceBtn.textContent = next ? "🔊 Voice" : "🔇 Voice";
+    voiceBtn.textContent = next ? "Voice on" : "Voice off";
     if (next) {
       // Warm up speechSynthesis on the user gesture (Safari autoplay gate).
       try { speakCue("voice ready"); } catch (_) {}
@@ -2158,36 +2231,271 @@ async function togglePoseFormCheck(wrap, item, btn) {
       try { window.speechSynthesis?.cancel?.(); } catch (_) {}
     }
   };
-  const videoEl  = videoWrap.querySelector("#poseVideo");
-  const canvasEl = videoWrap.querySelector("#poseCanvas");
+
+  // ── Guided session state ────────────────────────────────────────────────
+  const guided = {
+    phase: "preflight",          // preflight | active | rest | between | done
+    setIdx: 0,                   // 0-indexed; setIdx === totalSets means done
+    totalSets,
+    repsPerSet,                  // null when dose is unparseable
+    repsHistoryAll: [],          // every rep from every set (flat)
+    repsHistoryThisSet: [],      // reset each new set
+    warningsAll: [],
+    spokenCorrectionsThisRep: new Set(),
+    lastInRep: false,
+    detectedSinceTs: null,       // preflight: continuous-detection timer
+    submitted: false,
+    restTimer: null,
+    correctionFadeTimer: null,
+    lastSpokenCount: -1,
+    lastCorrectionTs: 0,
+  };
+
+  function clearTimers() {
+    if (guided.restTimer)           { clearInterval(guided.restTimer); guided.restTimer = null; }
+    if (guided.correctionFadeTimer) { clearTimeout(guided.correctionFadeTimer); guided.correctionFadeTimer = null; }
+  }
+
+  function updateSetRepLabels() {
+    if (guided.phase === "active") {
+      setLabel.textContent = `Set ${guided.setIdx + 1}/${guided.totalSets}`;
+      const repsThis = guided.repsHistoryThisSet.length;
+      const total = guided.repsPerSet || 0;
+      repLabel.textContent = total
+        ? `Rep ${repsThis}/${total}`
+        : `Rep ${repsThis}`;
+    } else {
+      setLabel.textContent = "";
+      repLabel.textContent = "";
+    }
+  }
+
+  function showCorrectionBubble(text, status) {
+    if (!text) return;
+    correctionEl.textContent = text;
+    correctionEl.dataset.status = status || "warn";
+    correctionEl.hidden = false;
+    if (guided.correctionFadeTimer) clearTimeout(guided.correctionFadeTimer);
+    guided.correctionFadeTimer = setTimeout(() => {
+      correctionEl.hidden = true;
+    }, GUIDED.CORRECTION_BUBBLE_MS);
+  }
+
+  function statusFromMetrics(metrics) {
+    let s = "idle";
+    for (const m of metrics || []) {
+      if (m.status === "bad")  return "bad";
+      if (m.status === "warn") s = "warn";
+      else if (m.status === "good" && s !== "warn") s = "good";
+    }
+    return s;
+  }
+
+  function startSet() {
+    guided.phase = "active";
+    guided.repsHistoryThisSet = [];
+    guided.spokenCorrectionsThisRep.clear();
+    guided.lastInRep = false;
+    guided.lastSpokenCount = -1;
+    preflightEl.hidden = true;
+    stageEl.classList.remove("pose-stage--preflight");
+    restOverlay.hidden = true;
+    betweenOl.hidden = true;
+    doneOverlay.hidden = true;
+    updateSetRepLabels();
+  }
+
+  function startRest() {
+    guided.phase = "rest";
+    const seconds = GUIDED.REST_SECONDS_DEFAULT;
+    let remaining = seconds;
+    restOverlay.hidden = false;
+    restCount.textContent = String(remaining);
+    if (restRing) {
+      const c = 2 * Math.PI * 45;
+      restRing.style.strokeDasharray  = String(c);
+      restRing.style.strokeDashoffset = "0";
+    }
+    if (guided.restTimer) clearInterval(guided.restTimer);
+    guided.restTimer = setInterval(() => {
+      remaining -= 1;
+      if (restRing) {
+        const c = 2 * Math.PI * 45;
+        const frac = remaining / seconds;
+        restRing.style.strokeDashoffset = String(c * (1 - frac));
+      }
+      if (remaining <= 0) {
+        clearInterval(guided.restTimer);
+        guided.restTimer = null;
+        restOverlay.hidden = true;
+        showBetween();
+      } else {
+        restCount.textContent = String(remaining);
+      }
+    }, 1000);
+  }
+
+  function showBetween() {
+    guided.phase = "between";
+    betweenTitle.textContent = `Set ${guided.setIdx + 1} of ${guided.totalSets}`;
+    betweenOl.hidden = false;
+    speakNow(`Set ${guided.setIdx + 1} of ${guided.totalSets}, ready when you are`);
+  }
+
+  function finishWorkout() {
+    guided.phase = "done";
+    clearTimers();
+    setLabel.textContent = "";
+    repLabel.textContent = "";
+    const totalReps = guided.repsHistoryAll.length;
+    const warnCount = guided.repsHistoryAll.filter((r) => r.status !== "good").length;
+    doneSub.textContent = `${totalReps} reps across ${guided.totalSets} set${guided.totalSets === 1 ? "" : "s"} - ${warnCount} form warning${warnCount === 1 ? "" : "s"}`;
+    doneOverlay.hidden = false;
+    speakNow("Workout complete. Logged to your record.");
+    if (!guided.submitted) {
+      guided.submitted = true;
+      const repSummary = { repCount: totalReps };
+      postPoseSession(item.ex, guided.repsHistoryAll, guided.warningsAll, repSummary);
+    }
+  }
+
+  function endSet() {
+    const reps = guided.repsHistoryThisSet.length;
+    const warns = guided.repsHistoryThisSet.filter((r) => r.status !== "good").length;
+    speakNow(`Set ${guided.setIdx + 1} complete. ${reps} reps, ${warns} form warnings.`);
+    guided.setIdx += 1;
+    if (guided.setIdx >= guided.totalSets) {
+      finishWorkout();
+    } else {
+      startRest();
+    }
+  }
+
+  betweenGo.onclick = () => { if (guided.phase === "between") startSet(); };
+  doneClose.onclick = () => { btn.click(); };
+
+  function handlePreflight(payload) {
+    // Required-landmark gate. We don't see raw lms here, so proxy via the
+    // metrics list: if at least 2/3 of the exercise's checks resolved this
+    // frame, the body is visible enough.
+    const expected = (window.PoseFormCheck.EXERCISES?.[item.ex.id]?.checks || []).length;
+    const got = (payload.metrics || []).length;
+    const detected = expected > 0 && got >= Math.max(2, Math.ceil(expected * 0.66));
+    const ts = performance.now();
+    if (detected) {
+      if (guided.detectedSinceTs == null) guided.detectedSinceTs = ts;
+      const heldMs = ts - guided.detectedSinceTs;
+      if (heldMs >= GUIDED.PREFLIGHT_DETECTED_HOLD_MS) {
+        if (preflightGo.disabled) {
+          preflightGo.disabled = false;
+          preflightGo.classList.add("ready");
+          preflightSt.textContent = "Looking good. Tap Start when ready.";
+        }
+      } else {
+        preflightSt.textContent = "Hold still... locking in.";
+      }
+    } else {
+      guided.detectedSinceTs = null;
+      preflightGo.disabled = true;
+      preflightGo.classList.remove("ready");
+      preflightSt.textContent = got === 0
+        ? "No body detected. Step into the outline."
+        : "Move so your full body is in frame.";
+    }
+  }
+
+  preflightGo.onclick = () => {
+    if (preflightGo.disabled) return;
+    // First user gesture: warm up speechSynthesis (Safari autoplay gate).
+    if (poseVoiceEnabled()) { try { speakNow("Set 1 of " + guided.totalSets); } catch (_) {} }
+    startSet();
+  };
+
+  // ── Pose payload handler (hot path, ~30fps) ─────────────────────────────
+  function onPosePayload(payload) {
+    const overall = statusFromMetrics(payload.metrics);
+    pulseEl.dataset.status = overall;
+    renderPoseMetrics(metricsEl, payload, item.ex);
+    renderPoseWarnings(warningsEl, payload);
+
+    if (guided.phase === "preflight") {
+      handlePreflight(payload);
+      return;
+    }
+    if (guided.phase !== "active") return;
+
+    // Per-rep dedupe-set rollover (inRep true → false).
+    rolloverRepThrottle(
+      { spokenKeys: guided.spokenCorrectionsThisRep },
+      guided.lastInRep,
+      !!payload.inRep,
+    );
+    guided.lastInRep = !!payload.inRep;
+
+    // Correction TTS + bubble. Pure throttle decision in decideCorrectionCue.
+    const nowTs = performance.now();
+    const decision = decideCorrectionCue(
+      {
+        spokenKeys: guided.spokenCorrectionsThisRep,
+        lastCueTs:  guided.lastCorrectionTs,
+      },
+      payload.checkTransitions || [],
+      payload.corrections || {},
+      nowTs,
+      GUIDED.CORRECTION_GAP_MS,
+    );
+    if (decision) {
+      guided.lastCorrectionTs = nowTs;
+      speakNow(decision.cue);
+      showCorrectionBubble(decision.cue, decision.status);
+    }
+
+    // Rep events: append, speak count, redraw the recent-reps list.
+    const events = payload.repEvents || [];
+    if (events.length) {
+      for (const ev of events) {
+        guided.repsHistoryThisSet.push(ev);
+        guided.repsHistoryAll.push(ev);
+      }
+      const repsThis = guided.repsHistoryThisSet.length;
+      if (repsThis !== guided.lastSpokenCount) {
+        guided.lastSpokenCount = repsThis;
+        speakNow(spokenCount(repsThis));
+      }
+      updateSetRepLabels();
+      renderPoseSession(sessionEl, guided.repsHistoryAll, payload.repSummary);
+    } else {
+      updateSetRepLabels();
+    }
+
+    if (payload.warnings && payload.warnings.length) {
+      for (const w of payload.warnings) guided.warningsAll.push(w);
+    }
+
+    // End-of-set: explicit setComplete flag from pose.js, or fallback when
+    // we have a target rep count.
+    if (payload.setComplete && guided.phase === "active") {
+      endSet();
+    } else if (
+      guided.repsPerSet &&
+      guided.repsHistoryThisSet.length >= guided.repsPerSet &&
+      guided.phase === "active"
+    ) {
+      endSet();
+    }
+  }
 
   try {
     await window.PoseFormCheck.start(
       videoEl,
       canvasEl,
       item.ex.id,
-      (payload) => {
-        if (payload.repEvents && payload.repEvents.length) {
-          for (const ev of payload.repEvents) repsHistory.push(ev);
-          renderPoseSession(sessionEl, repsHistory, payload.repSummary);
-        }
-        if (payload.warnings && payload.warnings.length) {
-          for (const w of payload.warnings) warningsAcc.push(w);
-        }
-        renderPoseMetrics(metricsEl, payload, item.ex);
-        renderPoseWarnings(warningsEl, payload);
-        // setComplete fires once when the patient hits the prescribed reps.
-        // POST the rolled-up set to the backend so Maya sees it on her
-        // next reply.
-        if (payload.setComplete && !posted) {
-          posted = true;
-          postPoseSession(item.ex, repsHistory, warningsAcc, payload.repSummary);
-        }
-      },
+      onPosePayload,
       {
-        exerciseName: item.ex.name,
-        targetDose: item.ex.default_dose,
-        voice: speakCue,
+        exerciseName:          item.ex.name,
+        targetDose:            item.ex.default_dose,
+        voice:                 speakCue,
+        suppressInternalVoice: true,  // PR-J wrapper drives all voice
       },
     );
     btn.disabled = false;
@@ -2198,7 +2506,6 @@ async function togglePoseFormCheck(wrap, item, btn) {
     btn.textContent = "Form Check";
     document.body.classList.remove("pose-active");
     showToast(`Camera error: ${e.message}`, "error");
-    // Restore demo video on failure
     const activeIdx = Array.from(wrap.querySelectorAll(".gallery-thumb-btn"))
       .findIndex((b) => b.classList.contains("active"));
     switchGalleryItem(activeIdx >= 0 ? activeIdx : 0);
