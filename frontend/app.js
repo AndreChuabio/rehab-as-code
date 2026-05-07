@@ -1011,8 +1011,15 @@ function renderCalendar(events) {
 // ---------------------------------------------------------------------------
 
 async function loadProtocol() {
-  const planApproved = localStorage.getItem("rehab_plan_approved") === "1";
-  if (!intakeComplete || !planApproved) {
+  // PR-U7: trust /protocol as source of truth. The previous gate keyed off
+  // localStorage.rehab_plan_approved, which only got set when the legacy
+  // protocol_state.last_pr_url was populated (a hackathon-era field tied to
+  // the retired GitHub-PR bus). On accounts where last_pr_url is empty but
+  // Supabase has an active protocol, the panel rendered "no protocol yet"
+  // while the sidebar correctly showed the exercises — a confusing split.
+  // Keep the intake gate (don't fetch before intake exists), but otherwise
+  // render whatever the backend returns.
+  if (!intakeComplete) {
     renderProtocol({ protocol: { phase: "pending_intake", exercises: [] } });
     return;
   }
@@ -4352,15 +4359,18 @@ function renderTodaySession() {
         e.status === "in_progress" ? "..." :
         e.status === "skipped" ? "—" : "";
       const statusClass = e.status || "planned";
-      // PR-T2: dim + label rows where the exercise's body_region differs
-      // from the active protocol's. is_current_region===false means
-      // either the row is from a prior protocol (different region) or
-      // there's no active protocol at all. We render a small inline
-      // tag so the patient understands why a stale row is showing
-      // through dimmed.
-      const outOfRegionClass = e.is_current_region ? "" : " out-of-region";
-      const regionTag = e.is_current_region ? "" : `
-      <span class="today-session-region-tag">prior: ${escapeHtml(e.body_region || "unknown")}</span>`;
+      // PR-T2 + PR-U7: dim + label rows ONLY when we have a confirmed
+      // out-of-region body_region. Planner-generated exercise IDs that
+      // aren't in the library return body_region: null from the backend;
+      // those rows used to render as "prior: unknown" + dimmed, which is
+      // misleading because the unknown ones are usually current-region
+      // regressions the planner just renamed. Treat null as "no info"
+      // and render normally.
+      const knownOutOfRegion = e.is_current_region === false && !!e.body_region;
+      const outOfRegionClass = knownOutOfRegion ? " out-of-region" : "";
+      const regionTag = knownOutOfRegion
+        ? `<span class="today-session-region-tag">prior: ${escapeHtml(e.body_region)}</span>`
+        : "";
       return `
     <li class="today-session-item ${statusClass}${outOfRegionClass}">
       <span class="today-session-name">${escapeHtml(friendly)}</span>${regionTag}
