@@ -2464,6 +2464,39 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   #poseStage .pose-overlay-set { font-size: 6vw; top: 10px; left: 10px; }
 }
 
+/* PR-U2: manual "Mark set done" button for presence-mode exercises.
+   Sits below the rep-time chip. Uses --accent so it reads as a primary
+   CTA — the patient is supposed to use it any time their PT-prescribed
+   hold is up, not just at the end of the timer. */
+#poseStage .pose-presence-done {
+  position: absolute;
+  top: 88px;
+  right: 14px;
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--bg);
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  letter-spacing: 0.01em;
+}
+#poseStage .pose-presence-done:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+@media (max-width: 480px) {
+  #poseStage .pose-presence-done {
+    top: auto;
+    bottom: 14px;
+    right: 14px;
+    padding: 8px 14px;
+    font-size: 13px;
+  }
+}
+
 /* Status pulse. Small dot in the bottom-right that pulses when the
    patient has any warn/bad alignment. Color encodes the worst current
    status. */
