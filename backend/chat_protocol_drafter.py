@@ -142,13 +142,30 @@ def _build_user_prompt(
     flow: str,
     payload: dict[str, Any],
     prior_protocol: dict[str, Any] | None,
+    canonical_patient_name: str | None = None,
 ) -> str:
     instruction = _FLOW_INSTRUCTIONS.get(flow, _FLOW_INSTRUCTIONS["checkin"])
     parts: list[str] = [instruction]
 
+    if canonical_patient_name:
+        # Anchor the patient name from the canonical Supabase source
+        # (intake_records -> auth.users) so the model can't recycle a stale
+        # `patient` field that happens to live on a prior protocol payload
+        # from a different account run.
+        parts.append(
+            f"Canonical patient name (use this verbatim in the `patient` "
+            f"field - do NOT use any name that may appear inside the active "
+            f'protocol JSON): "{canonical_patient_name}"'
+        )
+
     if prior_protocol:
         # Strip our internal _recent_set sentinel before sending to the model.
-        clean = {k: v for k, v in prior_protocol.items() if not k.startswith("_")}
+        # Also strip any `patient` field so the model can't accidentally copy
+        # a stale name; the canonical name above is the only allowed source.
+        clean = {
+            k: v for k, v in prior_protocol.items()
+            if not k.startswith("_") and k != "patient"
+        }
         parts.append("Active protocol:\n" + json.dumps(clean, indent=2))
     else:
         parts.append(
@@ -246,7 +263,23 @@ def draft_and_save_pending(
         raise ProtocolDraftError(f"anthropic SDK not installed: {exc}") from exc
 
     client = anthropic.Anthropic(api_key=api_key)
-    user_prompt = _build_user_prompt(flow, payload, prior_protocol)
+
+    # Resolve canonical patient name from Supabase (intake -> auth.users -> email).
+    # This deliberately bypasses prior_protocol.patient so a stale name from a
+    # previous account run can't leak into the new draft.
+    try:
+        import user_store as _us
+        canonical_name = _us.get_display_name(token)
+    except Exception as exc:
+        logger.warning(
+            "get_display_name failed in drafter for token=%s flow=%s: %s",
+            token, flow, exc,
+        )
+        canonical_name = None
+
+    user_prompt = _build_user_prompt(
+        flow, payload, prior_protocol, canonical_patient_name=canonical_name,
+    )
 
     try:
         resp = client.messages.create(
@@ -275,6 +308,13 @@ def draft_and_save_pending(
 
     summary = (proposal.get("summary") or "Updated rehab protocol.").strip()
     payload_to_save = _validate_proposal(proposal)
+
+    # Belt + suspenders: enforce the canonical name on the persisted row even
+    # if the model echoed a different value. Without this guard a malicious or
+    # confused model output could still write a stale name into the protocols
+    # table.
+    if canonical_name:
+        payload_to_save["patient"] = canonical_name
 
     try:
         protocol_id = protocol_repo.save_pending(

@@ -36,6 +36,35 @@ def test_pose_session_happy_path(authed_client, fake_user_id, monkeypatch):
         captured["save_token"] = token
         captured["save_payload"] = payload
 
+    # Stub the sessions mirror added in PR-A. We don't need a live DB - just
+    # assert /pose/session calls it with the right shape so the patient
+    # sidebar + clinician adherence panel see the completed set.
+    class _FakeSessionRepoModule:
+        class SessionRepoError(RuntimeError):
+            pass
+
+        @staticmethod
+        def upsert_completed_pose(*, token, exercise_id, pose_metrics,
+                                  started_at=None, completed_at=None,
+                                  protocol_id=None):
+            captured["sessions_mirror"] = {
+                "token": token,
+                "exercise_id": exercise_id,
+                "pose_metrics": pose_metrics,
+                "started_at": started_at,
+                "completed_at": completed_at,
+                "protocol_id": protocol_id,
+            }
+            return {"id": "sess-mirror", "token": token, "status": "completed"}
+
+    class _FakeProtocolRepoModule:
+        @staticmethod
+        def get_active(token):  # noqa: ARG004
+            return None
+
+    import sys
+    monkeypatch.setitem(sys.modules, "session_repo", _FakeSessionRepoModule)
+    monkeypatch.setitem(sys.modules, "protocol_repo", _FakeProtocolRepoModule)
     monkeypatch.setattr("main.ensure_user", _ensure_user)
     monkeypatch.setattr("main.save_checkin", _save_checkin)
 
@@ -55,6 +84,15 @@ def test_pose_session_happy_path(authed_client, fake_user_id, monkeypatch):
     saved = captured["save_payload"]
     assert saved["kind"] == "set_completion"
     assert saved["exercise_id"] == "wall_squat"
+
+    # And the durable sessions mirror was invoked.
+    mirror = captured.get("sessions_mirror")
+    assert mirror is not None, "sessions mirror was not called"
+    assert mirror["token"] == fake_user_id
+    assert mirror["exercise_id"] == "wall_squat"
+    assert mirror["pose_metrics"]["rep_count"] == 3
+    assert mirror["pose_metrics"]["best_depth"] == 0.78
+    assert mirror["pose_metrics"]["worst_status"] == "warn"
 
 
 def test_pose_session_rejects_unauthenticated(unauthed_client):

@@ -33,7 +33,7 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
@@ -441,6 +441,38 @@ def protocol(user_id: str | None = Depends(optional_user_id)):
     return {"repo": PROTOCOL_REPO, "protocol": p}
 
 
+@app.get("/exercises")
+def list_exercises(
+    phase: str | None = Query(None, description="Filter by phase: acute|subacute|strength"),
+    injury_type: str | None = Query(None, description="Optional injury filter"),
+    user_id: str | None = Depends(optional_user_id),  # noqa: ARG001
+):
+    """Return the curated exercise library indexed by exercise_kb.
+
+    The library is public reference data (no PHI), so auth is optional - the
+    sign-in overlay is a soft gate that lets unauthed visitors browse what
+    the platform offers. PHI lives in `protocols`, not here.
+
+    Filters:
+      ?phase=acute|subacute|strength      narrow to a phase
+      ?injury_type=knee|ankle|...         further narrow to an injury
+    """
+    import exercise_kb
+    if phase:
+        matches = exercise_kb.find_by_phase(phase, injury_type=injury_type)
+    elif injury_type:
+        # find_by_phase requires phase; do a manual filter when only injury is set.
+        matches = [
+            ex for ex in exercise_kb.list_all()
+            if injury_type.lower().strip() in [
+                i.lower() for i in ex.get("injury_types", [])
+            ]
+        ]
+    else:
+        matches = exercise_kb.list_all()
+    return {"exercises": [exercise_kb.to_card(ex) for ex in matches]}
+
+
 @app.get("/protocol/exercises")
 def protocol_exercises(user_id: str | None = Depends(optional_user_id)):
     """Return protocol exercises enriched with KB video data for the Guided Exercise view.
@@ -485,7 +517,11 @@ def protocol_exercises(user_id: str | None = Depends(optional_user_id)):
             "video_source": card.get("video_source"),
         })
     return {
-        "patient": p.get("patient") or "Andre",
+        # Don't echo a hardcoded default - the protocol's `patient` field is
+        # a denormalized snapshot. Front-end never displays this; kept in the
+        # response for backwards compat. Resolve display names through
+        # /me or user_store.get_display_name instead.
+        "patient": p.get("patient"),
         "phase": p.get("phase") or "post-ACL reconstruction",
         "week": p.get("week") or 1,
         "exercises": enriched,
@@ -577,6 +613,39 @@ async def pose_session(
         "client": req.client,
     }
     save_checkin(user_id, payload)
+
+    # Mirror the completed pose set into the durable sessions log so the
+    # patient sidebar + clinician adherence panel see it immediately. This
+    # is in addition to the checkins write above, which feeds Maya's recent-
+    # set context. Failures here are logged, not raised: telemetry into
+    # checkins is the load-bearing path; sessions is the audit/UX surface
+    # and a write failure shouldn't 500 the form-check that just completed.
+    try:
+        active = None
+        try:
+            import protocol_repo as _pr
+            active = _pr.get_active(user_id)
+        except Exception as exc:
+            logger.info("get_active failed during pose-session mirror: %s", exc)
+        protocol_id = active["id"] if active else None
+
+        import session_repo as _sr
+        _sr.upsert_completed_pose(
+            token=user_id,
+            exercise_id=req.exercise_id,
+            pose_metrics={
+                "rep_count": rep_count,
+                "best_depth": best_depth,
+                "worst_status": worst_status,
+                "warnings": [w.model_dump() for w in req.warnings],
+            },
+            started_at=req.started_at,
+            completed_at=req.ended_at,
+            protocol_id=protocol_id,
+        )
+    except Exception as exc:
+        logger.warning("sessions mirror failed for pose set: %s", exc)
+
     return {
         "session_id": payload.get("session_id"),
         "rep_count": rep_count,
@@ -759,6 +828,152 @@ def reject_protocol(
 
 
 # -------------------------------------------------------------------------
+# Sessions — DB-backed today's-session log
+# -------------------------------------------------------------------------
+#
+# Replaces the in-memory `todaySession` array on the patient frontend. Sessions
+# are clinical state: every exercise the patient stages, starts, completes, or
+# skips lands in public.sessions, RLS-scoped to (auth.uid()::text = token).
+# Pose-form-check sets are mirrored here from /pose/session above.
+
+
+class CreateSessionRequest(BaseModel):
+    exercise_id: str
+    planned_sets: int | None = None
+    planned_reps: int | None = None
+
+
+class PatchSessionRequest(BaseModel):
+    status: str | None = None
+    completed_sets: int | None = None
+    completed_reps: int | None = None
+    pose_metrics: dict | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+
+
+@app.post("/sessions")
+def create_session(
+    req: CreateSessionRequest,
+    user_id: str = Depends(current_user_id),
+):
+    """Stage an exercise into the patient's session log.
+
+    Captures the patient's currently-active protocol_id at create-time so the
+    audit trail shows which protocol was in force when the patient added
+    the exercise (the protocol may be superseded before they complete it).
+    """
+    ensure_user(user_id)
+    import session_repo as _sr
+    import protocol_repo as _pr
+
+    protocol_id = None
+    try:
+        active = _pr.get_active(user_id)
+        if active:
+            protocol_id = active["id"]
+    except Exception as exc:
+        logger.info("get_active failed during create_session: %s", exc)
+
+    try:
+        row = _sr.create_planned(
+            token=user_id,
+            exercise_id=req.exercise_id,
+            planned_sets=req.planned_sets,
+            planned_reps=req.planned_reps,
+            protocol_id=protocol_id,
+        )
+    except _sr.SessionRepoError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except Exception as exc:
+        logger.exception("create_session failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+    return row
+
+
+@app.patch("/sessions/{session_id}")
+def patch_session(
+    session_id: str,
+    req: PatchSessionRequest,
+    user_id: str = Depends(current_user_id),
+):
+    """Patient mutates their own session row. Scoped by (id, token) so a
+    cross-patient PATCH attempt 404s rather than corrupting another patient's
+    record - belt + suspenders alongside the RLS policy."""
+    import session_repo as _sr
+    try:
+        row = _sr.patch(
+            session_id=session_id,
+            token=user_id,
+            status=req.status,
+            completed_sets=req.completed_sets,
+            completed_reps=req.completed_reps,
+            pose_metrics=req.pose_metrics,
+            started_at=req.started_at,
+            completed_at=req.completed_at,
+        )
+    except _sr.SessionRepoError as exc:
+        # Both "no fields" and "not found" surface here; treat the latter as
+        # 404 for clearer semantics.
+        msg = str(exc)
+        if "not found" in msg:
+            raise HTTPException(status_code=404, detail=msg)
+        raise HTTPException(status_code=400, detail=msg)
+    except Exception as exc:
+        logger.exception("patch_session failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+    return row
+
+
+@app.get("/sessions/today")
+def list_today_sessions(
+    x_timezone: str | None = Header(None, alias="X-Timezone"),
+    user_id: str = Depends(current_user_id),
+):
+    """Today's session list (planned + in_progress + completed) for the user.
+
+    The patient's local timezone arrives via the X-Timezone header (the
+    frontend reads Intl.DateTimeFormat().resolvedOptions().timeZone). Falls
+    back to UTC if the header is absent or unresolvable.
+    """
+    ensure_user(user_id)
+    import session_repo as _sr
+    try:
+        rows = _sr.list_today(token=user_id, tz_name=x_timezone)
+    except Exception as exc:
+        logger.exception("list_today failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"sessions": rows}
+
+
+@app.get("/sessions/recent")
+def list_recent_sessions(
+    days: int = Query(7, ge=1, le=30),
+    token: str | None = Query(None, description="Clinician-only: read for a specific patient"),
+    user_id: str = Depends(current_user_id),
+):
+    """Recent sessions for adherence tracking.
+
+    Patient self-fetch: omit `token` -> reads the caller's own sessions.
+    Clinician fetch: pass `?token=<patient_uuid>` -> reads that patient's
+    sessions (gated by is_clinician check; rejects with 403 otherwise).
+    """
+    target = user_id
+    if token and token != user_id:
+        if not is_clinician(user_id):
+            raise HTTPException(status_code=403, detail="clinician role required")
+        target = token
+
+    import session_repo as _sr
+    try:
+        rows = _sr.list_recent(token=target, days=days)
+    except Exception as exc:
+        logger.exception("list_recent failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+    return {"sessions": rows, "token": target, "days": days}
+
+
+# -------------------------------------------------------------------------
 # Coach chat co-pilot (OpenAI) - /chat SSE endpoint
 # -------------------------------------------------------------------------
 
@@ -824,6 +1039,10 @@ async def chat(req: ChatRequest, user_id: str = Depends(current_user_id)):
     recent_set = get_last_set_completion(user_id)
     if recent_set:
         protocol_payload["_recent_set"] = recent_set
+    # Resolve the patient's display name fresh on every /chat call. Reading
+    # from the protocol payload would re-introduce the stale-name bug
+    # ("Christian" greeted as Andre) - see user_store.get_display_name docstring.
+    display_name = user_store.get_display_name(user_id)
     messages = [
         {"role": turn.role, "content": turn.content} for turn in req.history
     ]
@@ -839,6 +1058,7 @@ async def chat(req: ChatRequest, user_id: str = Depends(current_user_id)):
                 protocol=protocol_payload,
                 trigger_executor=trigger_executor,
                 user_token=user_id,
+                display_name=display_name,
             ):
                 yield f"data: {json.dumps(event)}\n\n"
         except Exception as exc:

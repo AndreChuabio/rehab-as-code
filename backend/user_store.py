@@ -19,6 +19,7 @@ backends produce, so callers don't care which one is active.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import sqlite3
 import uuid
@@ -26,6 +27,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from threading import Lock
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 USERS_DIR = Path(__file__).parent.parent / "users"
 DB_PATH = Path(__file__).parent.parent / "users.db"
@@ -982,3 +985,116 @@ def get_last_set_completion(
         _pg_get_last_set_completion,
         token, exercise_id,
     )
+
+
+# -- Display-name resolver (Supabase-canonical) -----------------------------
+#
+# The chat prompt and any other "Hi <name>" surface MUST resolve the patient
+# name on every request from authoritative sources, never from a denormalized
+# `protocol.patient` field. The protocol JSON is a snapshot whose `patient`
+# field can drift from a prior account/run; using it caused Maya to greet
+# the patient by a stale name (Andre -> "Christian"). See PR-A.
+#
+# Resolution order (most authoritative first):
+#   1. intake_records.payload.name      - patient typed it during intake.
+#   2. auth.users.raw_user_meta_data->>'full_name'  - set by some sign-up flows.
+#   3. email local-part (auth.users.email)          - better than nothing.
+#   4. None                                         - caller falls back to "the patient".
+#
+# Steps 2 and 3 require a DB read against `auth.users` which only the
+# Postgres backend can do. The flat-file / sqlite backends only have step 1.
+
+
+def get_display_name(token: str) -> str | None:
+    """Return the patient's display name, sourced from Supabase tables.
+
+    Source order: intake_records.payload.name -> auth.users.raw_user_meta_data
+    .full_name -> email local-part -> None.
+
+    Never returns a name pulled from a denormalized protocol payload - that
+    column drifts when accounts churn.
+    """
+    if not token:
+        return None
+    name = _pick(
+        _flat_get_display_name,
+        _sql_get_display_name,
+        _pg_get_display_name,
+        token,
+    )
+    if isinstance(name, str):
+        name = name.strip()
+        return name or None
+    return None
+
+
+def _flat_get_display_name(token: str) -> str | None:
+    user = _flat_load_user(token) or {}
+    intake = user.get("intake") or {}
+    candidate = intake.get("name") or user.get("patient_name")
+    return (candidate or "").strip() or None
+
+
+def _sql_get_display_name(token: str) -> str | None:
+    with _sql_conn() as c:
+        row = c.execute(
+            "SELECT json_extract(payload, '$.name') AS name "
+            "FROM intake_records WHERE token = ?",
+            (token,),
+        ).fetchone()
+        if row and row["name"]:
+            return str(row["name"]).strip() or None
+        urow = c.execute(
+            "SELECT patient_name FROM users WHERE token = ?", (token,)
+        ).fetchone()
+        if urow and urow["patient_name"]:
+            return str(urow["patient_name"]).strip() or None
+    return None
+
+
+def _pg_get_display_name(token: str) -> str | None:
+    with _pg_conn() as c, c.cursor() as cur:
+        # 1. Intake record (patient-typed during onboarding).
+        cur.execute(
+            "SELECT payload->>'name' AS name FROM intake_records WHERE token = %s",
+            (token,),
+        )
+        row = cur.fetchone()
+        if row and row.get("name"):
+            cleaned = str(row["name"]).strip()
+            if cleaned:
+                return cleaned
+
+        # 2. auth.users.raw_user_meta_data.full_name (set by some sign-up flows).
+        # 3. Email local-part - last-resort warm anonymous fallback.
+        try:
+            cur.execute(
+                "SELECT raw_user_meta_data->>'full_name' AS full_name, "
+                "email FROM auth.users WHERE id::text = %s",
+                (token,),
+            )
+            au = cur.fetchone()
+        except Exception as exc:
+            # auth.users is in a separate schema; if the role lacks SELECT
+            # we silently skip rather than 500ing the chat call. Fall back
+            # to public.users.patient_name below.
+            logger.warning("auth.users lookup failed for display_name: %s", exc)
+            au = None
+        if au:
+            full_name = (au.get("full_name") or "").strip()
+            if full_name:
+                return full_name
+            email = (au.get("email") or "").strip()
+            if email and "@" in email:
+                local = email.split("@", 1)[0].strip()
+                if local:
+                    return local
+
+        # 4. public.users.patient_name (legacy mirror; usually equals intake.name).
+        cur.execute(
+            "SELECT patient_name FROM users WHERE token = %s", (token,)
+        )
+        urow = cur.fetchone()
+        if urow and urow.get("patient_name"):
+            return str(urow["patient_name"]).strip() or None
+    return None
