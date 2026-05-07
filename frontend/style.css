@@ -25,7 +25,16 @@ body {
 }
 
 /* ── Layout ────────────────────────────────────────────────────────── */
-.app { display: flex; flex-direction: column; min-height: 100vh; }
+/* Pin the app to the viewport so .main can claim a bounded height. This is
+   what makes the chat surface scroll internally (messages area only) instead
+   of letting the whole page grow tall as Maya streams responses. */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+}
 
 .header {
   display: flex;
@@ -34,6 +43,7 @@ body {
   padding: 16px 28px;
   background: var(--surface);
   border-bottom: 1px solid var(--border);
+  flex: 0 0 auto;
 }
 
 .logo { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 600; }
@@ -42,12 +52,13 @@ body {
 
 .main {
   display: flex;
-  flex: 1;
+  flex: 1 1 auto;
   gap: 20px;
   padding: 24px;
   max-width: 1600px;
   margin: 0 auto;
   width: 100%;
+  min-height: 0;
 }
 
 .logo-tag {
@@ -309,7 +320,17 @@ body {
 .source-badge.mock { background: rgba(148, 163, 184, 0.15); color: var(--muted); }
 
 /* ── Center Panel ──────────────────────────────────────────────────── */
-.center-panel { flex: 1; display: flex; flex-direction: column; gap: 20px; }
+.center-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  /* The center panel must be bounded so the chat-card inside can use
+     flex: 1 1 auto + min-height: 0 and let chat-log scroll internally
+     instead of pushing the page tall. */
+  min-height: 0;
+  overflow: hidden;
+}
 
 .video-container {
   background: var(--surface);
@@ -747,6 +768,17 @@ body {
   grid-template-columns: 280px minmax(0, 1fr);
   gap: 20px;
   max-width: 1400px;
+  /* Claim full remaining viewport height so children (sidebar, center panel)
+     can use overflow: auto / flex: 1 1 auto and stay bounded. */
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Sidebar scrolls inside its column; it does not push the page taller. */
+.sidebar {
+  overflow-y: auto;
+  min-height: 0;
 }
 
 .header-right { display: flex; align-items: center; gap: 16px; }
@@ -860,22 +892,48 @@ body {
   border-radius: var(--radius);
   padding: 18px;
 }
-/* Stretch the chat surface to claim real vertical real-estate. Without this,
-   the card sizes to content and looks tiny when only one bubble is visible
-   (e.g., the first turn of an intake). chat-log also flexes to fill the
-   gap so messages have room to scroll into. */
-.stage-chat { display: flex; flex-direction: column; }
+/* Pin the chat surface to viewport height so messages scroll INTERNALLY,
+   keeping suggestion chips, quick-actions, and the input row fixed at the
+   bottom of the right column. Without these min-height: 0 declarations
+   on every flex parent, chat-log's overflow-y: auto silently fails and
+   the whole page grows as content streams in. */
+.stage-chat {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+}
 .stage-chat .chat-card {
   padding: 18px 18px 16px;
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
-  min-height: calc(100vh - 240px);
+  min-height: 0;
+  overflow: hidden;
 }
 .stage-chat .chat-card .chat-log {
   flex: 1 1 auto;
   max-height: none;
-  min-height: 280px;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* Top + bottom regions: header, intake-progress, chips, quick-actions,
+   input row — none of these shrink. Only the chat-log between them flexes. */
+.stage-chat .chat-card .chat-header,
+.stage-chat .chat-card .intake-progress,
+.stage-chat .chat-card .chat-suggestions,
+.stage-chat .chat-card .quick-actions,
+.stage-chat .chat-card .chat-input-row {
+  flex: 0 0 auto;
+}
+/* Visual separation between the scrollable message stream and the pinned
+   bottom region (chips + quick-actions + input) so the user can see where
+   the conversation ends. */
+.stage-chat .chat-card .chat-suggestions {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  margin-top: 4px;
 }
 .stage-video .video-container { padding: 0; min-height: 540px; }
 
@@ -1258,8 +1316,22 @@ body {
 
 /* Mobile fallback for the new grid */
 @media (max-width: 900px) {
-  .main { grid-template-columns: 1fr; }
-  .sidebar { width: 100%; }
+  /* On mobile we let the page flow naturally — sidebar above chat, with
+     the chat surface still claiming most of the viewport (calc minus the
+     stacked sidebar) so the input bar stays reachable without scrolling
+     the whole page. */
+  .app { height: auto; min-height: 100vh; overflow: visible; }
+  .main {
+    grid-template-columns: 1fr;
+    height: auto;
+    overflow: visible;
+  }
+  .sidebar { width: 100%; overflow-y: visible; }
+  .center-panel { overflow: visible; }
+  .stage-chat,
+  .stage-chat .chat-card { overflow: visible; }
+  .stage-chat .chat-card { min-height: 70vh; }
+  .stage-chat .chat-card .chat-log { min-height: 240px; }
   .stage-video .video-container { min-height: 360px; }
 }
 
