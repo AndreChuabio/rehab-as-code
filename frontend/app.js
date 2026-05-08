@@ -2105,14 +2105,16 @@ function maybeAttachFormCheckBtn(wrap, item) {
     console.warn("PoseFormCheck not loaded - pose.js failed to initialize");
     return;
   }
-  // Only show the button on exercises that have pose criteria defined.
-  // Without an EXERCISES entry the rep tracker no-ops silently and the
-  // patient gets a confusing "0 reps" experience.
-  // PR-U8: My plan exercises carry both `id` (planner-generated, may not
-  // be in EXERCISES) and `library_id` (resolved canonical library entry).
-  // Prefer library_id so regressions like seated_heel_raise get the form-
-  // check flow of their canonical ankle exercise.
+  // P1.1: source of truth for guided form-check support is the backend's
+  // form_check_supported flag (from knowledge/exercise-library.json),
+  // surfaced via to_card. EXERCISES membership is a defense-in-depth
+  // fallback so a stale frontend bundle never attaches a button for an
+  // exercise the pose engine doesn't know about.
+  // PR-U8: prefer library_id over id so planner-generated regressions
+  // resolved by the fuzzy matcher inherit the canonical entry's flag.
   const poseKey = item.ex.library_id || item.ex.id;
+  const supported = item.ex.form_check_supported === true;
+  if (!supported) return;
   if (!window.PoseFormCheck.EXERCISES?.[poseKey]) return;
   const videoWrap = wrap.querySelector("#galleryVideoWrap");
   if (!videoWrap || videoWrap.parentElement.querySelector(".pose-form-check-btn")) return;
@@ -2284,6 +2286,99 @@ function _preflightHelpText(ex) {
   const cfg = exDef?.framing && window.PoseFormCheck?.FRAMING_CONFIG?.[exDef.framing];
   if (cfg) return `${cfg.cameraTip} ${cfg.hint}`;
   return "Position your camera waist-high, about 8 feet away. Make sure your full body is visible inside the outline.";
+}
+
+// P1.4: render a small SVG diagram of the expected camera POV for the
+// exercise's framing preset. Diagrammatic guidance complements the text
+// hint — patients have been confused by "lower the camera or step back"
+// without seeing what the right setup looks like. Returns "" when the
+// exercise has no framing config (presence-mode + non-pose exercises).
+//
+// Stroke uses --ai-text and fill --ai-bg per Clinical Twilight; size is
+// fixed at 56x56 so the diagram fits in the preflight card without
+// crowding the cue list.
+function _preflightFramingSvg(framing) {
+  // Common SVG attrs: 56x56 viewport, currentColor fed by the .pose-framing-icon
+  // class so palette swaps don't need an SVG edit.
+  const wrap = (inner) =>
+    `<svg class="pose-framing-icon" viewBox="0 0 56 56" width="56" height="56"
+          xmlns="http://www.w3.org/2000/svg" aria-hidden="true">${inner}</svg>`;
+  switch (framing) {
+    case "full_body": {
+      // Stick figure standing upright on the right; camera on a tripod
+      // on the left, lens pointed across at hip height ~6 ft away.
+      const figure = `
+        <circle cx="42" cy="11" r="3.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="42" y1="14.5" x2="42" y2="32" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="42" y1="20" x2="36" y2="26" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="42" y1="20" x2="48" y2="26" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="42" y1="32" x2="38" y2="46" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="42" y1="32" x2="46" y2="46" stroke="currentColor" stroke-width="1.5"/>
+      `;
+      const camera = `
+        <rect x="6" y="22" width="12" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <circle cx="12" cy="26.5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="12" y1="31" x2="12" y2="46" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="7" y1="48" x2="17" y2="48" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M18 26 L24 22 L24 31 L18 27 Z" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="2 2"/>
+      `;
+      return wrap(figure + camera);
+    }
+    case "lower_body": {
+      // Legs only on the right; camera low + close on the left.
+      const legs = `
+        <line x1="40" y1="8" x2="40" y2="30" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2 2"/>
+        <line x1="40" y1="30" x2="35" y2="48" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="40" y1="30" x2="45" y2="48" stroke="currentColor" stroke-width="1.5"/>
+        <circle cx="40" cy="30" r="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      `;
+      const cameraLow = `
+        <rect x="6" y="36" width="12" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <circle cx="12" cy="40.5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M18 40 L26 36 L26 45 L18 41 Z" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="2 2"/>
+      `;
+      return wrap(legs + cameraLow);
+    }
+    case "feet_seated": {
+      // Feet on the right (top-down view of two shoes); camera on floor
+      // pointing up at the feet from the left.
+      const feet = `
+        <ellipse cx="42" cy="22" rx="4" ry="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <ellipse cx="42" cy="36" rx="4" ry="6" fill="none" stroke="currentColor" stroke-width="1.5"/>
+      `;
+      const cameraFloor = `
+        <rect x="6" y="44" width="14" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <circle cx="13" cy="48" r="2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M20 47 L34 30 L34 36 L20 50 Z" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="2 2"/>
+      `;
+      return wrap(feet + cameraFloor);
+    }
+    case "arms_torso": {
+      // Torso + arms on the right; camera at chest height on the left.
+      const torso = `
+        <circle cx="42" cy="10" r="3.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="42" y1="13.5" x2="42" y2="34" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="42" y1="20" x2="32" y2="24" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="42" y1="20" x2="52" y2="24" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="32" y1="24" x2="30" y2="34" stroke="currentColor" stroke-width="1.5"/>
+        <line x1="52" y1="24" x2="54" y2="34" stroke="currentColor" stroke-width="1.5"/>
+      `;
+      const cameraChest = `
+        <rect x="6" y="18" width="12" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <circle cx="12" cy="22.5" r="2.2" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        <path d="M18 22 L26 18 L26 27 L18 23 Z" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="2 2"/>
+      `;
+      return wrap(torso + cameraChest);
+    }
+    default:
+      return "";
+  }
+}
+
+// Resolve the framing key for an exercise, or null when no framing is set.
+function _preflightFramingKey(ex) {
+  const exDef = window.PoseFormCheck?.EXERCISES?.[ex.library_id || ex.id];
+  return exDef?.framing || null;
 }
 
 // Required-landmarks gate for the preflight overlay. Maps each check id
@@ -2570,8 +2665,11 @@ async function togglePoseFormCheck(wrap, item, btn) {
                 <div class="pose-preflight-cues">
                   <ul>${(item.ex.cues || []).slice(0, 3).map((c) => `<li>${escapeHtml(c)}</li>`).join("")}</ul>
                 </div>
-                <div class="pose-preflight-help">
-                  ${escapeHtml(_preflightHelpText(item.ex))}
+                <div class="pose-preflight-help-row">
+                  ${_preflightFramingSvg(_preflightFramingKey(item.ex))}
+                  <div class="pose-preflight-help">
+                    ${escapeHtml(_preflightHelpText(item.ex))}
+                  </div>
                 </div>
                 <div class="pose-preflight-status" id="posePreflightStatus">Waiting for camera...</div>
                 <button class="pose-preflight-go" id="posePreflightGoBtn" type="button">Start</button>
@@ -3300,6 +3398,10 @@ function attachChatCardFormCheckBtn(wrap, card) {
   // when set so the form-check button shows on regressed-but-resolvable
   // exercises (consistent with maybeAttachFormCheckBtn).
   const exId = card.library_id || card.id || card.name;
+  // P1.1: backend's form_check_supported is source of truth; EXERCISES
+  // membership is a safety check against stale frontend bundles.
+  const supported = card.form_check_supported === true;
+  if (!supported) return;
   if (!exId || !window.PoseFormCheck.EXERCISES?.[exId]) return;
   const actions = wrap.querySelector(".exercise-actions");
   if (!actions || actions.querySelector(".pose-form-check-btn")) return;
@@ -4107,13 +4209,26 @@ function launchCurrentExercise() {
     }
     const btn = card.querySelector(".pose-form-check-btn");
     if (!btn) {
-      // Pose registry doesn't have this exercise — that's expected for
-      // some library exercises (stationary_bike etc). Surface a nudge
-      // instead of silently leaving the patient stuck.
+      // P1.4: form_check_supported=false on the library means there is no
+      // tuned check roster (e.g., stationary_bike). Render a "Self-paced"
+      // pill + 2-line explanation so the patient knows this is intentional,
+      // not a bug, and isn't waiting for camera prompts that never come.
+      // Pin the pill onto the card title row when available.
+      const titleRow = card.querySelector(".exercise-title-row");
+      if (titleRow && !titleRow.querySelector(".self-paced-pill")) {
+        const pill = document.createElement("span");
+        pill.className = "self-paced-pill";
+        pill.textContent = "Self-paced";
+        pill.title = "No guided form-check for this exercise";
+        titleRow.appendChild(pill);
+      }
       const nudge = document.createElement("div");
-      nudge.className = "flow-nudge";
+      nudge.className = "flow-nudge self-paced-nudge";
       nudge.innerHTML = `
-        <span>No guided form-check available for this exercise. Mark it done when finished.</span>
+        <div class="self-paced-explainer">
+          <strong>This exercise is self-paced.</strong>
+          <span>Watch the demo, complete the prescribed sets, then tap Mark done.</span>
+        </div>
         <button type="button" class="picker-action primary" id="flowMarkManualDone">Mark done</button>
       `;
       card.appendChild(nudge);

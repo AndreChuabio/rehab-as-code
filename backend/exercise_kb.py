@@ -230,6 +230,12 @@ def to_card(exercise: dict[str, Any]) -> dict[str, Any]:
         "thumbnail_url": exercise.get("thumbnail_url"),
         "regression_of": exercise.get("regression_of"),
         "progression_to": exercise.get("progression_to", []),
+        # Frontend gates the "Start guided form-check" button on this flag.
+        # Source of truth lives in knowledge/exercise-library.json so the
+        # planner can read it from the candidate list and prefer guided
+        # exercises when therapeutically equivalent.
+        "form_check_supported": bool(exercise.get("form_check_supported", False)),
+        "body_region": exercise.get("body_region"),
     }
 
 

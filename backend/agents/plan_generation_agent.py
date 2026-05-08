@@ -75,6 +75,181 @@ class PlanGenerationError(RuntimeError):
     """
 
 
+class PlannerInvalidIDsError(PlanGenerationError):
+    """Planner produced exercise IDs that don't exist in the library, twice.
+
+    P1.2: hard-fail rather than fuzzy-resolve to wrong content. Surfaces
+    as a pipeline error on the clinician dashboard (which is preferable
+    to silently saving a draft whose 'Seated Heel Raise' resolves to a
+    prone-hip-extension video).
+    """
+
+    def __init__(self, invalid_ids: list[str]):
+        self.invalid_ids = invalid_ids
+        super().__init__(
+            f"planner produced unknown exercise IDs after retry: {invalid_ids}"
+        )
+
+
+def _planner_invalid_ids(draft: dict[str, Any]) -> list[str]:
+    """Return the list of exercise IDs in the draft that aren't in the library.
+
+    Uses exercise_kb.find_by_id (exact match only). The fuzzy resolver is
+    intentionally NOT used here — the point of this validator is to catch
+    hallucinated IDs before they enter the pending_review queue. If find_by_id
+    misses, we want to feed that signal back to the planner.
+
+    The library entries' canonical names are the planner's expected output;
+    when the planner emits the human-readable name (e.g. "Seated Heel Raise")
+    instead of an id (e.g. "ankle_dorsiflexion_band"), find_by_id misses on
+    that too — both are treated as invalid here.
+
+    Returns [] when every id resolves. Mirrors the planner's refusal sentinel
+    (`clinician_review_required`) by treating it as a non-id pass-through.
+    """
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        import exercise_kb as _kb
+    except Exception as exc:
+        logger.warning("plan_generation: exercise_kb import failed: %s", exc)
+        return []
+
+    invalid: list[str] = []
+    for ex in draft.get("exercises") or []:
+        if not isinstance(ex, dict):
+            continue
+        ex_id = ex.get("id") or ex.get("name") or ""
+        if not ex_id:
+            continue
+        # Refusal sentinel emitted when no candidate fits — accept as-is.
+        if ex_id == "clinician_review_required":
+            continue
+        if _kb.find_by_id(ex_id) is None:
+            # Slug-normalize before declaring invalid (matches the kb's loose
+            # match): "Mini Squat" -> "mini_squat" should pass.
+            slug = ex_id.strip().lower().replace(" ", "_").replace("-", "_")
+            if _kb.find_by_id(slug) is None:
+                invalid.append(ex_id)
+    return invalid
+
+
+def _compose_with_id_validation(
+    *,
+    candidates: list[dict[str, Any]],
+    signal: dict[str, Any],
+    intake: dict[str, Any] | None,
+    phase: str,
+    week: int,
+    concerns: list[dict[str, Any]] | None,
+    token: str | None,
+) -> dict[str, Any]:
+    """Call planner_compose; if any returned exercise IDs are unknown,
+    retry once with explicit feedback. Hard-fail on a second invalid set.
+
+    P1.2 contract:
+      * planner returns valid IDs first try -> return draft.
+      * planner returns invalid IDs first try -> log warning, retry once
+        with concerns extended by an invalid_exercise_ids entry.
+      * planner returns invalid IDs on retry too -> raise PlannerInvalidIDsError.
+
+    Pre-existing safety-review concerns are preserved across the retry so
+    the planner sees BOTH the original concern set and the new invalid-id
+    feedback.
+    """
+    draft = planner_compose(
+        candidates=candidates,
+        signal=signal,
+        intake=intake,
+        phase=phase,
+        week=week,
+        concerns=concerns,
+        token=token,
+    )
+    invalid = _planner_invalid_ids(draft)
+    if not invalid:
+        return draft
+
+    logger.warning(
+        "planner produced invalid exercise IDs token=%s invalid=%s — retrying once",
+        token, invalid,
+    )
+    retry_concerns = list(concerns or []) + [_build_invalid_ids_concern(invalid)]
+    draft = planner_compose(
+        candidates=candidates,
+        signal=signal,
+        intake=intake,
+        phase=phase,
+        week=week,
+        concerns=retry_concerns,
+        token=token,
+    )
+    invalid_after = _planner_invalid_ids(draft)
+    if invalid_after:
+        logger.error(
+            "planner produced invalid exercise IDs after retry token=%s invalid=%s",
+            token, invalid_after,
+        )
+        raise PlannerInvalidIDsError(invalid_after)
+    return draft
+
+
+def _build_invalid_ids_concern(invalid_ids: list[str]) -> dict[str, Any]:
+    """Build a concerns-list entry the planner can address on retry.
+
+    The planner's `concerns` argument is the existing feedback channel
+    (used by safety reviewer); reusing it keeps the retry path cohesive
+    with the safety-review retry loop.
+    """
+    return {
+        "category": "invalid_exercise_ids",
+        "severity": "med",
+        "summary": (
+            "Your previous draft included exercise IDs that don't exist "
+            "in the exercise library: "
+            + ", ".join(repr(i) for i in invalid_ids)
+            + ". Re-emit using only `exercise_id` values from the candidate "
+            "list above. Do not invent or rename library entries."
+        ),
+    }
+
+
+def _enrich_candidates_with_form_check(
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Attach form_check_supported to each candidate from the library.
+
+    The researcher's tool schema only emits exercise_id + citations + rationale;
+    the planner needs form_check_supported to honor the "prefer guided
+    alternatives" rule in its system prompt. Looking the flag up here keeps
+    the source of truth in knowledge/exercise-library.json (rather than
+    duplicating into every protocol-library YAML).
+
+    Falls through gracefully when an id isn't in the library: the planner
+    just treats it as form_check_supported=false.
+    """
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        import exercise_kb as _kb
+    except Exception as exc:
+        logger.warning("plan_generation: exercise_kb import failed: %s", exc)
+        return candidates
+
+    enriched: list[dict[str, Any]] = []
+    for cand in candidates or []:
+        if not isinstance(cand, dict):
+            enriched.append(cand)
+            continue
+        ex_id = cand.get("exercise_id") or cand.get("id") or ""
+        lib = _kb.find_by_id(ex_id) if ex_id else None
+        if not lib:
+            # Try the resolver fallback so legacy protocol-library names
+            # ("mini_squats" -> "mini_squat") still get the flag.
+            lib = _kb.resolve_to_library(ex_id) if ex_id else None
+        flag = bool(lib.get("form_check_supported", False)) if lib else False
+        enriched.append({**cand, "form_check_supported": flag})
+    return enriched
+
+
 def _coverage_concern(library_match: dict[str, Any]) -> dict[str, Any] | None:
     """Translate a library_match marker into a clinician-visible concern, or None.
 
@@ -257,6 +432,13 @@ class PlanGenerationAgent(PatientAgent):
         except (ResearcherError, TrendAnalystError) as exc:
             raise PlanGenerationError(str(exc)) from exc
 
+        # Enrich each candidate with form_check_supported looked up from
+        # the canonical exercise library so the planner system prompt's
+        # "prefer guided" rule has a per-candidate signal to act on. The
+        # researcher cites protocol-library YAMLs (which don't carry the
+        # flag); knowledge/exercise-library.json is the source of truth.
+        candidates = _enrich_candidates_with_form_check(candidates)
+
         # Sequential: evaluator depends on the trend; planner depends on both.
         try:
             decision = await asyncio.to_thread(
@@ -388,7 +570,7 @@ class PlanGenerationAgent(PatientAgent):
         draft: dict[str, Any] | None = None
         verdict: dict[str, Any] | None = None
         for attempt in range(_MAX_PLANNER_RETRIES + 1):
-            draft = planner_compose(
+            draft = _compose_with_id_validation(
                 candidates=candidates,
                 signal=decision,
                 intake=intake,

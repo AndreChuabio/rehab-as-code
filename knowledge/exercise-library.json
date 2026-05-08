@@ -24,7 +24,8 @@
         "terminal_knee_extension"
       ],
       "default_dose": "3 x 15, 5s holds",
-      "body_region": "knee"
+      "body_region": "knee",
+      "form_check_supported": true
     },
     {
       "id": "heel_slides",
@@ -48,7 +49,8 @@
         "stationary_bike"
       ],
       "default_dose": "3 x 10, ROM target 100 deg",
-      "body_region": "knee"
+      "body_region": "knee",
+      "form_check_supported": true
     },
     {
       "id": "terminal_knee_extension",
@@ -71,7 +73,8 @@
         "mini_squat"
       ],
       "default_dose": "3 x 12, yellow band",
-      "body_region": "knee"
+      "body_region": "knee",
+      "form_check_supported": true
     },
     {
       "id": "stationary_bike",
@@ -95,7 +98,8 @@
         "wall_sit"
       ],
       "default_dose": "10 min, RPE 4",
-      "body_region": "knee"
+      "body_region": "knee",
+      "form_check_supported": true
     },
     {
       "id": "glute_bridge",
@@ -119,7 +123,8 @@
         "single_leg_glute_bridge"
       ],
       "default_dose": "3 x 12",
-      "body_region": "knee"
+      "body_region": "knee",
+      "form_check_supported": true
     },
     {
       "id": "wall_sit",
@@ -143,7 +148,8 @@
         "mini_squat"
       ],
       "default_dose": "3 x 30s holds",
-      "body_region": "knee"
+      "body_region": "knee",
+      "form_check_supported": true
     },
     {
       "id": "mini_squat",
@@ -166,7 +172,8 @@
         "single_leg_squat"
       ],
       "default_dose": "3 x 12, bodyweight",
-      "body_region": "knee"
+      "body_region": "knee",
+      "form_check_supported": true
     },
     {
       "id": "single_leg_squat",
@@ -189,7 +196,8 @@
         "box_jump"
       ],
       "default_dose": "3 x 8 per side",
-      "body_region": "knee"
+      "body_region": "knee",
+      "form_check_supported": true
     },
     {
       "id": "ankle_alphabet",
@@ -213,7 +221,8 @@
         "ankle_dorsiflexion_band"
       ],
       "default_dose": "3 sets A-Z, 2x daily",
-      "body_region": "ankle"
+      "body_region": "ankle",
+      "form_check_supported": true
     },
     {
       "id": "ankle_towel_calf_stretch",
@@ -237,7 +246,8 @@
         "ankle_dorsiflexion_band"
       ],
       "default_dose": "3 x 30s holds",
-      "body_region": "ankle"
+      "body_region": "ankle",
+      "form_check_supported": true
     },
     {
       "id": "ankle_dorsiflexion_band",
@@ -260,7 +270,8 @@
         "ankle_calf_raises_double_leg"
       ],
       "default_dose": "3 x 15, yellow band",
-      "body_region": "ankle"
+      "body_region": "ankle",
+      "form_check_supported": true
     },
     {
       "id": "ankle_eversion_band",
@@ -283,7 +294,8 @@
         "ankle_calf_raises_double_leg"
       ],
       "default_dose": "3 x 15, yellow band",
-      "body_region": "ankle"
+      "body_region": "ankle",
+      "form_check_supported": true
     },
     {
       "id": "ankle_calf_raises_double_leg",
@@ -307,7 +319,8 @@
         "ankle_calf_raises_single_leg"
       ],
       "default_dose": "3 x 15",
-      "body_region": "ankle"
+      "body_region": "ankle",
+      "form_check_supported": true
     },
     {
       "id": "ankle_calf_raises_single_leg",
@@ -330,7 +343,8 @@
         "ankle_lateral_hops"
       ],
       "default_dose": "3 x 10 each side",
-      "body_region": "ankle"
+      "body_region": "ankle",
+      "form_check_supported": true
     },
     {
       "id": "ankle_single_leg_balance",
@@ -354,7 +368,8 @@
         "ankle_lateral_hops"
       ],
       "default_dose": "3 x 30s each side",
-      "body_region": "ankle"
+      "body_region": "ankle",
+      "form_check_supported": true
     },
     {
       "id": "ankle_lateral_hops",
@@ -375,7 +390,8 @@
       "regression_of": "ankle_single_leg_balance",
       "progression_to": [],
       "default_dose": "3 x 10 hops",
-      "body_region": "ankle"
+      "body_region": "ankle",
+      "form_check_supported": true
     },
     {
       "id": "shoulder_pendulum",
@@ -398,7 +414,8 @@
         "shoulder_isometric_er"
       ],
       "default_dose": "1 x 20 each direction",
-      "body_region": "shoulder"
+      "body_region": "shoulder",
+      "form_check_supported": false
     },
     {
       "id": "shoulder_isometric_er",
@@ -422,7 +439,8 @@
         "shoulder_scapular_retraction"
       ],
       "default_dose": "3 x 10s holds",
-      "body_region": "shoulder"
+      "body_region": "shoulder",
+      "form_check_supported": false
     },
     {
       "id": "shoulder_isometric_ir",
@@ -446,7 +464,8 @@
         "shoulder_scapular_retraction"
       ],
       "default_dose": "3 x 10s holds",
-      "body_region": "shoulder"
+      "body_region": "shoulder",
+      "form_check_supported": false
     },
     {
       "id": "shoulder_sleeper_stretch",
@@ -469,7 +488,8 @@
         "shoulder_wall_slides"
       ],
       "default_dose": "3 x 30s holds",
-      "body_region": "shoulder"
+      "body_region": "shoulder",
+      "form_check_supported": false
     },
     {
       "id": "shoulder_scapular_retraction",
@@ -493,7 +513,8 @@
         "shoulder_prone_t"
       ],
       "default_dose": "3 x 12",
-      "body_region": "shoulder"
+      "body_region": "shoulder",
+      "form_check_supported": false
     },
     {
       "id": "shoulder_wall_slides",
@@ -517,7 +538,8 @@
         "shoulder_prone_y"
       ],
       "default_dose": "3 x 10",
-      "body_region": "shoulder"
+      "body_region": "shoulder",
+      "form_check_supported": true
     },
     {
       "id": "shoulder_prone_y",
@@ -538,7 +560,8 @@
       "regression_of": "shoulder_wall_slides",
       "progression_to": [],
       "default_dose": "3 x 10",
-      "body_region": "shoulder"
+      "body_region": "shoulder",
+      "form_check_supported": false
     },
     {
       "id": "shoulder_prone_t",
@@ -559,7 +582,8 @@
       "regression_of": "shoulder_scapular_retraction",
       "progression_to": [],
       "default_dose": "3 x 10",
-      "body_region": "shoulder"
+      "body_region": "shoulder",
+      "form_check_supported": false
     },
     {
       "id": "lb_pelvic_tilt",
@@ -582,7 +606,8 @@
         "lb_cat_cow"
       ],
       "default_dose": "2 x 15",
-      "body_region": "low_back"
+      "body_region": "low_back",
+      "form_check_supported": false
     },
     {
       "id": "lb_cat_cow",
@@ -606,7 +631,8 @@
         "lb_bird_dog"
       ],
       "default_dose": "2 x 10",
-      "body_region": "low_back"
+      "body_region": "low_back",
+      "form_check_supported": false
     },
     {
       "id": "lb_supine_knee_to_chest",
@@ -627,7 +653,8 @@
       "regression_of": null,
       "progression_to": [],
       "default_dose": "2 x 30s each",
-      "body_region": "low_back"
+      "body_region": "low_back",
+      "form_check_supported": false
     },
     {
       "id": "lb_child_pose",
@@ -648,7 +675,8 @@
       "regression_of": null,
       "progression_to": [],
       "default_dose": "2 x 30s",
-      "body_region": "low_back"
+      "body_region": "low_back",
+      "form_check_supported": false
     },
     {
       "id": "lb_mckenzie_press_up",
@@ -670,7 +698,8 @@
       "regression_of": null,
       "progression_to": [],
       "default_dose": "2 x 10",
-      "body_region": "low_back"
+      "body_region": "low_back",
+      "form_check_supported": false
     },
     {
       "id": "lb_glute_bridge_lb",
@@ -694,7 +723,8 @@
         "lb_bird_dog"
       ],
       "default_dose": "3 x 12",
-      "body_region": "low_back"
+      "body_region": "low_back",
+      "form_check_supported": false
     },
     {
       "id": "lb_dead_bug",
@@ -718,7 +748,8 @@
         "lb_bird_dog"
       ],
       "default_dose": "3 x 10 each side",
-      "body_region": "low_back"
+      "body_region": "low_back",
+      "form_check_supported": false
     },
     {
       "id": "lb_bird_dog",
@@ -740,7 +771,8 @@
       "regression_of": "lb_dead_bug",
       "progression_to": [],
       "default_dose": "3 x 10 each side",
-      "body_region": "low_back"
+      "body_region": "low_back",
+      "form_check_supported": true
     },
     {
       "id": "ham_seated_active_extension",
@@ -763,7 +795,8 @@
         "ham_supine_curl_ball"
       ],
       "default_dose": "3 x 10",
-      "body_region": "hamstring"
+      "body_region": "hamstring",
+      "form_check_supported": false
     },
     {
       "id": "ham_supine_active_stretch",
@@ -786,7 +819,8 @@
         "ham_supine_curl_ball"
       ],
       "default_dose": "3 x 10",
-      "body_region": "hamstring"
+      "body_region": "hamstring",
+      "form_check_supported": false
     },
     {
       "id": "ham_supine_curl_ball",
@@ -810,7 +844,8 @@
         "ham_bridge_heel_slide"
       ],
       "default_dose": "3 x 10",
-      "body_region": "hamstring"
+      "body_region": "hamstring",
+      "form_check_supported": false
     },
     {
       "id": "ham_bridge_heel_slide",
@@ -833,7 +868,8 @@
         "ham_single_leg_rdl"
       ],
       "default_dose": "3 x 10 each leg",
-      "body_region": "hamstring"
+      "body_region": "hamstring",
+      "form_check_supported": false
     },
     {
       "id": "ham_prone_hip_extension",
@@ -856,7 +892,8 @@
         "ham_single_leg_rdl"
       ],
       "default_dose": "3 x 12 each leg",
-      "body_region": "hamstring"
+      "body_region": "hamstring",
+      "form_check_supported": false
     },
     {
       "id": "ham_single_leg_rdl",
@@ -880,7 +917,8 @@
         "ham_nordic_eccentric_assisted"
       ],
       "default_dose": "3 x 8 each side",
-      "body_region": "hamstring"
+      "body_region": "hamstring",
+      "form_check_supported": false
     },
     {
       "id": "ham_walking_lunge",
@@ -901,7 +939,8 @@
       "regression_of": null,
       "progression_to": [],
       "default_dose": "3 x 10 each leg",
-      "body_region": "hamstring"
+      "body_region": "hamstring",
+      "form_check_supported": true
     },
     {
       "id": "ham_nordic_eccentric_assisted",
@@ -922,7 +961,8 @@
       "regression_of": "ham_single_leg_rdl",
       "progression_to": [],
       "default_dose": "3 x 6, slow eccentric",
-      "body_region": "hamstring"
+      "body_region": "hamstring",
+      "form_check_supported": false
     },
     {
       "id": "elbow_wrist_flexor_stretch",
@@ -943,7 +983,8 @@
       "regression_of": null,
       "progression_to": [],
       "default_dose": "3 x 30s holds",
-      "body_region": "elbow"
+      "body_region": "elbow",
+      "form_check_supported": false
     },
     {
       "id": "elbow_wrist_extensor_stretch",
@@ -964,7 +1005,8 @@
       "regression_of": null,
       "progression_to": [],
       "default_dose": "3 x 30s holds",
-      "body_region": "elbow"
+      "body_region": "elbow",
+      "form_check_supported": false
     },
     {
       "id": "elbow_grip_squeeze",
@@ -986,7 +1028,8 @@
       "regression_of": null,
       "progression_to": [],
       "default_dose": "3 x 15, 5s holds",
-      "body_region": "elbow"
+      "body_region": "elbow",
+      "form_check_supported": false
     },
     {
       "id": "elbow_isometric_extension",
@@ -1009,7 +1052,8 @@
         "elbow_eccentric_wrist_extension"
       ],
       "default_dose": "3 x 10s holds",
-      "body_region": "elbow"
+      "body_region": "elbow",
+      "form_check_supported": false
     },
     {
       "id": "elbow_radial_nerve_glide",
@@ -1030,7 +1074,8 @@
       "regression_of": null,
       "progression_to": [],
       "default_dose": "2 x 10",
-      "body_region": "elbow"
+      "body_region": "elbow",
+      "form_check_supported": false
     },
     {
       "id": "elbow_pronation_supination_band",
@@ -1051,7 +1096,8 @@
       "regression_of": null,
       "progression_to": [],
       "default_dose": "3 x 12",
-      "body_region": "elbow"
+      "body_region": "elbow",
+      "form_check_supported": false
     },
     {
       "id": "elbow_eccentric_wrist_extension",
@@ -1073,7 +1119,8 @@
       "regression_of": "elbow_isometric_extension",
       "progression_to": [],
       "default_dose": "3 x 15, 1-2 lb",
-      "body_region": "elbow"
+      "body_region": "elbow",
+      "form_check_supported": false
     },
     {
       "id": "elbow_eccentric_wrist_flexion",
@@ -1095,7 +1142,8 @@
       "regression_of": null,
       "progression_to": [],
       "default_dose": "3 x 15, 1-2 lb",
-      "body_region": "elbow"
+      "body_region": "elbow",
+      "form_check_supported": false
     }
   ]
 }
