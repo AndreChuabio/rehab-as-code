@@ -56,9 +56,20 @@
 
         <section class="card calendar-card">
           <h3>Today's Schedule</h3>
+          <div class="gcal-status" id="gcalStatus" hidden></div>
           <ul class="event-list" id="eventList">
             <li class="loading-text">Loading...</li>
           </ul>
+          <div class="gcal-actions" id="gcalActions" hidden>
+            <button class="gcal-connect-btn" id="gcalConnectBtn"
+                    onclick="connectGoogleCalendar()">
+              Connect Google Calendar
+            </button>
+            <button class="gcal-disconnect-btn" id="gcalDisconnectBtn"
+                    onclick="disconnectGoogleCalendar()" hidden>
+              Disconnect
+            </button>
+          </div>
         </section>
 
       </aside>

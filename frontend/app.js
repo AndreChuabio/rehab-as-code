@@ -998,7 +998,9 @@ async function loadSidebar() {
   try {
     const [healthRes, calRes] = await Promise.all([
       fetch(`${API_BASE}/health-data`),
-      fetch(`${API_BASE}/calendar`),
+      // /calendar prefers per-user GCal when the JWT is attached;
+      // unauthenticated callers transparently get mock/legacy data.
+      authedFetch(`${API_BASE}/calendar`),
     ]);
     const health = await healthRes.json();
     const cal = await calRes.json();
@@ -1008,7 +1010,105 @@ async function loadSidebar() {
     console.error("Failed to load sidebar data:", e);
     showToast("Could not connect to backend - is it running?", "error");
   }
+  // Update the Connect / Disconnect Google Calendar UI; only meaningful
+  // for signed-in users — the helper exits early otherwise.
+  refreshGoogleCalendarStatus();
 }
+
+// ---------------------------------------------------------------------------
+// Google Calendar connection (per-user OAuth)
+// ---------------------------------------------------------------------------
+
+async function refreshGoogleCalendarStatus() {
+  const actions = document.getElementById("gcalActions");
+  const status = document.getElementById("gcalStatus");
+  const connectBtn = document.getElementById("gcalConnectBtn");
+  const disconnectBtn = document.getElementById("gcalDisconnectBtn");
+  if (!actions || !status) return;
+
+  if (!window.RehabAuth?.getJwt?.()) {
+    actions.hidden = true;
+    status.hidden = true;
+    return;
+  }
+  actions.hidden = false;
+
+  try {
+    const res = await authedFetch(`${API_BASE}/auth/google/status`);
+    if (!res.ok) throw new Error(`status ${res.status}`);
+    const body = await res.json();
+    if (body.connected) {
+      status.hidden = false;
+      status.classList.add("connected");
+      status.textContent = body.google_email
+        ? `Connected as ${body.google_email}`
+        : "Google Calendar connected";
+      connectBtn.hidden = true;
+      disconnectBtn.hidden = false;
+    } else {
+      status.hidden = true;
+      status.classList.remove("connected");
+      connectBtn.hidden = false;
+      disconnectBtn.hidden = true;
+    }
+  } catch (e) {
+    console.warn("gcal status check failed:", e);
+  }
+}
+
+async function connectGoogleCalendar() {
+  if (!window.RehabAuth?.getJwt?.()) {
+    showToast("Sign in first to connect your calendar", "info");
+    return;
+  }
+  try {
+    const res = await authedFetch(`${API_BASE}/auth/google/start`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      throw new Error(body.detail || `start ${res.status}`);
+    }
+    const { auth_url } = await res.json();
+    if (!auth_url) throw new Error("no auth_url returned");
+    // Full-page redirect — the Google consent screen rejects iframes.
+    window.location.href = auth_url;
+  } catch (e) {
+    showToast(`Couldn't start Google connect: ${e.message || e}`, "error");
+  }
+}
+
+async function disconnectGoogleCalendar() {
+  if (!window.RehabAuth?.getJwt?.()) return;
+  try {
+    const res = await authedFetch(`${API_BASE}/auth/google`, { method: "DELETE" });
+    if (!res.ok) throw new Error(`disconnect ${res.status}`);
+    showToast("Google Calendar disconnected", "info");
+    await refreshGoogleCalendarStatus();
+    // Re-fetch /calendar so the sidebar reverts to mock/legacy data.
+    loadSidebar();
+  } catch (e) {
+    showToast(`Disconnect failed: ${e.message || e}`, "error");
+  }
+}
+
+// Surface a toast after the OAuth round-trip lands back on /?gcal=connected.
+(function handleGcalRedirect() {
+  try {
+    const url = new URL(window.location.href);
+    const flag = url.searchParams.get("gcal");
+    if (!flag) return;
+    if (flag === "connected") {
+      showToast("Google Calendar connected", "info");
+    } else if (flag === "error") {
+      const reason = url.searchParams.get("reason") || "unknown";
+      showToast(`Google connect failed: ${reason}`, "error");
+    }
+    url.searchParams.delete("gcal");
+    url.searchParams.delete("reason");
+    history.replaceState(null, "", url.pathname + url.search + url.hash);
+  } catch (e) {
+    /* ignore */
+  }
+})();
 
 function renderHealth(health) {
   const score = (val) => {
