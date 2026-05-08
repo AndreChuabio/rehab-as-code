@@ -59,7 +59,11 @@
       return;
     }
 
-    if (role !== "clinician") {
+    // admin is a strict superset of clinician — both belong on the
+    // dashboard. Without this check ac233/Nikki/andre102599 (all
+    // admins after the staff_users migration) would land here and
+    // immediately bounce back to / in a one-second redirect loop.
+    if (role !== "clinician" && role !== "admin") {
       redirectToPatient(`role=${role}`);
       return;
     }
