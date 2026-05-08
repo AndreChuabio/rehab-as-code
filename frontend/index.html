@@ -73,6 +73,10 @@
                   role="tab" aria-selected="false" onclick="switchStage('video')">
             Video Call
           </button>
+          <button class="stage-tab" data-mode="history" id="tabHistory"
+                  role="tab" aria-selected="false" onclick="switchStage('history')">
+            History
+          </button>
         </div>
 
         <!-- VIDEO MODE -->
@@ -184,6 +188,27 @@
               />
               <button type="submit" class="chat-send-btn" id="chatSendBtn">Send</button>
             </form>
+          </div>
+        </div>
+
+        <!-- HISTORY MODE
+             Last 30 days of patient's own sessions, grouped by date. Reads
+             /sessions/recent?days=30 (no `target` param — backend resolves
+             current_user_id from JWT, PHI hygiene). Read-only MVP — no
+             charts, no filters, no exports. -->
+        <div class="stage-pane stage-history" id="stageHistory" role="tabpanel"
+             aria-labelledby="tabHistory" hidden>
+          <div class="history-card">
+            <div class="history-header">
+              <h3>Last 30 days</h3>
+              <button type="button" class="history-refresh" id="historyRefreshBtn"
+                      onclick="loadPatientHistory()" title="Refresh">
+                Refresh
+              </button>
+            </div>
+            <div class="history-body" id="historyBody">
+              <div class="history-empty">Loading…</div>
+            </div>
           </div>
         </div>
       </section>
@@ -317,6 +342,24 @@
     </button>
     <div class="review-pill-panel" id="reviewPillPanel" hidden>
       <p class="review-pill-panel-body" id="reviewPillPanelBody"></p>
+    </div>
+  </div>
+
+  <!-- Workout-recap modal. Opens when the patient clicks "View today's
+       record" on the workout-complete card. Shows the rows from
+       /sessions/today (completed first, skipped grouped at the bottom)
+       with the same out-of-region tagging the sidebar uses. Read-only. -->
+  <div class="recap-modal" id="recapModal" hidden role="dialog"
+       aria-modal="true" aria-labelledby="recapModalTitle">
+    <div class="recap-card">
+      <h2 id="recapModalTitle">Today's session</h2>
+      <p class="recap-blurb" id="recapModalDate"></p>
+      <div class="recap-body" id="recapModalBody"></div>
+      <div class="recap-actions">
+        <button type="button" class="recap-close" id="recapModalClose">
+          Close
+        </button>
+      </div>
     </div>
   </div>
 
