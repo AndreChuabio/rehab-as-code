@@ -923,6 +923,12 @@
   overflow: hidden;
   margin: 0 16px;
 }
+/* Same display-overrides-[hidden] bug pattern as PR-U6 (pose overlays) and
+   PR #103 (.clinician-main). Without this, the segmented control is visible
+   to plain clinicians who never had role=admin confirmed server-side,
+   leaking the existence of admin chrome. .admin-badge has no display: rule
+   so the user-agent [hidden] { display: none } applies natively. */
+.admin-mode-switch[hidden] { display: none; }
 .admin-mode-btn {
   background: transparent;
   border: 0;
