@@ -30,15 +30,29 @@ async function navigateToIntake() {
     // init failure is handled in bootstrapAuth (toast + overlay); fall through
     // to legacy chat so the page is still walkable.
   }
-  // Sync state in the background so the trust pill / sidebar reflect reality.
+
+  // PR-V2: authed users get the production conversational intake
+  // (IntakeAgent → /patient/interact → #intakeModal). The legacy
+  // triggerIntake() chat flow with hardcoded INTAKE_QUESTIONS + "Andre"
+  // defaults + "fast for demo" copy is for demo mode (no JWT) only.
   if (window.RehabAuth?.getJwt?.()) {
-    refreshPatientState({ openModalIfNeeded: false })
-      .catch((e) => console.warn("state refresh failed", e));
+    const state = await refreshPatientState({ openModalIfNeeded: true })
+      .catch((e) => { console.warn("state refresh failed", e); return null; });
+    // openModalIfNeeded handles the needs_intake case (opens intakeModal).
+    // For returning patients (state=needs_plan or ready), clicking Start
+    // intake means "I want to update something" — drop a chat note pointing
+    // them at Maya rather than re-running the demo questionnaire.
+    if (state && state.state !== "needs_intake") {
+      switchStage("chat");
+      appendChatBubble(
+        "coach",
+        "Your intake is on file. Tell me what's changed — a new injury, a worse pain spot, anything — and I'll update your record."
+      );
+    }
+    return;
   }
-  // Always open the intake surface on explicit click. Server state may say
-  // needs_plan (intake row exists) but a click on Start intake means the user
-  // wants to redo or extend their intake — likely a new injury or correction.
-  // Don't silently no-op; honour the click.
+  // Demo mode (no JWT): keep the legacy chat flow so the public landing
+  // page is still walkable without sign-in.
   triggerIntake();
 }
 
@@ -1022,18 +1036,13 @@ function renderCalendar(events) {
 // ---------------------------------------------------------------------------
 
 async function loadProtocol() {
-  // PR-U7: trust /protocol as source of truth. The previous gate keyed off
-  // localStorage.rehab_plan_approved, which only got set when the legacy
-  // protocol_state.last_pr_url was populated (a hackathon-era field tied to
-  // the retired GitHub-PR bus). On accounts where last_pr_url is empty but
-  // Supabase has an active protocol, the panel rendered "no protocol yet"
-  // while the sidebar correctly showed the exercises — a confusing split.
-  // Keep the intake gate (don't fetch before intake exists), but otherwise
-  // render whatever the backend returns.
-  if (!intakeComplete) {
-    renderProtocol({ protocol: { phase: "pending_intake", exercises: [] } });
-    return;
-  }
+  // PR-V3: drop the localStorage `intakeComplete` gate. Same reasoning as
+  // PR-U7's removal of the planApproved gate — localStorage is unreliable
+  // (cleared on cache wipe, doesn't sync across devices), so andre102599
+  // (38 protocols on the backend) was rendering "no protocol yet" on a
+  // fresh browser session because the flag had never been set. /protocol
+  // is the source of truth; if exercises are empty, render the empty
+  // state, otherwise render what the backend returns.
   try {
     const res = await authedFetch(`${API_BASE}/protocol`);
     const data = await res.json();
@@ -1387,7 +1396,7 @@ function reportSymptom() {
   activeFlow = { type: "symptom", step: 0, answers: {} };
   updateFlowUI(true);
   appendChatBubble("coach",
-    "Let's log your symptom. Press Enter to use each default.\n\n" +
+    "Let's log your symptom. Five quick questions.\n\n" +
     SYMPTOM_QUESTIONS[0].q
   );
   setTimeout(prefillFlowInput, 50);
@@ -1397,28 +1406,34 @@ function reportSymptom() {
 // Guided flows: intake / symptom / check-in
 // ---------------------------------------------------------------------------
 
+// Demo-mode-only questionnaire used by triggerIntake() when no JWT is
+// present (public landing page walkthrough). Authed patients run the
+// production conversational intake via IntakeAgent + /patient/interact.
+// Per PR-V2: no `default` values for PHI fields — pre-filling identity
+// or pain levels in the live input is a consent-pattern violation.
+// Hints stay as placeholders only (cleared on focus).
 const INTAKE_QUESTIONS = [
-  { key: "name",     q: "What's your name?",                                         default: "Andre",                     hint: "e.g. Andre" },
-  { key: "age",      q: "How old are you?",                                           default: "26",                        hint: "e.g. 26" },
-  { key: "injury",   q: "What was your injury or surgery?",                           default: "ACL reconstruction",        hint: "e.g. ACL reconstruction" },
-  { key: "timing",   q: "When was your surgery or injury?",                           default: "3 weeks ago",               hint: "e.g. 3 weeks ago" },
-  { key: "pain",     q: "On a scale of 1–10, what's your current pain level?",       default: "3",                         hint: "e.g. 3" },
-  { key: "symptoms", q: "Any specific symptoms? (press Enter to use the default)",   default: "mild pain at 110° flexion", hint: "e.g. mild pain at 110° flexion" },
+  { key: "name",     q: "What's your name?",                                hint: "e.g. Sarah" },
+  { key: "age",      q: "How old are you?",                                  hint: "e.g. 26" },
+  { key: "injury",   q: "What was your injury or surgery?",                  hint: "e.g. ACL reconstruction" },
+  { key: "timing",   q: "When was your surgery or injury?",                  hint: "e.g. 3 weeks ago" },
+  { key: "pain",     q: "On a scale of 1–10, what's your current pain level?", hint: "no default — type your number" },
+  { key: "symptoms", q: "Any specific symptoms?",                            hint: "e.g. tightness at end-range flexion" },
 ];
 
 const SYMPTOM_QUESTIONS = [
-  { key: "location",  q: "Where is the pain or discomfort?",          default: "inner knee",               hint: "e.g. inner knee" },
-  { key: "type",      q: "How would you describe it?",                 default: "dull ache",                hint: "e.g. sharp, dull, ache, tightness" },
-  { key: "level",     q: "Pain level 1–10?",                           default: "4",                        hint: "e.g. 4" },
-  { key: "trigger",   q: "When does it happen?",                       default: "during single-leg squats", hint: "e.g. during single-leg squats" },
-  { key: "duration",  q: "How long has this been going on?",           default: "started today",            hint: "e.g. started today" },
+  { key: "location",  q: "Where is the pain or discomfort?",  hint: "e.g. inner knee" },
+  { key: "type",      q: "How would you describe it?",         hint: "e.g. sharp, dull, ache, tightness" },
+  { key: "level",     q: "Pain level 1–10?",                   hint: "type your number" },
+  { key: "trigger",   q: "When does it happen?",               hint: "e.g. during single-leg squats" },
+  { key: "duration",  q: "How long has this been going on?",   hint: "e.g. started today" },
 ];
 
 const CHECKIN_QUESTIONS = [
-  { key: "rating",     q: "How did today's session go overall? (1–10)",                             default: "8",                                        hint: "e.g. 8" },
-  { key: "completed",  q: "Which exercises did you complete?",                                      default: "heel slides, quad sets, stationary bike",   hint: "e.g. heel slides, quad sets" },
-  { key: "strong",     q: "What felt strong or improved today?",                                    default: "quad set felt stronger",                   hint: "e.g. quad set felt stronger than yesterday" },
-  { key: "difficult",  q: "Anything that felt difficult or caused discomfort? (or type \"none\")", default: "none",                                      hint: "e.g. single-leg balance was shaky" },
+  { key: "rating",     q: "How did today's session go overall? (1–10)", hint: "your rating" },
+  { key: "completed",  q: "Which exercises did you complete?",          hint: "e.g. heel slides, quad sets" },
+  { key: "strong",     q: "What felt strong or improved today?",        hint: "e.g. quad set felt stronger" },
+  { key: "difficult",  q: "Anything that felt difficult or caused discomfort? (or type \"none\")", hint: "e.g. single-leg balance was shaky, or 'none'" },
 ];
 
 const FLOW_META = {
@@ -1449,7 +1464,7 @@ function triggerIntake() {
   activeFlow = { type: "intake", step: 0, answers: {} };
   updateFlowUI(true);
   appendChatBubble("coach",
-    "I'll walk you through a quick intake. Press Enter to use each default — it's fast for demo.\n\n" +
+    "Demo mode — sign in for a real intake. Six quick questions.\n\n" +
     INTAKE_QUESTIONS[0].q
   );
   setTimeout(prefillFlowInput, 50);
@@ -1461,9 +1476,9 @@ function prefillFlowInput() {
   const q = meta.questions[activeFlow.step];
   const input = document.getElementById("chatInput");
   if (input && q) {
-    input.value = q.default || "";
+    // PR-V2: never seed PHI inputs with `value=...`. Hint text only.
+    input.value = "";
     input.placeholder = q.hint || "Type your answer...";
-    input.select();
     input.focus();
   }
 }
@@ -1516,7 +1531,7 @@ function handleFlowAnswer(text) {
 
   const meta = FLOW_META[activeFlow.type];
   const q = meta.questions[activeFlow.step];
-  activeFlow.answers[q.key] = text || q.default || "";
+  activeFlow.answers[q.key] = text || "";
   activeFlow.step++;
 
   if (activeFlow.step < meta.questions.length) {
@@ -1571,7 +1586,7 @@ function triggerCheckin() {
   activeFlow = { type: "checkin", step: 0, answers: {} };
   updateFlowUI(true);
   appendChatBubble("coach",
-    "Quick session check-in! Press Enter to accept each default.\n\n" +
+    "Quick session check-in. Four questions.\n\n" +
     CHECKIN_QUESTIONS[0].q
   );
   setTimeout(prefillFlowInput, 50);

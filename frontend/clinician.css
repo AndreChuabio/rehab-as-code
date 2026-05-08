@@ -83,6 +83,13 @@
   min-height: 0;
 }
 
+/* Same display-grid-overrides-[hidden] bug pattern as PR-U6 with the
+   pose overlays. Without this, both Review queue (id=clinicianMain)
+   AND Pipeline debug (id=adminMain) render at the same time when the
+   admin toggles between modes — even though one carries the [hidden]
+   attribute. Restore the expected hidden semantics. */
+.clinician-main[hidden] { display: none; }
+
 .clinician-queue {
   border-right: 1px solid var(--border);
   background: var(--surface);
