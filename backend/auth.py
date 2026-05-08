@@ -209,11 +209,16 @@ def _role_for(user_id: str | None) -> str | None:
                 (user_id,),
             )
             row = cur.fetchone()
-            return row[0] if row else None
+            # db.py configures the pool with row_factory=dict_row, so
+            # `row` is a dict — indexing by integer raises KeyError(0),
+            # which previously printed as the cryptic message "0".
+            return row["role"] if row else None
     except DbConfigError:
         return None
     except Exception as exc:
-        logger.warning("staff role lookup failed: %s", exc)
+        logger.warning(
+            "staff role lookup failed: %s: %s", type(exc).__name__, exc
+        )
         return None
 
 
