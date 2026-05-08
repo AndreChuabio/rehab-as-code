@@ -4641,6 +4641,10 @@ function renderPatientHistory(sessions) {
       const metaLine = meta.length
         ? `<div class="history-row-meta">${meta.join(" · ")}</div>`
         : "";
+      // PR-Y: pain/RPE/notes from the linked auto-checkin row, when present.
+      // Skip the line entirely if the session has no checkin (don't render
+      // a "no check-in logged" stub).
+      const checkinLine = renderCheckinFeelLine(s, "history-row-checkin");
       return `
         <div class="history-row ${status}${outOfRegionClass}">
           <div class="history-row-head">
@@ -4649,6 +4653,7 @@ function renderPatientHistory(sessions) {
             ${regionTag}
           </div>
           ${metaLine}
+          ${checkinLine}
         </div>`;
     }).join("");
     return `
@@ -4686,6 +4691,33 @@ function formatHistoryDayHeader(ymd) {
   if (sameYMD(d, today)) return `Today — ${pretty}`;
   if (sameYMD(d, yesterday)) return `Yesterday — ${pretty}`;
   return pretty;
+}
+
+// ---------------------------------------------------------------------------
+// PR-Y: shared "How it felt" rendering for session rows.
+//
+// /sessions/today and /sessions/recent both LEFT JOIN the most recent linked
+// checkin. Surface pain (0-10) and RPE (1-10) inline; render notes (PHI) on
+// a second line, escaped, italicized, prefixed with "flag:". When the row
+// has no checkin (`checkin_id` null), return "" so the caller emits nothing
+// — we explicitly do NOT render a "no check-in logged" stub.
+// ---------------------------------------------------------------------------
+function renderCheckinFeelLine(row, baseClass) {
+  if (!row || row.checkin_id == null) return "";
+  const pain = row.checkin_pain_level;
+  const rpe = row.checkin_rpe;
+  const notes = row.checkin_notes;
+  const segments = [];
+  if (pain != null) segments.push(`Pain ${escapeHtml(String(pain))}/10`);
+  if (rpe != null) segments.push(`RPE ${escapeHtml(String(rpe))}/10`);
+  if (!segments.length && !notes) return "";
+  const headLine = segments.length
+    ? `<div class="${baseClass}">${segments.join(" · ")}</div>`
+    : "";
+  const notesLine = notes
+    ? `<div class="${baseClass}-notes"><em>flag: ${escapeHtml(notes)}</em></div>`
+    : "";
+  return headLine + notesLine;
 }
 
 // ---------------------------------------------------------------------------
@@ -4755,16 +4787,17 @@ function renderWorkoutRecap() {
     const regionTag = knownOutOfRegion
       ? `<span class="today-session-region-tag">prior: ${escapeHtml(r.body_region)}</span>`
       : "";
-    // pose_metrics is the only enriched data we have on session rows
-    // today — pain/RPE/notes live in the separate /checkins surface and
-    // aren't joined into /sessions/today. When that join lands, render
-    // pain/rpe/notes inline here. For now: rep count + worst form status.
+    // pose_metrics: rep count + worst form status from the live form-check
+    // run. PR-Y: also surface pain/RPE/notes from the linked auto-checkin
+    // when the patient logged one post-session. No checkin -> render no
+    // extra line (no stub).
     const meta = [];
     if (r.pose_metrics?.rep_count != null) meta.push(`${r.pose_metrics.rep_count} reps`);
     if (r.pose_metrics?.worst_status) meta.push(escapeHtml(r.pose_metrics.worst_status));
     const metaLine = meta.length
       ? `<div class="recap-row-meta">${meta.join(" · ")}</div>`
       : "";
+    const checkinLine = renderCheckinFeelLine(r, "recap-row-checkin");
     const statusClass = r.status === "skipped" ? " skipped" : "";
     return `
       <div class="recap-row${statusClass}${outOfRegionClass}">
@@ -4774,6 +4807,7 @@ function renderWorkoutRecap() {
           ${regionTag}
         </div>
         ${metaLine}
+        ${checkinLine}
       </div>`;
   };
 
