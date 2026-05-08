@@ -25,16 +25,18 @@
   // ── Header / segmented control wiring ──────────────────────────────────────
 
   async function init() {
-    // Wait until auth.js has resolved a JWT. clinician.js bootstraps the
-    // queue once auth is ready; we hook the same window event so the
-    // admin probe runs after auth, not before.
+    // Wire click handlers + filters FIRST so they always bind, regardless
+    // of whether /admin/me succeeds, fails, or hangs. _setMode early-returns
+    // when !_isAdmin, so binding the click before the probe is safe — plain
+    // clinicians clicking the (CSS-bug-revealed) buttons just no-op.
+    _wireSegmented();
+    _wireFilters();
+
     if (window.RehabAuth?.getJwt?.()) {
-      await _probeAdmin();
+      _probeAdmin();  // fire-and-forget — UI updates when it resolves
     } else {
       window.addEventListener("rehab-auth-ready", _probeAdmin, { once: true });
     }
-    _wireSegmented();
-    _wireFilters();
   }
 
   async function _probeAdmin() {
