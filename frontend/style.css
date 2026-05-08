@@ -345,6 +345,43 @@ body {
 .gcal-disconnect-btn:hover { background: var(--surface); }
 .gcal-disconnect-btn { color: var(--muted); }
 
+.calendar-proposal .cal-proposal-title {
+  font-weight: 600;
+  margin-top: 4px;
+}
+.calendar-proposal .cal-proposal-time {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
+.calendar-proposal .cal-proposal-desc {
+  font-size: 12px;
+  margin-top: 6px;
+}
+.calendar-proposal .cal-proposal-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.calendar-proposal .cal-confirm-btn,
+.calendar-proposal .cal-decline-btn {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: inherit;
+  cursor: pointer;
+}
+.calendar-proposal .cal-confirm-btn { font-weight: 600; }
+.calendar-proposal .cal-confirm-btn:hover,
+.calendar-proposal .cal-decline-btn:hover { background: var(--surface); }
+.calendar-proposal .cal-proposal-status {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 8px;
+}
+
 .source-badge {
   font-size: 10px;
   font-weight: 600;

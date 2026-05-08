@@ -9,6 +9,7 @@ Endpoints:
   GET  /auth/google/start              get the consent URL to redirect the browser to
   GET  /auth/google/callback           Google redirects here with the auth code
   DELETE /auth/google                  revoke + forget this user's Google connection
+  POST /calendar/events                user-confirmed event create (Maya propose → user confirm)
   POST /start-session                 build context + create Tavus CVI session
   GET  /context                       pre-built context (cron use case)
   GET  /protocol                      current rehab protocol for this patient
@@ -138,6 +139,22 @@ class HealthSyncPayload(BaseModel):
     sleep_hours: float | None = None
     steps_yesterday: float | None = None
     calories_burned: float | None = None
+
+
+class CalendarEventCreate(BaseModel):
+    """User-confirmed calendar event create. Times are RFC3339 strings.
+
+    Coach Maya proposes an event via the `propose_calendar_event` tool;
+    the patient confirms in the chat UI; the frontend POSTs this body.
+    The server never creates events without an explicit POST from the
+    user's signed-in browser.
+    """
+    title: str
+    start_iso: str
+    end_iso: str
+    description: str | None = None
+    location: str | None = None
+    timezone: str | None = None
 
 
 @app.get("/")
@@ -332,6 +349,37 @@ def google_oauth_disconnect(user_id: str = Depends(current_user_id)):
     from google_oauth import disconnect
     removed = disconnect(user_id)
     return {"disconnected": removed}
+
+
+@app.post("/calendar/events")
+def create_calendar_event(
+    payload: CalendarEventCreate,
+    user_id: str = Depends(current_user_id),
+):
+    """Create an event on the patient's primary Google Calendar.
+
+    Strictly user-confirmed: this endpoint is only called from the
+    frontend after the patient clicks "Add to calendar" on a Coach Maya
+    proposal card. Returns 409 if the user connected before the
+    calendar.events scope landed (frontend prompts them to reconnect).
+    """
+    from google_oauth import GoogleScopeError, create_calendar_event as _create
+    try:
+        event = _create(
+            user_id,
+            title=payload.title,
+            start_iso=payload.start_iso,
+            end_iso=payload.end_iso,
+            description=payload.description,
+            location=payload.location,
+            timezone=payload.timezone,
+        )
+    except GoogleScopeError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        logger.warning("create_calendar_event failed user=%s: %s", user_id, exc)
+        raise HTTPException(status_code=502, detail=f"calendar create failed: {exc}")
+    return {"ok": True, "event": event}
 
 
 @app.post("/start-session")

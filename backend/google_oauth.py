@@ -47,12 +47,16 @@ GOOGLE_AUTH_URL  = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
 GOOGLE_REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 
-# calendar.readonly is the minimum scope to list events; we deliberately
-# do NOT request calendar.events (which would let us write to the user's
-# calendar). userinfo.email is convenient for showing "Connected as
-# alice@gmail.com" in the UI.
+# calendar.events lets us create/update events on the user's primary
+# calendar; it's strictly broader than calendar.readonly. We deliberately
+# do NOT request the unscoped `calendar` (which also exposes ACLs / other
+# users' calendars). userinfo.email is convenient for showing
+# "Connected as alice@gmail.com" in the UI.
+WRITE_SCOPE = "https://www.googleapis.com/auth/calendar.events"
+READ_SCOPE = "https://www.googleapis.com/auth/calendar.readonly"
+
 SCOPES = [
-    "https://www.googleapis.com/auth/calendar.readonly",
+    WRITE_SCOPE,
     "https://www.googleapis.com/auth/userinfo.email",
     "openid",
 ]
@@ -220,8 +224,21 @@ def _upsert_token(
         )
 
 
+def _has_write_scope(scope: str | None) -> bool:
+    """calendar.events grants write; the broader `calendar` scope would too,
+    but we never request it. Plain readonly users need to reconnect before
+    Maya can schedule on their behalf."""
+    return bool(scope) and WRITE_SCOPE in scope
+
+
 def get_connection_status(user_id: str) -> dict[str, Any]:
-    """Lightweight check for the frontend: is this user connected?"""
+    """Lightweight check for the frontend: is this user connected?
+
+    `can_write` distinguishes legacy readonly users (connected before the
+    scope upgrade) from users who consented to event creation. The
+    frontend uses it to surface a "reconnect to enable scheduling" prompt
+    instead of letting Maya silently fail mid-confirm.
+    """
     from db import get_conn
 
     with get_conn(autocommit=True) as conn, conn.cursor() as cur:
@@ -232,12 +249,89 @@ def get_connection_status(user_id: str) -> dict[str, Any]:
         )
         row = cur.fetchone()
     if not row:
-        return {"connected": False}
+        return {"connected": False, "can_write": False}
+    scope = row.get("scope")
     return {
         "connected": True,
+        "can_write": _has_write_scope(scope),
         "google_email": row.get("google_email"),
-        "scope": row.get("scope"),
+        "scope": scope,
         "connected_at": row.get("connected_at").isoformat() if row.get("connected_at") else None,
+    }
+
+
+class GoogleScopeError(RuntimeError):
+    """User connected with readonly scope; needs to reconnect for writes."""
+
+
+def create_calendar_event(
+    user_id: str,
+    *,
+    title: str,
+    start_iso: str,
+    end_iso: str,
+    description: str | None = None,
+    location: str | None = None,
+    timezone: str | None = None,
+) -> dict[str, Any]:
+    """Create an event on the user's primary calendar.
+
+    Caller is responsible for confirming intent with the user BEFORE this
+    runs — there is no undo path beyond manually deleting the event.
+
+    Raises GoogleScopeError if the user only granted readonly scope, or
+    RuntimeError on a Google API failure.
+    """
+    from db import get_conn
+
+    with get_conn(autocommit=True) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT scope FROM google_tokens WHERE user_id = %s",
+            (user_id,),
+        )
+        row = cur.fetchone()
+    if not row:
+        raise RuntimeError("user has not connected Google Calendar")
+    if not _has_write_scope(row.get("scope")):
+        raise GoogleScopeError(
+            "Google Calendar connected with readonly scope. Reconnect to "
+            "grant event-creation permission."
+        )
+
+    creds = get_credentials_for_user(user_id)
+    if not creds:
+        raise RuntimeError("could not obtain refreshed credentials")
+
+    try:
+        from googleapiclient.discovery import build
+    except ImportError as exc:
+        raise RuntimeError("googleapiclient not installed") from exc
+
+    body: dict[str, Any] = {
+        "summary": title,
+        "start": {"dateTime": start_iso},
+        "end": {"dateTime": end_iso},
+    }
+    if timezone:
+        body["start"]["timeZone"] = timezone
+        body["end"]["timeZone"] = timezone
+    if description:
+        body["description"] = description
+    if location:
+        body["location"] = location
+
+    service = build("calendar", "v3", credentials=creds, cache_discovery=False)
+    created = service.events().insert(calendarId="primary", body=body).execute()
+    logger.info(
+        "[calendar] created event for user=%s id=%s",
+        user_id[:8], created.get("id"),
+    )
+    return {
+        "id": created.get("id"),
+        "html_link": created.get("htmlLink"),
+        "summary": created.get("summary"),
+        "start": created.get("start"),
+        "end": created.get("end"),
     }
 
 

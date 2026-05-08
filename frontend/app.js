@@ -1040,15 +1040,28 @@ async function refreshGoogleCalendarStatus() {
     if (body.connected) {
       status.hidden = false;
       status.classList.add("connected");
-      status.textContent = body.google_email
+      const who = body.google_email
         ? `Connected as ${body.google_email}`
         : "Google Calendar connected";
-      connectBtn.hidden = true;
-      disconnectBtn.hidden = false;
+      // Legacy users (connected pre-write-scope) need to reconnect before
+      // Coach Maya can schedule on their behalf. Show the Connect button
+      // alongside Disconnect with a "Reconnect to enable scheduling" hint.
+      if (body.can_write === false) {
+        status.textContent = `${who} (read-only — reconnect to enable scheduling)`;
+        connectBtn.hidden = false;
+        connectBtn.textContent = "Reconnect for scheduling";
+        disconnectBtn.hidden = false;
+      } else {
+        status.textContent = who;
+        connectBtn.hidden = true;
+        connectBtn.textContent = "Connect Google Calendar";
+        disconnectBtn.hidden = false;
+      }
     } else {
       status.hidden = true;
       status.classList.remove("connected");
       connectBtn.hidden = false;
+      connectBtn.textContent = "Connect Google Calendar";
       disconnectBtn.hidden = true;
     }
   } catch (e) {
@@ -1454,6 +1467,109 @@ function renderPendingProtocolCard(protocolId, summary, flowLabel) {
   `;
   log.appendChild(bubble);
   scrollChatLog?.();
+}
+
+// Calendar proposal: rendered when Maya calls propose_calendar_event.
+// Shows a confirm card with "Add to calendar" / "Not now". Clicking
+// "Add to calendar" POSTs to /calendar/events; the user is the only
+// principal that can ever cause a write. If the user connected with
+// readonly scope (legacy), we surface a reconnect prompt instead.
+function renderCalendarProposal(proposal) {
+  const log = document.getElementById("chatLog");
+  if (!log || !proposal) return;
+  const bubble = document.createElement("div");
+  bubble.className = "chat-bubble pr-result calendar-proposal";
+
+  const title = escapeHtml(proposal.title || "(untitled)");
+  const startStr = formatProposalTime(proposal.start_iso);
+  const endStr = formatProposalTime(proposal.end_iso);
+  const desc = proposal.description
+    ? `<div class="cal-proposal-desc">${escapeHtml(proposal.description)}</div>`
+    : "";
+
+  bubble.innerHTML = `
+    <div class="pr-result-header">Schedule on Google Calendar?</div>
+    <div class="cal-proposal-title">${title}</div>
+    <div class="cal-proposal-time">${startStr} → ${endStr}</div>
+    ${desc}
+    <div class="cal-proposal-actions">
+      <button class="cal-confirm-btn" type="button">Add to calendar</button>
+      <button class="cal-decline-btn" type="button">Not now</button>
+    </div>
+    <div class="cal-proposal-status" hidden></div>
+  `;
+  log.appendChild(bubble);
+  scrollChatLog?.();
+
+  const confirmBtn = bubble.querySelector(".cal-confirm-btn");
+  const declineBtn = bubble.querySelector(".cal-decline-btn");
+  const statusEl = bubble.querySelector(".cal-proposal-status");
+
+  declineBtn?.addEventListener("click", () => {
+    bubble.querySelector(".cal-proposal-actions")?.remove();
+    statusEl.hidden = false;
+    statusEl.textContent = "Skipped.";
+  });
+
+  confirmBtn?.addEventListener("click", async () => {
+    confirmBtn.disabled = true;
+    declineBtn.disabled = true;
+    statusEl.hidden = false;
+    statusEl.textContent = "Adding…";
+    try {
+      const res = await authedFetch(`${API_BASE}/calendar/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: proposal.title,
+          start_iso: proposal.start_iso,
+          end_iso: proposal.end_iso,
+          description: proposal.description || null,
+        }),
+      });
+      if (res.status === 409) {
+        // Connected with readonly scope — prompt reconnect.
+        bubble.querySelector(".cal-proposal-actions")?.remove();
+        statusEl.innerHTML = `Calendar connected without write permission.
+          <button class="cal-confirm-btn" type="button"
+                  onclick="connectGoogleCalendar()">Reconnect</button>`;
+        return;
+      }
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail || `create ${res.status}`);
+      }
+      const body = await res.json();
+      const link = body?.event?.html_link;
+      bubble.querySelector(".cal-proposal-actions")?.remove();
+      statusEl.innerHTML = link
+        ? `Added — <a href="${link}" target="_blank" rel="noopener">open in Google Calendar</a>`
+        : "Added to your calendar.";
+      // Refresh the sidebar so the new event shows up under Today's Schedule.
+      loadSidebar();
+    } catch (e) {
+      confirmBtn.disabled = false;
+      declineBtn.disabled = false;
+      statusEl.textContent = `Couldn't add: ${e.message || e}`;
+    }
+  });
+}
+
+function formatProposalTime(iso) {
+  if (!iso) return "(unspecified)";
+  try {
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    return d.toLocaleString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  } catch (e) {
+    return iso;
+  }
 }
 
 // Triage alert (PR-H): patient-side receipt rendered when the symptom
@@ -3268,6 +3384,10 @@ function handleChatEvent(event, coachBubble, appendDelta) {
           renderPendingProtocolError(r.error, flowLabel);
         }
       }
+      break;
+
+    case "calendar_proposal":
+      renderCalendarProposal(event.proposal);
       break;
 
     case "triage_alert":
