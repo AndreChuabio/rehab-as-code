@@ -2261,6 +2261,96 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 .recap-close:hover { color: var(--text); }
 
+/* ── Patient history pane (Surface B) ──────────────────────────────────────
+   Third stage-tab on the patient dashboard. 30-day session log grouped
+   by date. Reuses session-region-tag styling from PR-T2 for out-of-
+   region rows. Read-only MVP. */
+.stage-history .history-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+}
+.history-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.history-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--text);
+}
+.history-refresh {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 5px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+}
+.history-refresh:hover { color: var(--text); }
+.history-body { display: flex; flex-direction: column; gap: 14px; }
+.history-empty {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 12px 0;
+}
+.history-day { display: flex; flex-direction: column; gap: 6px; }
+.history-day-header {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.history-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.history-row.completed { /* default; nothing to do */ }
+.history-row.skipped {
+  opacity: 0.55;
+  text-decoration: line-through;
+}
+.history-row.in_progress { opacity: 0.85; }
+.history-row.out-of-region {
+  border-left: 2px solid var(--ai-bg);
+}
+.history-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--text);
+}
+.history-row-status {
+  display: inline-block;
+  width: 1em;
+  text-align: center;
+  color: var(--muted);
+}
+.history-row.completed .history-row-status { color: var(--success); }
+.history-row-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+
 /* ── Structured intake modal ────────────────────────────────────────────── */
 
 .intake-modal {

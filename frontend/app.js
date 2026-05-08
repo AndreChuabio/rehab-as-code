@@ -946,27 +946,47 @@ function onPlanApproved() {
 // ---------------------------------------------------------------------------
 
 function switchStage(mode) {
-  const chatPane  = document.getElementById("stageChat");
-  const videoPane = document.getElementById("stageVideo");
-  const chatTab   = document.getElementById("tabChat");
-  const videoTab  = document.getElementById("tabVideo");
-  const isChat = mode === "chat";
+  const chatPane    = document.getElementById("stageChat");
+  const videoPane   = document.getElementById("stageVideo");
+  const historyPane = document.getElementById("stageHistory");
+  const chatTab     = document.getElementById("tabChat");
+  const videoTab    = document.getElementById("tabVideo");
+  const historyTab  = document.getElementById("tabHistory");
 
-  chatPane.hidden  = !isChat;
-  videoPane.hidden =  isChat;
-  chatTab.classList.toggle("active", isChat);
-  videoTab.classList.toggle("active", !isChat);
-  chatTab.setAttribute("aria-selected", isChat);
-  videoTab.setAttribute("aria-selected", !isChat);
+  const isChat = mode === "chat";
+  const isVideo = mode === "video";
+  const isHistory = mode === "history";
+
+  if (chatPane) chatPane.hidden = !isChat;
+  if (videoPane) videoPane.hidden = !isVideo;
+  if (historyPane) historyPane.hidden = !isHistory;
+
+  if (chatTab) {
+    chatTab.classList.toggle("active", isChat);
+    chatTab.setAttribute("aria-selected", String(isChat));
+  }
+  if (videoTab) {
+    videoTab.classList.toggle("active", isVideo);
+    videoTab.setAttribute("aria-selected", String(isVideo));
+  }
+  if (historyTab) {
+    historyTab.classList.toggle("active", isHistory);
+    historyTab.setAttribute("aria-selected", String(isHistory));
+  }
 
   if (isChat) {
-    // Leaving video: keep the iframe in the DOM but don't tear it down — the
-    // patient may flip back. The End-session button is the explicit teardown.
+    // Leaving other panes: keep the video iframe in the DOM but don't tear
+    // it down — the patient may flip back. End-session is the explicit
+    // teardown.
     document.getElementById("chatInput")?.focus();
-  } else {
+  } else if (isVideo) {
     // Entering video: refresh the "Continue last session" affordance so a
     // mid-day return doesn't show a stale row from a previous tab session.
     loadRecentTavusSessions();
+  } else if (isHistory) {
+    // Entering history: fetch the 30-day log. Caches in-flight via the
+    // _historyLoading guard inside loadPatientHistory.
+    loadPatientHistory();
   }
 }
 
@@ -4528,6 +4548,144 @@ function escapeHtml(s) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+// ---------------------------------------------------------------------------
+// Patient history pane (Surface B)
+//
+// Reads /sessions/recent?days=30 (no `target` — backend resolves
+// current_user_id from JWT). Groups rows by their created_at date,
+// rendering most-recent day first. Reuses the session-region-tag pattern
+// from PR-T2 for out-of-region rows. Read-only MVP — no charts, no
+// filters, no exports.
+// ---------------------------------------------------------------------------
+
+let _historyLoading = false;
+
+async function loadPatientHistory() {
+  const host = document.getElementById("historyBody");
+  if (!host) return;
+  if (_historyLoading) return;
+
+  if (!window.RehabAuth?.getJwt?.()) {
+    host.innerHTML = `<div class="history-empty">
+      Sign in to see your session history.
+    </div>`;
+    return;
+  }
+
+  _historyLoading = true;
+  host.innerHTML = `<div class="history-empty">Loading…</div>`;
+
+  let data;
+  try {
+    const res = await authedFetch(`${API_BASE}/sessions/recent?days=30`);
+    if (res.status === 401) {
+      host.innerHTML = `<div class="history-empty">
+        Sign in to see your session history.
+      </div>`;
+      return;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    data = await res.json();
+  } catch (e) {
+    console.warn("loadPatientHistory failed:", e);
+    host.innerHTML = `<div class="history-empty">
+      Could not load history: ${escapeHtml(e.message || "unknown error")}
+    </div>`;
+    return;
+  } finally {
+    _historyLoading = false;
+  }
+
+  renderPatientHistory(data?.sessions || []);
+}
+
+function renderPatientHistory(sessions) {
+  const host = document.getElementById("historyBody");
+  if (!host) return;
+  if (!sessions.length) {
+    host.innerHTML = `<div class="history-empty">
+      No sessions yet. Start today's session from the Coach Chat tab.
+    </div>`;
+    return;
+  }
+
+  // Bucket by created_at YYYY-MM-DD (UTC, matching the clinician dashboard).
+  const byDay = new Map();
+  for (const s of sessions) {
+    const d = (s.created_at || "").slice(0, 10) || "unknown";
+    if (!byDay.has(d)) byDay.set(d, []);
+    byDay.get(d).push(s);
+  }
+  // Most recent date first.
+  const days = Array.from(byDay.entries()).sort((a, b) => b[0].localeCompare(a[0]));
+
+  const html = days.map(([day, rows]) => {
+    const header = formatHistoryDayHeader(day);
+    const rowHtml = rows.map((s) => {
+      const friendly = exerciseDisplayName(s.exercise_id);
+      const status = s.status || "planned";
+      const glyph =
+        status === "completed" ? "✓" :
+        status === "skipped" ? "⊘" :
+        status === "in_progress" ? "…" : "·";
+      const knownOutOfRegion = s.is_current_region === false && !!s.body_region;
+      const outOfRegionClass = knownOutOfRegion ? " out-of-region" : "";
+      const regionTag = knownOutOfRegion
+        ? `<span class="session-region-tag">prior: ${escapeHtml(s.body_region)}</span>`
+        : "";
+      const meta = [];
+      if (s.pose_metrics?.rep_count != null) meta.push(`${s.pose_metrics.rep_count} reps`);
+      if (s.pose_metrics?.worst_status) meta.push(escapeHtml(s.pose_metrics.worst_status));
+      const metaLine = meta.length
+        ? `<div class="history-row-meta">${meta.join(" · ")}</div>`
+        : "";
+      return `
+        <div class="history-row ${status}${outOfRegionClass}">
+          <div class="history-row-head">
+            <span class="history-row-status">${escapeHtml(glyph)}</span>
+            <span>${escapeHtml(friendly)}</span>
+            ${regionTag}
+          </div>
+          ${metaLine}
+        </div>`;
+    }).join("");
+    return `
+      <div class="history-day">
+        <div class="history-day-header">${escapeHtml(header)}</div>
+        ${rowHtml}
+      </div>`;
+  }).join("");
+
+  host.innerHTML = html;
+}
+
+// Pretty-format a YYYY-MM-DD bucket key. "Today — May 7, 2026", "Yesterday
+// — May 6, 2026", or "May 4, 2026". Anything that fails to parse falls
+// back to the raw key so the UI never collapses to "Invalid Date".
+function formatHistoryDayHeader(ymd) {
+  if (!ymd || ymd === "unknown") return "Unknown date";
+  const parts = ymd.split("-");
+  if (parts.length !== 3) return ymd;
+  // Construct as a local-noon Date so timezone ticks don't shift the day.
+  const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 12, 0, 0);
+  if (Number.isNaN(d.getTime())) return ymd;
+
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  const sameYMD = (a, b) =>
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate();
+
+  const pretty = d.toLocaleDateString("en-US", {
+    month: "long", day: "numeric", year: "numeric",
+  });
+  if (sameYMD(d, today)) return `Today — ${pretty}`;
+  if (sameYMD(d, yesterday)) return `Yesterday — ${pretty}`;
+  return pretty;
 }
 
 // ---------------------------------------------------------------------------
