@@ -320,6 +320,24 @@
     </div>
   </div>
 
+  <!-- Workout-recap modal. Opens when the patient clicks "View today's
+       record" on the workout-complete card. Shows the rows from
+       /sessions/today (completed first, skipped grouped at the bottom)
+       with the same out-of-region tagging the sidebar uses. Read-only. -->
+  <div class="recap-modal" id="recapModal" hidden role="dialog"
+       aria-modal="true" aria-labelledby="recapModalTitle">
+    <div class="recap-card">
+      <h2 id="recapModalTitle">Today's session</h2>
+      <p class="recap-blurb" id="recapModalDate"></p>
+      <div class="recap-body" id="recapModalBody"></div>
+      <div class="recap-actions">
+        <button type="button" class="recap-close" id="recapModalClose">
+          Close
+        </button>
+      </div>
+    </div>
+  </div>
+
   <!-- Set/change password modal. Shown when the signed-in user clicks the
        "Set password" affordance on the pill. Calls RehabAuth.updatePassword. -->
   <div class="setpw-modal" id="setPwModal" hidden>

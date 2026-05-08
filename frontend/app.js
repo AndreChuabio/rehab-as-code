@@ -4223,10 +4223,14 @@ function renderWorkoutComplete() {
     </div>
   `;
   card.querySelector("#workoutCompleteRecord").addEventListener("click", () => {
-    // Scroll the sidebar today-session card into view; that's the
-    // canonical "today's record" surface.
-    const todaySidebar = document.getElementById("todaySessionCard");
-    if (todaySidebar) todaySidebar.scrollIntoView({ behavior: "smooth", block: "start" });
+    // Open the recap modal with today's actual rows. Falls back to the
+    // sidebar scroll if the modal markup is missing for any reason.
+    if (document.getElementById("recapModal")) {
+      openWorkoutRecapModal();
+    } else {
+      const todaySidebar = document.getElementById("todaySessionCard");
+      if (todaySidebar) todaySidebar.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
   });
 
   log.appendChild(card);
@@ -4524,6 +4528,120 @@ function escapeHtml(s) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+// ---------------------------------------------------------------------------
+// Workout-recap modal (Surface A)
+//
+// Renders today's rows from the in-memory `todaySession` cache populated by
+// refreshTodaySession() — same shape the sidebar uses, so we don't refetch.
+// Completed rows render first, skipped exercises grouped at the bottom in a
+// muted style. Out-of-region rows reuse the existing `prior: <region>` tag.
+// Read-only — no mutations.
+// ---------------------------------------------------------------------------
+
+function openWorkoutRecapModal() {
+  const modal = document.getElementById("recapModal");
+  if (!modal) return;
+  renderWorkoutRecap();
+  modal.hidden = false;
+
+  // Wire close handlers once. Idempotent — re-attaching is harmless because
+  // we replace listeners by toggling a marker dataset.
+  if (!modal.dataset.wired) {
+    modal.dataset.wired = "1";
+    document
+      .getElementById("recapModalClose")
+      ?.addEventListener("click", closeWorkoutRecapModal);
+    modal.addEventListener("click", (e) => {
+      if (e.target === modal) closeWorkoutRecapModal();
+    });
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && !modal.hidden) closeWorkoutRecapModal();
+    });
+  }
+}
+
+function closeWorkoutRecapModal() {
+  const modal = document.getElementById("recapModal");
+  if (modal) modal.hidden = true;
+}
+
+function renderWorkoutRecap() {
+  const dateEl = document.getElementById("recapModalDate");
+  const body = document.getElementById("recapModalBody");
+  if (!body) return;
+
+  if (dateEl) {
+    dateEl.textContent = new Date().toLocaleDateString("en-US", {
+      weekday: "long", month: "long", day: "numeric",
+    });
+  }
+
+  const rows = Array.isArray(todaySession) ? todaySession : [];
+  if (!rows.length) {
+    body.innerHTML = `<div class="recap-empty">No exercises logged for today yet.</div>`;
+    return;
+  }
+
+  const completed = rows.filter((r) => r.status === "completed");
+  const skipped = rows.filter((r) => r.status === "skipped");
+  const other = rows.filter(
+    (r) => r.status !== "completed" && r.status !== "skipped",
+  );
+
+  const renderRow = (r, statusGlyph) => {
+    const friendly = exerciseDisplayName(r.exercise_id);
+    const knownOutOfRegion = r.is_current_region === false && !!r.body_region;
+    const outOfRegionClass = knownOutOfRegion ? " out-of-region" : "";
+    const regionTag = knownOutOfRegion
+      ? `<span class="today-session-region-tag">prior: ${escapeHtml(r.body_region)}</span>`
+      : "";
+    // pose_metrics is the only enriched data we have on session rows
+    // today — pain/RPE/notes live in the separate /checkins surface and
+    // aren't joined into /sessions/today. When that join lands, render
+    // pain/rpe/notes inline here. For now: rep count + worst form status.
+    const meta = [];
+    if (r.pose_metrics?.rep_count != null) meta.push(`${r.pose_metrics.rep_count} reps`);
+    if (r.pose_metrics?.worst_status) meta.push(escapeHtml(r.pose_metrics.worst_status));
+    const metaLine = meta.length
+      ? `<div class="recap-row-meta">${meta.join(" · ")}</div>`
+      : "";
+    const statusClass = r.status === "skipped" ? " skipped" : "";
+    return `
+      <div class="recap-row${statusClass}${outOfRegionClass}">
+        <div class="recap-row-head">
+          <span class="recap-row-status">${escapeHtml(statusGlyph)}</span>
+          <span>${escapeHtml(friendly)}</span>
+          ${regionTag}
+        </div>
+        ${metaLine}
+      </div>`;
+  };
+
+  const parts = [];
+  if (completed.length) {
+    parts.push(`<div class="recap-section-title">Completed</div>`);
+    parts.push(completed.map((r) => renderRow(r, "✓")).join(""));
+  }
+  if (other.length) {
+    parts.push(`<div class="recap-section-title">In progress</div>`);
+    parts.push(other.map((r) => renderRow(r, "…")).join(""));
+  }
+  if (skipped.length) {
+    const names = skipped
+      .map((r) => exerciseDisplayName(r.exercise_id))
+      .map(escapeHtml)
+      .join(", ");
+    parts.push(
+      `<div class="recap-skipped-list"><strong>Skipped:</strong> ${names}</div>`,
+    );
+  }
+  if (!parts.length) {
+    body.innerHTML = `<div class="recap-empty">No exercises logged for today yet.</div>`;
+    return;
+  }
+  body.innerHTML = parts.join("");
 }
 
 function showToast(msg, type = "info") {

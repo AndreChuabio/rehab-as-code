@@ -2151,6 +2151,116 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .setpw-status-ok  { color: var(--success); border: 1px solid rgba(95, 208, 154, 0.3); background: var(--success-bg); }
 .setpw-status-err { color: var(--danger); border: 1px solid rgba(255, 107, 122, 0.3); background: var(--danger-bg); }
 
+/* ── Workout recap modal ───────────────────────────────────────────────────
+   Opens from the workout-complete card. Read-only summary of today's
+   session rows. Shape mirrors setpw-modal so the backdrop blur, z-index,
+   and close-on-backdrop conventions stay consistent across the app. */
+.recap-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  background: rgba(8, 12, 20, 0.78);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+}
+.recap-modal[hidden] { display: none; }
+.recap-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 22px 24px;
+  width: min(520px, 92vw);
+  max-height: 80vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  box-shadow: var(--shadow);
+}
+.recap-card h2 {
+  margin: 0;
+  font-size: 17px;
+  color: var(--text);
+}
+.recap-blurb {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.recap-body { display: flex; flex-direction: column; gap: 10px; }
+.recap-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-top: 4px;
+}
+.recap-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.recap-row.skipped {
+  opacity: 0.6;
+  background: transparent;
+}
+.recap-row.out-of-region {
+  border-left: 2px solid var(--ai-bg);
+}
+.recap-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--text);
+}
+.recap-row-status {
+  color: var(--success);
+  font-weight: 600;
+}
+.recap-row.skipped .recap-row-status { color: var(--muted); }
+.recap-row-meta {
+  font-size: 12px;
+  color: var(--muted);
+}
+.recap-skipped-list {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 8px 12px;
+  background: var(--surface2);
+  border-radius: 8px;
+}
+.recap-empty {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 8px 0;
+}
+.recap-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+.recap-close {
+  padding: 8px 16px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+}
+.recap-close:hover { color: var(--text); }
+
 /* ── Structured intake modal ────────────────────────────────────────────── */
 
 .intake-modal {
