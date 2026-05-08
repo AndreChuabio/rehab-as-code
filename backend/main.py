@@ -1868,15 +1868,47 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
         to compute the "Good to see you again — N days" prepend on the
         greeting. None for first-time visitors.
     """
-    # Capture prior last_active BEFORE ensure_user updates it to now.
-    # For first-time visitors prior is None; for returning users this is
-    # their last session's timestamp, which the frontend renders as
-    # "Good to see you again — N days" on the greeting.
-    prior = user_store.load_user(user_id) or {}
-    prior_last_active = prior.get("last_active")
+    # PR-W1: defensive wrap on the core load/ensure path.
+    #
+    # Pooler exhaustion (Supabase transaction pooler hitting EMAXCONNSESSION)
+    # was bubbling unhandled exceptions out of load_user / ensure_user as
+    # 500s, which the frontend rendered as a red "Patient state check failed
+    # (500)" toast plus a "no protocol yet" panel — even for users with
+    # active protocols. Degrading to 200 with state="unknown" keeps the
+    # review-pill / today-CTA helpers rendering and avoids the alarming
+    # toast for a transient infra blip.
+    #
+    # Single-read fast path: capture prior_last_active AND the user record
+    # in one DB call. ensure_user only fires for first-time visitors
+    # (load returns None), saving a round-trip on every returning request.
+    # First-time visitors stay at 2 reads (load -> ensure -> load); returning
+    # users drop from 3 reads to 1.
+    #
+    # PHI hygiene: log only the exception + token, never the user record.
+    try:
+        user = user_store.load_user(user_id)
+        prior_last_active = (user or {}).get("last_active")
+        if user is None:
+            ensure_user(user_id)
+            user = user_store.load_user(user_id) or {}
+    except Exception as exc:
+        logger.exception(
+            "intake-status load/ensure failed token=%s: %s", user_id, exc,
+        )
+        return {
+            "state": "unknown",
+            "patient_name": None,
+            "display_name": None,
+            "last_active": None,
+            "has_intake": False,
+            "has_protocol": False,
+            "current_phase": None,
+            "current_week": None,
+            "last_pr_url": None,
+            "session_count": 0,
+            "review_status": None,
+        }
 
-    ensure_user(user_id)
-    user = user_store.load_user(user_id) or {}
     intake = user.get("intake")
     ps = user.get("protocol_state") or {}
     has_intake = intake is not None

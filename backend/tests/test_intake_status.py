@@ -114,3 +114,33 @@ def test_intake_status_display_name_resolver_failure_is_graceful(
 def test_intake_status_rejects_unauthenticated(unauthed_client):
     resp = unauthed_client.get("/patient/me/intake-status")
     assert resp.status_code == 401, resp.text
+
+
+def test_intake_status_degrades_to_unknown_on_load_user_failure(
+    authed_client, fake_user_id, monkeypatch,
+):
+    """PR-W1: pooler exhaustion / DB blip in load_user must not 5xx the
+    endpoint. Degrade to 200 with state="unknown" + all flags False so the
+    frontend's review-pill / today-CTA helpers can still render instead of
+    the red "Patient state check failed (500)" toast.
+
+    Pins the don't-5xx contract for the core load/ensure path.
+    """
+    def _boom(token):
+        raise RuntimeError("EMAXCONNSESSION: pooler exhausted")
+
+    monkeypatch.setattr("main.user_store.load_user", _boom)
+    # ensure_user shouldn't be reached, but stub it so a regression doesn't
+    # accidentally hit a real DB.
+    monkeypatch.setattr("main.ensure_user", lambda token, slack_user_id=None: token)
+
+    resp = authed_client.get("/patient/me/intake-status")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["state"] == "unknown"
+    assert body["has_intake"] is False
+    assert body["has_protocol"] is False
+    assert body["display_name"] is None
+    assert body["last_active"] is None
+    assert body["session_count"] == 0
+    assert body["review_status"] is None
