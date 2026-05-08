@@ -2105,14 +2105,16 @@ function maybeAttachFormCheckBtn(wrap, item) {
     console.warn("PoseFormCheck not loaded - pose.js failed to initialize");
     return;
   }
-  // Only show the button on exercises that have pose criteria defined.
-  // Without an EXERCISES entry the rep tracker no-ops silently and the
-  // patient gets a confusing "0 reps" experience.
-  // PR-U8: My plan exercises carry both `id` (planner-generated, may not
-  // be in EXERCISES) and `library_id` (resolved canonical library entry).
-  // Prefer library_id so regressions like seated_heel_raise get the form-
-  // check flow of their canonical ankle exercise.
+  // P1.1: source of truth for guided form-check support is the backend's
+  // form_check_supported flag (from knowledge/exercise-library.json),
+  // surfaced via to_card. EXERCISES membership is a defense-in-depth
+  // fallback so a stale frontend bundle never attaches a button for an
+  // exercise the pose engine doesn't know about.
+  // PR-U8: prefer library_id over id so planner-generated regressions
+  // resolved by the fuzzy matcher inherit the canonical entry's flag.
   const poseKey = item.ex.library_id || item.ex.id;
+  const supported = item.ex.form_check_supported === true;
+  if (!supported) return;
   if (!window.PoseFormCheck.EXERCISES?.[poseKey]) return;
   const videoWrap = wrap.querySelector("#galleryVideoWrap");
   if (!videoWrap || videoWrap.parentElement.querySelector(".pose-form-check-btn")) return;
@@ -3300,6 +3302,10 @@ function attachChatCardFormCheckBtn(wrap, card) {
   // when set so the form-check button shows on regressed-but-resolvable
   // exercises (consistent with maybeAttachFormCheckBtn).
   const exId = card.library_id || card.id || card.name;
+  // P1.1: backend's form_check_supported is source of truth; EXERCISES
+  // membership is a safety check against stale frontend bundles.
+  const supported = card.form_check_supported === true;
+  if (!supported) return;
   if (!exId || !window.PoseFormCheck.EXERCISES?.[exId]) return;
   const actions = wrap.querySelector(".exercise-actions");
   if (!actions || actions.querySelector(".pose-form-check-btn")) return;

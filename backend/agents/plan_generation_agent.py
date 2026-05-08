@@ -75,6 +75,43 @@ class PlanGenerationError(RuntimeError):
     """
 
 
+def _enrich_candidates_with_form_check(
+    candidates: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Attach form_check_supported to each candidate from the library.
+
+    The researcher's tool schema only emits exercise_id + citations + rationale;
+    the planner needs form_check_supported to honor the "prefer guided
+    alternatives" rule in its system prompt. Looking the flag up here keeps
+    the source of truth in knowledge/exercise-library.json (rather than
+    duplicating into every protocol-library YAML).
+
+    Falls through gracefully when an id isn't in the library: the planner
+    just treats it as form_check_supported=false.
+    """
+    try:
+        sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+        import exercise_kb as _kb
+    except Exception as exc:
+        logger.warning("plan_generation: exercise_kb import failed: %s", exc)
+        return candidates
+
+    enriched: list[dict[str, Any]] = []
+    for cand in candidates or []:
+        if not isinstance(cand, dict):
+            enriched.append(cand)
+            continue
+        ex_id = cand.get("exercise_id") or cand.get("id") or ""
+        lib = _kb.find_by_id(ex_id) if ex_id else None
+        if not lib:
+            # Try the resolver fallback so legacy protocol-library names
+            # ("mini_squats" -> "mini_squat") still get the flag.
+            lib = _kb.resolve_to_library(ex_id) if ex_id else None
+        flag = bool(lib.get("form_check_supported", False)) if lib else False
+        enriched.append({**cand, "form_check_supported": flag})
+    return enriched
+
+
 def _coverage_concern(library_match: dict[str, Any]) -> dict[str, Any] | None:
     """Translate a library_match marker into a clinician-visible concern, or None.
 
@@ -256,6 +293,13 @@ class PlanGenerationAgent(PatientAgent):
             )
         except (ResearcherError, TrendAnalystError) as exc:
             raise PlanGenerationError(str(exc)) from exc
+
+        # Enrich each candidate with form_check_supported looked up from
+        # the canonical exercise library so the planner system prompt's
+        # "prefer guided" rule has a per-candidate signal to act on. The
+        # researcher cites protocol-library YAMLs (which don't carry the
+        # flag); knowledge/exercise-library.json is the source of truth.
+        candidates = _enrich_candidates_with_form_check(candidates)
 
         # Sequential: evaluator depends on the trend; planner depends on both.
         try:
