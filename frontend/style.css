@@ -1642,8 +1642,9 @@ body {
   gap: 12px;
   width: 100%;
   align-items: stretch;
-  /* Claim most of the viewport. object-fit: cover (below) fills the column
-     completely so we don't see letterbox bands top + bottom. */
+  /* Claim most of the viewport. object-fit: contain on the ref video means
+     we may show letterbox bands when video aspect != column aspect — that's
+     intentional. Patients need to see the whole demo, not a cropped middle. */
   min-height: 560px;
   height: calc(100vh - 160px);
   max-height: 88vh;
@@ -1693,7 +1694,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .pose-split-ref video {
   width: 100%;
   height: 100%;
-  object-fit: cover;  /* fill the column; mild crop is fine for demo */
+  object-fit: contain;
   display: block;
 }
 .pose-split-ref-label {
