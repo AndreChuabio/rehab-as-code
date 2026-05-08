@@ -15,17 +15,6 @@
         <span class="logo-tag">protocols as code, gated by clinician review</span>
       </div>
       <div class="header-right">
-        <!-- Always-visible clinician dashboard link. Visible to any
-             signed-in user; the server gates actual access via
-             require_clinician_id (403 for plain patients). During
-             productionization Andre + Nikki are both clinicians/admins
-             and need a guaranteed nav path that doesn't depend on the
-             staff_users table being seeded on the current Supabase
-             branch. Hidden when signed-out / demo state via JS. -->
-        <a class="clinician-link" id="clinicianDashLink"
-           href="/clinician" hidden>
-          Clinician dashboard →
-        </a>
         <span class="date-display" id="dateDisplay"></span>
       </div>
     </header>
@@ -298,6 +287,13 @@
   <div class="auth-pill" id="authPill" hidden>
     <span class="auth-pill-dot" id="authPillDot" aria-hidden="true"></span>
     <span class="auth-pill-email" id="authPillEmail"></span>
+    <!-- Always-visible clinician dashboard link, integrated into the
+         auth pill so it flows with the other actions instead of
+         floating in its own absolute slot. Server-side gate
+         (require_clinician_id) handles authorization; rendering it
+         to plain patients is harmless because /clinician 403s. -->
+    <a class="auth-pill-dashlink" id="clinicianDashLink"
+       href="/clinician" hidden>Dashboard</a>
     <button type="button" class="auth-pill-setpw" id="authPillSetPw" hidden>
       Set password
     </button>
