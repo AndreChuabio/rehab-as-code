@@ -1477,7 +1477,19 @@ def list_today_sessions(
     except Exception as exc:
         logger.exception("list_today failed")
         raise HTTPException(status_code=500, detail=str(exc))
-    rows, active_region = _enrich_sessions_with_region(rows, user_id)
+    # PR-V hotfix: enrichment was crashing on prod with no clear error
+    # surface (rendered as bare 500 to the browser). Defensive wrap so
+    # /sessions/today never goes down when the enrichment helpers fail —
+    # rows render unenriched, frontend treats null body_region as "no
+    # info" per PR-U7. Real exception lands in Vercel logs.
+    try:
+        rows, active_region = _enrich_sessions_with_region(rows, user_id)
+    except Exception:
+        logger.exception("sessions_today enrichment failed token=%s", user_id)
+        for r in rows:
+            r.setdefault("body_region", None)
+            r.setdefault("is_current_region", False)
+        active_region = None
     return {"sessions": rows, "active_body_region": active_region}
 
 
