@@ -2231,6 +2231,19 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   font-size: 12px;
   color: var(--muted);
 }
+/* PR-Y: How-it-felt line surfaces pain/RPE/notes from the linked checkin.
+   Notes are PHI-tier, so the styling stays muted — never compete with
+   safety banners. */
+.recap-row-checkin {
+  font-size: 12px;
+  color: var(--text);
+  margin-top: 2px;
+}
+.recap-row-checkin-notes {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
+}
 .recap-skipped-list {
   font-size: 13px;
   color: var(--muted);
@@ -2349,6 +2362,19 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .history-row-meta {
   font-size: 12px;
   color: var(--muted);
+}
+/* PR-Y: How-it-felt line for the 30-day history pane. Same restraint as
+   the recap modal — pain/RPE on top in body color, notes muted+italic
+   below. */
+.history-row-checkin {
+  font-size: 12px;
+  color: var(--text);
+  margin-top: 2px;
+}
+.history-row-checkin-notes {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 2px;
 }
 
 /* ── Structured intake modal ────────────────────────────────────────────── */

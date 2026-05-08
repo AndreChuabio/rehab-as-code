@@ -55,7 +55,42 @@ def _serialize(row: dict[str, Any]) -> dict[str, Any]:
         v = out.get(key)
         if v is not None and not isinstance(v, str):
             out[key] = v.isoformat()
+    # PR-Y: defaults so the response shape is stable even when the row has
+    # no linked check-in. Frontend keys off `checkin_id is None` to skip
+    # rendering the "How it felt" line; downstream code can still rely on
+    # the keys existing.
+    out.setdefault("checkin_id", None)
+    out.setdefault("checkin_pain_level", None)
+    out.setdefault("checkin_rpe", None)
+    out.setdefault("checkin_notes", None)
     return out
+
+
+# PR-Y: LEFT JOIN LATERAL to attach the most recent check-in per session.
+# `checkins.payload->>'associated_session_id'` is the link the frontend
+# auto-checkin writer populates; pain_level is a top-level column,
+# rpe/notes live inside the JSONB payload. LIMIT 1 + ORDER BY recorded_at
+# DESC because nothing prevents a patient from re-logging a check-in
+# after the fact — we surface the latest one. Don't log the joined
+# `notes` field; PHI hygiene.
+_CHECKIN_JOIN_SELECT = (
+    "s.id, s.token, s.exercise_id, s.protocol_id, s.planned_sets, "
+    "s.planned_reps, s.completed_sets, s.completed_reps, s.pose_metrics, "
+    "s.status, s.started_at, s.completed_at, s.created_at, "
+    "c.session_id AS checkin_id, "
+    "c.pain_level AS checkin_pain_level, "
+    "(c.payload->>'rpe')::int AS checkin_rpe, "
+    "c.payload->>'notes' AS checkin_notes "
+    "FROM sessions s "
+    "LEFT JOIN LATERAL ("
+    "  SELECT session_id, pain_level, payload, recorded_at "
+    "  FROM checkins "
+    "  WHERE token = s.token "
+    "  AND payload->>'associated_session_id' = s.id::text "
+    "  ORDER BY recorded_at DESC "
+    "  LIMIT 1"
+    ") c ON TRUE "
+)
 
 
 def create_planned(
@@ -208,13 +243,10 @@ def list_today(token: str, tz_name: str | None = None) -> list[dict[str, Any]]:
 
     with _conn() as c, c.cursor() as cur:
         cur.execute(
-            "SELECT id, token, exercise_id, protocol_id, planned_sets, "
-            "planned_reps, completed_sets, completed_reps, pose_metrics, "
-            "status, started_at, completed_at, created_at "
-            "FROM sessions "
-            "WHERE token = %s "
-            "AND created_at >= %s AND created_at <= %s "
-            "ORDER BY created_at ASC",
+            "SELECT " + _CHECKIN_JOIN_SELECT
+            + "WHERE s.token = %s "
+            "AND s.created_at >= %s AND s.created_at <= %s "
+            "ORDER BY s.created_at ASC",
             (token, start_local, end_local),
         )
         rows = cur.fetchall() or []
@@ -233,13 +265,10 @@ def list_recent(token: str, days: int = 7) -> list[dict[str, Any]]:
         return []
     with _conn() as c, c.cursor() as cur:
         cur.execute(
-            "SELECT id, token, exercise_id, protocol_id, planned_sets, "
-            "planned_reps, completed_sets, completed_reps, pose_metrics, "
-            "status, started_at, completed_at, created_at "
-            "FROM sessions "
-            "WHERE token = %s "
-            "AND created_at >= NOW() - (%s || ' days')::INTERVAL "
-            "ORDER BY created_at ASC",
+            "SELECT " + _CHECKIN_JOIN_SELECT
+            + "WHERE s.token = %s "
+            "AND s.created_at >= NOW() - (%s || ' days')::INTERVAL "
+            "ORDER BY s.created_at ASC",
             (token, str(days)),
         )
         rows = cur.fetchall() or []

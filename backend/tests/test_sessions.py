@@ -451,3 +451,127 @@ def test_recent_legacy_active_no_body_region_marks_rows_not_current(
     assert body["sessions"][0]["is_current_region"] is False
     # body_region still resolved on the row itself even when active is unknown
     assert body["sessions"][0]["body_region"] == "ankle"
+
+
+# ---------------------------------------------------------------------------
+# PR-Y: checkin LEFT JOIN on /sessions/today and /sessions/recent
+# ---------------------------------------------------------------------------
+#
+# session_repo.list_today / list_recent now LEFT JOIN LATERAL the most
+# recent checkin row per session. Pain/RPE/notes flow through the
+# enrichment loop unchanged. When there's no linked checkin, all four
+# checkin_* keys are present but None — frontend keys off checkin_id is
+# null to skip rendering "How it felt" entirely.
+
+
+def test_today_includes_checkin_pain_rpe_notes_when_linked(
+    authed_client, fake_user_id, monkeypatch,
+):
+    """Session row arrives from session_repo with the join already done;
+    the endpoint must preserve all four checkin_* keys end-to-end."""
+    _stub_session_today(monkeypatch, [
+        {
+            "id": "s1", "exercise_id": "ankle_alphabet", "status": "completed",
+            "checkin_id": "ck-1",
+            "checkin_pain_level": 7,
+            "checkin_rpe": 3,
+            "checkin_notes": "felt sharp twinge mid-rep",
+        },
+    ])
+    _stub_protocol_active(monkeypatch, {"body_region": "ankle"})
+    _stub_body_region_lookup(monkeypatch, {"ankle_alphabet": "ankle"})
+    monkeypatch.setattr("main.ensure_user", lambda t, slack_user_id=None: t)
+
+    resp = authed_client.get("/sessions/today", headers={"X-Timezone": "UTC"})
+    assert resp.status_code == 200, resp.text
+    row = resp.json()["sessions"][0]
+    assert row["checkin_id"] == "ck-1"
+    assert row["checkin_pain_level"] == 7
+    assert row["checkin_rpe"] == 3
+    assert row["checkin_notes"] == "felt sharp twinge mid-rep"
+    # Region enrichment still works alongside the checkin keys.
+    assert row["is_current_region"] is True
+
+
+def test_today_checkin_fields_null_when_no_checkin(
+    authed_client, fake_user_id, monkeypatch,
+):
+    """Row with no linked checkin: all four checkin_* keys are present
+    and None. Stable shape for the frontend to key off."""
+    _stub_session_today(monkeypatch, [
+        {
+            "id": "s1", "exercise_id": "ankle_alphabet", "status": "completed",
+            "checkin_id": None,
+            "checkin_pain_level": None,
+            "checkin_rpe": None,
+            "checkin_notes": None,
+        },
+    ])
+    _stub_protocol_active(monkeypatch, {"body_region": "ankle"})
+    _stub_body_region_lookup(monkeypatch, {"ankle_alphabet": "ankle"})
+    monkeypatch.setattr("main.ensure_user", lambda t, slack_user_id=None: t)
+
+    resp = authed_client.get("/sessions/today", headers={"X-Timezone": "UTC"})
+    assert resp.status_code == 200, resp.text
+    row = resp.json()["sessions"][0]
+    assert row["checkin_id"] is None
+    assert row["checkin_pain_level"] is None
+    assert row["checkin_rpe"] is None
+    assert row["checkin_notes"] is None
+
+
+def test_recent_includes_checkin_fields(
+    authed_client, fake_user_id, monkeypatch,
+):
+    """Same pass-through guarantee for /sessions/recent: enrichment loop
+    must not strip the checkin_* keys when adding body_region."""
+    _stub_session_recent(monkeypatch, [
+        {
+            "id": "r1", "exercise_id": "ankle_alphabet", "status": "completed",
+            "created_at": "2026-05-05T10:00:00Z",
+            "checkin_id": "ck-9",
+            "checkin_pain_level": 4,
+            "checkin_rpe": 5,
+            "checkin_notes": None,
+        },
+    ])
+    _stub_protocol_active(monkeypatch, {"body_region": "ankle"})
+    _stub_body_region_lookup(monkeypatch, {"ankle_alphabet": "ankle"})
+
+    resp = authed_client.get("/sessions/recent?days=7")
+    assert resp.status_code == 200, resp.text
+    row = resp.json()["sessions"][0]
+    assert row["checkin_id"] == "ck-9"
+    assert row["checkin_pain_level"] == 4
+    assert row["checkin_rpe"] == 5
+    assert row["checkin_notes"] is None
+    assert row["is_current_region"] is True
+
+
+def test_recent_checkin_fields_survive_clinician_target_path(
+    authed_clinician_client, fake_clinician_id, fake_user_id, monkeypatch,
+):
+    """Clinician fetching another patient's recent sessions still gets
+    the joined checkin fields — pain/RPE/notes are part of the clinical
+    review surface, not gated separately."""
+    _stub_session_recent(monkeypatch, [
+        {
+            "id": "r1", "exercise_id": "ankle_alphabet", "status": "completed",
+            "created_at": "2026-05-05T10:00:00Z",
+            "checkin_id": "ck-2", "checkin_pain_level": 8,
+            "checkin_rpe": 7, "checkin_notes": "had to stop early",
+        },
+    ])
+    _stub_protocol_active(monkeypatch, {"body_region": "ankle"})
+    _stub_body_region_lookup(monkeypatch, {"ankle_alphabet": "ankle"})
+    monkeypatch.setattr("main.is_clinician", lambda uid: uid == fake_clinician_id)
+
+    resp = authed_clinician_client.get(
+        f"/sessions/recent?days=7&token={fake_user_id}",
+    )
+    assert resp.status_code == 200, resp.text
+    row = resp.json()["sessions"][0]
+    assert row["checkin_id"] == "ck-2"
+    assert row["checkin_pain_level"] == 8
+    assert row["checkin_rpe"] == 7
+    assert row["checkin_notes"] == "had to stop early"
