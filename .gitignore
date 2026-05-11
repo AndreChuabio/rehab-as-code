@@ -65,3 +65,8 @@ users/
 .vercel
 .env*.local
 .mcp.json
+
+# Raw pose reference clips. Ship the built index.json (in pose_refs/),
+# never the recordings themselves -- they may carry identifying motion
+# patterns. See frontend/pose_refs/README.md.
+frontend/pose_refs/raw/*.json

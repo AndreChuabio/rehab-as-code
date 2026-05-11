@@ -1,0 +1,12 @@
+# Raw reference clips (downloaded from frontend/pose_record.html) drop
+# here. The build script (frontend/scripts/build_pose_refs.js) reads
+# every *.json in this directory, computes embeddings, and writes
+# ../index.json.
+#
+# Naming convention: <exercise_id>__<label>__<recorder>__<YYYYMMDD>.json
+# e.g. mini_squat__good__andre__20260507.json
+#
+# Don't commit the raw clips themselves to git - they may carry
+# patient-recorded video frames if Andre or Nikki did the recording on
+# a session computer. .gitignore handles that; only this .gitkeep is
+# tracked so the directory survives.
