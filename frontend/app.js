@@ -60,11 +60,17 @@ async function navigateToIntake() {
   if (window.RehabAuth?.getJwt?.()) {
     const state = await refreshPatientState({ openModalIfNeeded: true })
       .catch((e) => { console.warn("state refresh failed", e); return null; });
-    // openModalIfNeeded handles the needs_intake case (opens intakeModal).
-    // For returning patients (state=needs_plan or ready), clicking Start
-    // intake means "I want to update something" — drop a chat note pointing
-    // them at Maya rather than re-running the demo questionnaire.
-    if (state && state.state !== "needs_intake") {
+    // refreshPatientState no longer auto-opens modals (that fired on every
+    // page load / account switch / "View as patient"). The intake modal
+    // opens ONLY here, on an explicit Start-intake click, and only for a new
+    // patient — so a needs_intake patient isn't silently dead-ended.
+    if (state && state.state === "needs_intake") {
+      hideCoachWorkingIndicator();
+      showIntakeModal();
+    } else if (state) {
+      // Returning patient (needs_plan / ready): clicking Start intake means
+      // "I want to update something" — point them at Maya rather than
+      // re-running the questionnaire.
       switchStage("chat");
       appendChatBubble(
         "coach",
