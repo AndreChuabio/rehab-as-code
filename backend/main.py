@@ -1926,7 +1926,13 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
     try:
         import protocol_repo
         active_protocol = protocol_repo.get_active(user_id)
-        has_protocol = active_protocol is not None
+        # A "pending_intake" placeholder is NOT a real protocol — it's a
+        # sentinel row (a single clinician_review_required exercise) minted
+        # before onboarding completes. Counting it as has_protocol silently
+        # resolves the patient to state="ready", so the intake modal never
+        # opens and "Start intake" dead-ends. Gate it out by phase.
+        active_phase = ((active_protocol or {}).get("payload") or {}).get("phase")
+        has_protocol = active_protocol is not None and active_phase != "pending_intake"
     except protocol_repo.ProtocolRepoError as exc:
         logger.warning("active-protocol check unavailable (config): %s", exc)
         has_protocol = bool(ps.get("last_pr_url"))
