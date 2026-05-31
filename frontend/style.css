@@ -3708,3 +3708,122 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   .next-exercise-actions .picker-action { width: 100%; }
   .flow-nudge { flex-direction: column; align-items: stretch; }
 }
+
+/* ---- Guided tour overlay (tour.js) ----------------------------------------
+   Shared by the patient app and clinician dashboard. The dark scrim is the
+   spotlight's box-shadow cut-out; the card floats beside the highlighted
+   region. Reuses Clinical Twilight tokens — no new palette. */
+.tour-trigger {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tour-trigger:hover { background: var(--surface3); }
+
+.tour-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 8950;
+}
+
+.tour-spotlight {
+  position: fixed;
+  border-radius: 8px;
+  box-shadow: 0 0 0 9999px rgba(8, 12, 20, 0.78);
+  pointer-events: none;
+  transition: top 0.25s ease, left 0.25s ease, width 0.25s ease, height 0.25s ease;
+}
+.tour-spotlight.no-motion { transition: none; }
+
+.tour-card {
+  position: fixed;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 16px 18px;
+  color: var(--text);
+  z-index: 8951;
+}
+.tour-card:focus { outline: none; }
+
+.tour-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+.tour-step-count {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 600;
+}
+.tour-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.tour-close:hover { color: var(--text-strong); }
+
+.tour-card-title {
+  margin: 0 0 6px;
+  font-size: 16px;
+  color: var(--text-strong);
+}
+.tour-card-body {
+  margin: 0 0 14px;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text);
+}
+
+.tour-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.tour-nav { display: flex; gap: 8px; }
+.tour-skip {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 6px 4px;
+}
+.tour-skip:hover { color: var(--text); }
+.tour-back {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.tour-back:hover { background: var(--surface3); }
+.tour-next {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: var(--bg);
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.tour-next:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
