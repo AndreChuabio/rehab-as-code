@@ -41,10 +41,12 @@ def test_intake_status_needs_intake_state(authed_client, fake_user_id, monkeypat
 
 
 def test_intake_status_ready_state(authed_client, fake_user_id, monkeypatch):
-    """Patient with intake AND a protocol PR — fully onboarded.
+    """Patient with intake AND an active protocol row — fully onboarded.
 
-    Asserts display_name is the resolved string and last_active is the
-    *prior* ISO timestamp (captured before ensure_user mutated it).
+    "ready" derives from protocol_repo.get_active (the canonical signal), not
+    protocol_state.last_pr_url (a dead PR-bus field). current_phase/week come
+    from the active protocol payload. Also asserts the PR-R additions
+    (display_name + prior last_active).
     """
     monkeypatch.setattr("main.ensure_user", lambda token, slack_user_id=None: token)
     monkeypatch.setattr(
@@ -53,17 +55,22 @@ def test_intake_status_ready_state(authed_client, fake_user_id, monkeypatch):
             "token": token,
             "patient_name": "Andre",
             "intake": {"name": "Andre", "injury": "knee"},
-            "protocol_state": {
-                "current_phase": "acute",
-                "current_week": 2,
-                "last_pr_url": "https://github.com/x/y/pull/1",
-            },
+            "protocol_state": {"current_phase": "acute", "current_week": 2},
             "session_history": [{"id": 1}, {"id": 2}],
             "last_active": "2026-05-01T12:00:00Z",
         },
     )
     monkeypatch.setattr(
         "main.user_store.get_display_name", lambda token: "Andre",
+    )
+    monkeypatch.setattr(
+        "protocol_repo.get_active",
+        lambda token: {
+            "id": "p1",
+            "token": token,
+            "status": "active",
+            "payload": {"phase": "acute", "week": 2},
+        },
     )
 
     resp = authed_client.get("/patient/me/intake-status")
@@ -109,6 +116,81 @@ def test_intake_status_display_name_resolver_failure_is_graceful(
     body = resp.json()
     assert body["display_name"] is None
     assert body["last_active"] == "2026-05-01T12:00:00Z"
+
+
+def test_intake_status_ready_from_active_protocol_not_pr_url(
+    authed_client, fake_user_id, monkeypatch,
+):
+    """Regression: a returning patient with an ACTIVE protocol row but no
+    vestigial protocol_state.last_pr_url must resolve to "ready" — not
+    "needs_plan".
+
+    last_pr_url is a dead PR-bus field (always None now); keying state off it
+    made Maya greet every returning patient as if drafting their FIRST plan,
+    even at subacute week 5. State must derive from protocol_repo.get_active,
+    and current_phase/week must come from the active payload.
+    """
+    monkeypatch.setattr("main.ensure_user", lambda token, slack_user_id=None: token)
+    monkeypatch.setattr(
+        "main.user_store.load_user",
+        lambda token: {
+            "token": token,
+            "patient_name": "Christian",
+            "intake": {"name": "Christian", "injury": "ankle"},
+            # Real post-PR-bus shape: protocol_state carries NO last_pr_url.
+            "protocol_state": {"current_phase": None, "current_week": None},
+            "session_history": [{"id": 1}],
+            "last_active": "2026-05-20T12:00:00Z",
+        },
+    )
+    monkeypatch.setattr("main.user_store.get_display_name", lambda token: "Christian")
+    # Canonical signal: an active protocol row exists for this patient.
+    monkeypatch.setattr(
+        "protocol_repo.get_active",
+        lambda token: {
+            "id": "p1",
+            "token": token,
+            "status": "active",
+            "payload": {"phase": "subacute", "week": 5},
+        },
+    )
+
+    resp = authed_client.get("/patient/me/intake-status")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["state"] == "ready"
+    assert body["has_protocol"] is True
+    assert body["current_phase"] == "subacute"
+    assert body["current_week"] == 5
+
+
+def test_intake_status_needs_plan_when_no_active_protocol(
+    authed_client, fake_user_id, monkeypatch,
+):
+    """Intake present but get_active returns None -> needs_plan (the
+    legitimate pre-first-plan state). Pins the new derivation so a future
+    edit can't silently flip an intake-only patient to "ready"."""
+    monkeypatch.setattr("main.ensure_user", lambda token, slack_user_id=None: token)
+    monkeypatch.setattr(
+        "main.user_store.load_user",
+        lambda token: {
+            "token": token,
+            "patient_name": "Christian",
+            "intake": {"name": "Christian", "injury": "ankle"},
+            "protocol_state": {"last_pr_url": "https://stale/pr/1"},  # ignored now
+            "session_history": [],
+            "last_active": None,
+        },
+    )
+    monkeypatch.setattr("main.user_store.get_display_name", lambda token: "Christian")
+    monkeypatch.setattr("protocol_repo.get_active", lambda token: None)
+
+    resp = authed_client.get("/patient/me/intake-status")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    # No active row -> needs_plan, even though the stale last_pr_url is truthy.
+    assert body["state"] == "needs_plan"
+    assert body["has_protocol"] is False
 
 
 def test_intake_status_rejects_unauthenticated(unauthed_client):

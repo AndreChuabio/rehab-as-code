@@ -1849,8 +1849,8 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
 
     States:
       - "needs_intake"     no intake_records row
-      - "needs_plan"       intake exists, protocol_state has no last_pr_url
-      - "ready"            intake + protocol_state.last_pr_url both present
+      - "needs_plan"       intake exists but no active protocol row
+      - "ready"            intake + an active protocol row both present
 
     Also returns `review_status` (PR-H trust loop): a small dict telling the
     frontend whether the patient has a draft awaiting clinician review, was
@@ -1912,11 +1912,33 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
     intake = user.get("intake")
     ps = user.get("protocol_state") or {}
     has_intake = intake is not None
-    has_pr = bool(ps.get("last_pr_url"))
+
+    # has_protocol must reflect the CANONICAL active protocol row, not the
+    # vestigial protocol_state.last_pr_url. last_pr_url is a dead field from
+    # the retired GitHub-PR-as-message-bus: it is hardwired to None by the
+    # only writers (plan_generation_agent) and never flipped on approval, so
+    # keying state off it collapsed every returning patient to "needs_plan"
+    # and made Maya greet them as if drafting their FIRST plan even at week 5.
+    # Derive from protocol_repo.get_active; degrade to the old signal only if
+    # the protocols table is unreachable (local sqlite / pooler blip) rather
+    # than 5xx-ing this patient-state endpoint.
+    active_protocol = None
+    try:
+        import protocol_repo
+        active_protocol = protocol_repo.get_active(user_id)
+        has_protocol = active_protocol is not None
+    except protocol_repo.ProtocolRepoError as exc:
+        logger.warning("active-protocol check unavailable (config): %s", exc)
+        has_protocol = bool(ps.get("last_pr_url"))
+    except Exception as exc:
+        logger.exception(
+            "active-protocol check failed token=%s: %s", user_id, exc,
+        )
+        has_protocol = bool(ps.get("last_pr_url"))
 
     if not has_intake:
         state = "needs_intake"
-    elif not has_pr:
+    elif not has_protocol:
         state = "needs_plan"
     else:
         state = "ready"
@@ -1959,15 +1981,26 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
         )
         display_name = None
 
+    # Phase/week from the active protocol payload (canonical), falling back to
+    # the protocol_state mirror only when no active row was resolved.
+    active_payload = (active_protocol or {}).get("payload") or {}
+    current_phase = active_payload.get("phase")
+    if current_phase is None:
+        current_phase = ps.get("current_phase")
+    current_week = active_payload.get("week")
+    if current_week is None:
+        current_week = ps.get("current_week")
+
     return {
         "state": state,
         "patient_name": user.get("patient_name"),
         "display_name": display_name,
         "last_active": prior_last_active,
         "has_intake": has_intake,
-        "has_protocol": has_pr,
-        "current_phase": ps.get("current_phase"),
-        "current_week": ps.get("current_week"),
+        "has_protocol": has_protocol,
+        "current_phase": current_phase,
+        "current_week": current_week,
+        # Retained for backward compat; no longer load-bearing (PR-bus dead).
         "last_pr_url": ps.get("last_pr_url"),
         "session_count": len(user.get("session_history", [])),
         "review_status": review_status,
