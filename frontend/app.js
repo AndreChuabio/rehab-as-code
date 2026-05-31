@@ -3628,6 +3628,13 @@ const _todaysSessionState = {
   startedAtMs: null,        // performance.now() at startTodaysSession; powers totalTimeMin
 };
 
+// Re-entrancy lock for refreshTodaysFlowCTA. Supabase onChange fires multiple
+// times per load (INITIAL_SESSION -> SIGNED_IN/TOKEN_REFRESHED), each firing
+// refreshPatientState -> refreshTodaysFlowCTA. Without this, two invocations
+// both pass the teardown (DOM empty), both await refreshTodaySession, then
+// both append a CTA — rendering two stacked "Your plan is ready" cards.
+let _todaysFlowCtaRendering = false;
+
 // Pure helper. Given the current state, return the next exercise to play
 // (or null if done). Also returns whether the workout is complete.
 // Exposed on window.__flowHelpers for the unit test.
@@ -3895,66 +3902,80 @@ if (typeof window !== "undefined") {
 // and the sidebar today-session card. Idempotent — safe to call on every
 // patient-state poll.
 async function refreshTodaysFlowCTA() {
-  const sidebarSlot = document.getElementById("todaysFlowSidebarCTA");
-  const chatLog = document.getElementById("chatLog");
+  // Serialize concurrent invocations (see _todaysFlowCtaRendering above). A
+  // second overlapping call would otherwise append a duplicate CTA across the
+  // `await refreshTodaySession()` below. Skipping it is safe — the in-flight
+  // call renders from current state, and any later state change re-invokes.
+  if (_todaysFlowCtaRendering) return;
+  _todaysFlowCtaRendering = true;
+  try {
+    const sidebarSlot = document.getElementById("todaysFlowSidebarCTA");
+    const chatLog = document.getElementById("chatLog");
 
-  // Tear down stale CTAs first; we always rebuild from current state.
-  if (sidebarSlot) {
-    sidebarSlot.innerHTML = "";
-    sidebarSlot.hidden = true;
-  }
-  const existingChatCta = document.getElementById("todaysFlowChatCTA");
-  if (existingChatCta) existingChatCta.remove();
-
-  // Don't show the CTA mid-flow — once the patient clicks Start, the picker
-  // owns the chat scroll. The flow itself surfaces the next-exercise CTA.
-  if (_todaysSessionState.active) return;
-
-  const reviewState = patientState?.review_status?.state;
-  if (reviewState !== "recently_approved") return;
-
-  // Today's session: refresh if we don't already have a fresh mirror, then
-  // gate on completion count. If any row is completed today, the patient
-  // has already started — don't double-prompt.
-  if (window.RehabAuth?.getJwt?.()) {
-    try {
-      await refreshTodaySession();
-    } catch (e) {
-      console.warn("refreshTodaysFlowCTA: refreshTodaySession failed:", e);
+    // Tear down stale CTAs first; we always rebuild from current state.
+    if (sidebarSlot) {
+      sidebarSlot.innerHTML = "";
+      sidebarSlot.hidden = true;
     }
-  }
-  const completedToday = todaySession.filter((s) => s.status === "completed").length;
-  if (completedToday > 0) return;
+    const existingChatCta = document.getElementById("todaysFlowChatCTA");
+    if (existingChatCta) existingChatCta.remove();
 
-  // Render inline CTA at the top of the chat scroll.
-  if (chatLog) {
-    const cta = document.createElement("div");
-    cta.id = "todaysFlowChatCTA";
-    cta.className = "todays-session-cta";
-    cta.innerHTML = `
-      <div class="todays-session-cta-title">Your plan is ready.</div>
-      <div class="todays-session-cta-sub">Start today's session?</div>
-      <button type="button" class="todays-session-cta-btn">Start session →</button>
-    `;
-    cta.querySelector("button").addEventListener("click", startTodaysSession);
-    // Insert right after the chat-empty placeholder if present, else prepend.
-    const empty = document.getElementById("chatEmpty");
-    if (empty && empty.parentElement === chatLog) {
-      empty.insertAdjacentElement("afterend", cta);
-    } else {
-      chatLog.insertBefore(cta, chatLog.firstChild);
+    // Don't show the CTA mid-flow — once the patient clicks Start, the picker
+    // owns the chat scroll. The flow itself surfaces the next-exercise CTA.
+    if (_todaysSessionState.active) return;
+
+    const reviewState = patientState?.review_status?.state;
+    if (reviewState !== "recently_approved") return;
+
+    // Today's session: refresh if we don't already have a fresh mirror, then
+    // gate on completion count. If any row is completed today, the patient
+    // has already started — don't double-prompt.
+    if (window.RehabAuth?.getJwt?.()) {
+      try {
+        await refreshTodaySession();
+      } catch (e) {
+        console.warn("refreshTodaysFlowCTA: refreshTodaySession failed:", e);
+      }
     }
-  }
+    const completedToday = todaySession.filter((s) => s.status === "completed").length;
+    if (completedToday > 0) return;
 
-  // Mirror in the sidebar.
-  if (sidebarSlot) {
-    sidebarSlot.hidden = false;
-    sidebarSlot.innerHTML = `
-      <button type="button" class="todays-session-sidebar-btn">
-        Start today's session →
-      </button>
-    `;
-    sidebarSlot.querySelector("button").addEventListener("click", startTodaysSession);
+    // Render inline CTA at the top of the chat scroll.
+    if (chatLog) {
+      // Atomic teardown-before-insert: defends against any stale node that
+      // slipped in across the await above (belt-and-suspenders with the lock).
+      const stale = document.getElementById("todaysFlowChatCTA");
+      if (stale) stale.remove();
+      const cta = document.createElement("div");
+      cta.id = "todaysFlowChatCTA";
+      cta.className = "todays-session-cta";
+      cta.innerHTML = `
+        <div class="todays-session-cta-title">Your plan is ready.</div>
+        <div class="todays-session-cta-sub">Start today's session?</div>
+        <button type="button" class="todays-session-cta-btn">Start session →</button>
+      `;
+      cta.querySelector("button").addEventListener("click", startTodaysSession);
+      // Insert right after the chat-empty placeholder if present, else prepend.
+      const empty = document.getElementById("chatEmpty");
+      if (empty && empty.parentElement === chatLog) {
+        empty.insertAdjacentElement("afterend", cta);
+      } else {
+        chatLog.insertBefore(cta, chatLog.firstChild);
+      }
+    }
+
+    // Mirror in the sidebar.
+    if (sidebarSlot) {
+      sidebarSlot.hidden = false;
+      sidebarSlot.innerHTML = `
+        <button type="button" class="todays-session-sidebar-btn">
+          Start today's session →
+        </button>
+      `;
+      sidebarSlot.querySelector("button").addEventListener("click", startTodaysSession);
+    }
+  } finally {
+    _todaysFlowCtaRendering = false;
   }
 }
 
