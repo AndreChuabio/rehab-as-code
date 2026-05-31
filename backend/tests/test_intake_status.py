@@ -193,6 +193,51 @@ def test_intake_status_needs_plan_when_no_active_protocol(
     assert body["has_protocol"] is False
 
 
+def test_intake_status_pending_intake_placeholder_is_not_ready(
+    authed_client, fake_user_id, monkeypatch,
+):
+    """Regression: a degenerate active protocol stuck at phase 'pending_intake'
+    (a pre-onboarding sentinel row) must NOT count as has_protocol.
+
+    Otherwise the patient resolves to "ready", the intake modal never opens,
+    and "Start intake" dead-ends. The account must read as needs_intake (no
+    intake row) / needs_plan (intake present) so the real intake path reopens.
+    """
+    monkeypatch.setattr("main.ensure_user", lambda token, slack_user_id=None: token)
+    monkeypatch.setattr(
+        "main.user_store.load_user",
+        lambda token: {
+            "token": token,
+            "patient_name": None,
+            "intake": None,
+            "protocol_state": None,
+            "session_history": [],
+            "last_active": None,
+        },
+    )
+    monkeypatch.setattr("main.user_store.get_display_name", lambda token: None)
+    monkeypatch.setattr(
+        "protocol_repo.get_active",
+        lambda token: {
+            "id": "placeholder-1",
+            "token": token,
+            "status": "active",
+            "payload": {
+                "phase": "pending_intake",
+                "week": 0,
+                "exercises": [{"name": "clinician_review_required"}],
+            },
+        },
+    )
+
+    resp = authed_client.get("/patient/me/intake-status")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["has_protocol"] is False
+    # No intake row + placeholder active -> needs_intake (intake reopens).
+    assert body["state"] == "needs_intake"
+
+
 def test_intake_status_rejects_unauthenticated(unauthed_client):
     resp = unauthed_client.get("/patient/me/intake-status")
     assert resp.status_code == 401, resp.text
