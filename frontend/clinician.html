@@ -24,6 +24,7 @@
 
     <div class="clinician-header-meta">
       <span class="clinician-email" id="clinicianEmail"></span>
+      <button type="button" class="tour-trigger" id="clinicianTourTrigger">Take the tour</button>
       <button type="button" class="clinician-as-patient" id="clinicianAsPatient">
         View as patient
       </button>
@@ -163,16 +164,21 @@
              one-liner pointing the clinician at the safety block. -->
         <div class="narrator-no-diff" id="narratorNoDiff" hidden></div>
 
-        <div class="clinician-diff">
-          <div class="clinician-diff-col">
-            <div class="clinician-diff-label">Current active</div>
-            <pre id="diffActive"></pre>
+        <section class="structured-diff" id="diffStructured"></section>
+
+        <details class="clinician-diff-raw" id="rawDiffDetails">
+          <summary>Show raw JSON diff (advanced)</summary>
+          <div class="clinician-diff">
+            <div class="clinician-diff-col">
+              <div class="clinician-diff-label">Current active</div>
+              <pre id="diffActive"></pre>
+            </div>
+            <div class="clinician-diff-col">
+              <div class="clinician-diff-label">Proposed</div>
+              <pre id="diffProposed"></pre>
+            </div>
           </div>
-          <div class="clinician-diff-col">
-            <div class="clinician-diff-label">Proposed</div>
-            <pre id="diffProposed"></pre>
-          </div>
-        </div>
+        </details>
 
         <div class="clinician-notes" id="notesBlock" hidden>
           <label for="reviewNotes">Review notes <span id="notesRequired" hidden>(required)</span></label>
@@ -237,6 +243,7 @@
   </main>
 
   <script src="/static/auth.js"></script>
+  <script src="/static/tour.js"></script>
   <script src="/static/clinician.js"></script>
   <script src="/static/clinician_admin.js"></script>
 </body>
