@@ -1840,6 +1840,34 @@ async def _kick_plan_generation(user_id: str, message: str) -> dict:
     }
 
 
+def _is_placeholder_protocol(active: dict | None) -> bool:
+    """True if an active protocol row is a pre-intake sentinel, not a real plan.
+
+    A chat/out-of-scope path (or a manual/backfill write) can leave a
+    status='active' row tagged phase='pending_intake' with no real content —
+    either an empty exercises list or a single `clinician_review_required`
+    sentinel. Treating that as a real protocol resolves the patient to
+    state="ready", so the intake modal never opens and "Start intake"
+    dead-ends silently.
+
+    We match on the pre-intake phase tag AND actual emptiness — NOT the phase
+    tag alone. A real protocol whose phase field never advanced off
+    'pending_intake' still carries real exercises and must count as a protocol
+    (otherwise we'd re-trigger intake for an onboarded patient).
+    """
+    if not active:
+        return False
+    payload = active.get("payload") or {}
+    if payload.get("phase") != "pending_intake":
+        return False
+    exercises = payload.get("exercises") or []
+    if not exercises:
+        return True
+    if len(exercises) == 1 and (exercises[0] or {}).get("name") == "clinician_review_required":
+        return True
+    return False
+
+
 @app.get("/patient/me/intake-status")
 def patient_intake_status(user_id: str = Depends(current_user_id)):
     """Server-derived patient state for the frontend state machine.
@@ -1926,13 +1954,12 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
     try:
         import protocol_repo
         active_protocol = protocol_repo.get_active(user_id)
-        # A "pending_intake" placeholder is NOT a real protocol — it's a
-        # sentinel row (a single clinician_review_required exercise) minted
-        # before onboarding completes. Counting it as has_protocol silently
-        # resolves the patient to state="ready", so the intake modal never
-        # opens and "Start intake" dead-ends. Gate it out by phase.
-        active_phase = ((active_protocol or {}).get("payload") or {}).get("phase")
-        has_protocol = active_protocol is not None and active_phase != "pending_intake"
+        # A pre-intake placeholder (pending_intake + empty/sentinel exercises)
+        # is NOT a real protocol — counting it as has_protocol resolves the
+        # patient to state="ready" and silently dead-ends "Start intake".
+        # Gate on actual emptiness, not the phase tag alone: a real protocol
+        # can carry the pending_intake tag and must still count.
+        has_protocol = active_protocol is not None and not _is_placeholder_protocol(active_protocol)
     except protocol_repo.ProtocolRepoError as exc:
         logger.warning("active-protocol check unavailable (config): %s", exc)
         has_protocol = bool(ps.get("last_pr_url"))
