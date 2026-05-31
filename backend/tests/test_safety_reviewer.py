@@ -175,3 +175,42 @@ def test_review_reconciles_no_concerns_with_ok_false(monkeypatch):
     out = review(draft=SAMPLE_DRAFT, intake=None, trend_summary=None)
     assert out["ok"] is True
     assert out["concerns"] == []
+
+
+def test_review_derives_low_when_severity_omitted_no_concerns(monkeypatch):
+    """Prod bug: the model calls submit_verdict, ok=True, no concerns, but
+    OMITS overall_severity (tool-use doesn't enforce required). Must derive
+    'low' and proceed instead of 502-ing the whole plan run."""
+    block = _FakeToolUseBlock("submit_verdict", {"ok": True, "concerns": []})
+    _stub_anthropic(monkeypatch, response_blocks=[block])
+    from agents.safety_reviewer import review
+    out = review(draft=SAMPLE_DRAFT, intake={"injury_type": "knee"}, trend_summary=None)
+    assert out["overall_severity"] == "low"
+    assert out["ok"] is True
+
+
+def test_review_derives_from_concerns_when_severity_omitted(monkeypatch):
+    """overall_severity omitted but concerns present -> derive the worst
+    concern severity (overall_severity is defined as that maximum)."""
+    concerns = [
+        {"check": "rom", "severity": "low", "detail": "x"},
+        {"check": "load", "severity": "med", "detail": "y"},
+    ]
+    block = _FakeToolUseBlock("submit_verdict", {"ok": False, "concerns": concerns})
+    _stub_anthropic(monkeypatch, response_blocks=[block])
+    from agents.safety_reviewer import review
+    out = review(draft=SAMPLE_DRAFT, intake=None, trend_summary=None)
+    assert out["overall_severity"] == "med"
+    assert out["ok"] is False
+    assert len(out["concerns"]) == 2
+
+
+def test_review_still_raises_on_present_garbage_severity(monkeypatch):
+    """A present-but-non-enum value (not omitted) still fails closed."""
+    bad = _FakeToolUseBlock("submit_verdict", {
+        "ok": False, "concerns": [], "overall_severity": "critical",
+    })
+    _stub_anthropic(monkeypatch, response_blocks=[bad])
+    from agents.safety_reviewer import SafetyReviewError, review
+    with pytest.raises(SafetyReviewError):
+        review(draft=SAMPLE_DRAFT, intake=None, trend_summary=None)
