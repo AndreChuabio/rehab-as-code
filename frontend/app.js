@@ -3,6 +3,28 @@ const API_BASE = "";
 let intakeComplete = localStorage.getItem("rehab_intake_complete") === "1";
 let approvedPlanExercises = []; // exercises the user added in step 2
 
+// Guided onboarding tour (tour.js). Steps whose target is missing/hidden are
+// skipped automatically, so conditional cards (Today's Session, the review
+// pill) drop out cleanly when not yet present. Bump the `key` version to
+// re-show the tour after a material change.
+const PATIENT_TOUR = {
+  key: "patient_v1",
+  steps: [
+    { selector: "#healthStats", placement: "right", title: "Your wearable signals",
+      body: "Sleep, HRV, and recovery from your wearable. Coach Maya and your PT use these trends to decide when to progress or hold your plan." },
+    { selector: ".protocol-card", placement: "right", title: "Your current protocol",
+      body: "The exercises your clinician approved for this week. Every change here is reviewed by a real PT before it reaches you." },
+    { selector: ".quick-actions", placement: "top", title: "Quick actions",
+      body: "Start your intake, draft next week's plan, browse the exercise library, or log a daily check-in — all from here." },
+    { selector: "#chatLog", placement: "left", title: "Coach Maya",
+      body: "Chat with Coach Maya any time — ask about an exercise, report pain, or request a swap. She is grounded in your approved plan." },
+    { selector: "#tabVideo", placement: "bottom", title: "Video sessions",
+      body: "Jump into a guided video session for live form coaching when you are ready to move." },
+    { selector: "#reviewPill", placement: "bottom", title: "Review status",
+      body: "Shows where your plan sits in clinician review — pending, approved, or needs attention. You are always in the loop." },
+  ],
+};
+
 // ---------------------------------------------------------------------------
 // Hash-based routing  /#intake  /#plan  /#exercise  /#checkin
 // ---------------------------------------------------------------------------
@@ -97,6 +119,10 @@ document.addEventListener("DOMContentLoaded", () => {
   bootstrapAuth();
   wireIntakeModal();
   wirePlanGenModal();
+  // "Take the tour" — always available, re-launches regardless of the flag.
+  document.getElementById("tourTrigger")?.addEventListener("click", () => {
+    window.Tour?.start(PATIENT_TOUR);
+  });
 });
 
 function wireIntakeModal() {
@@ -596,6 +622,10 @@ async function refreshPatientState({ openModalIfNeeded = true } = {}) {
     }
     applyStepLocks();
     loadProtocol();
+    // First-run guided tour — only once the dashboard is populated (ready),
+    // so it never fights the intake/plan-gen modals or points at empty cards.
+    // Delay lets the sidebar + review pill finish rendering before anchoring.
+    setTimeout(() => window.Tour?.autoStart(PATIENT_TOUR), 800);
   }
   return patientState;
 }

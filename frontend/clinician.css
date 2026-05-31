@@ -756,6 +756,252 @@
 .diff-changed-old { background: rgba(232, 181, 74, 0.18);  display: inline-block; width: 100%; }
 .diff-changed-new { background: rgba(79, 179, 196, 0.22);  display: inline-block; width: 100%; }
 
+/* ---- Structured exercise-level diff (primary clinician view) -----------
+   Readable cards in body sans-serif (NOT 12px monospace — monospace only
+   survives inside the collapsed raw <pre>). Status rail + text label + glyph
+   so colour is never the only signal. */
+.structured-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.structured-diff-banner {
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.structured-diff-summary {
+  font-size: 13px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+.structured-diff-summary .count-sig {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.structured-diff-caption {
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.8;
+  margin-top: -6px;
+}
+
+.structured-diff-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+details.structured-diff-group { display: block; }
+details.structured-diff-group > .exercise-diff-card { margin-top: 8px; }
+
+.structured-diff-group-label {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+.structured-diff-significant > .structured-diff-group-label { color: var(--danger); }
+details.structured-diff-group > summary.structured-diff-group-label {
+  cursor: pointer;
+  list-style: revert;
+}
+
+.structured-diff-unchanged-list {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 6px 2px 2px;
+  line-height: 1.5;
+}
+
+.structured-diff-empty {
+  font-size: 13px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.exercise-diff-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.exercise-diff-card.added     { border-left-color: var(--success); }
+.exercise-diff-card.removed    { border-left-color: var(--danger); }
+.exercise-diff-card.modified   { border-left-color: var(--warn); }
+.exercise-diff-card.unchanged  { border-left-color: var(--border); opacity: 0.65; }
+.exercise-diff-card.significant { border-left-color: var(--danger); }
+
+.exercise-diff-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.exercise-diff-glyph {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--muted);
+  width: 14px;
+  text-align: center;
+}
+
+.exercise-diff-status {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.06em;
+}
+.exercise-diff-status.status-added    { background: rgba(95, 208, 154, 0.18); color: var(--success); }
+.exercise-diff-status.status-removed   { background: rgba(255, 107, 122, 0.18); color: var(--danger); }
+.exercise-diff-status.status-modified  { background: rgba(232, 181, 74, 0.18); color: var(--warn); }
+.exercise-diff-status.status-unchanged { background: var(--surface3); color: var(--muted); }
+
+.exercise-diff-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.exercise-diff-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.diff-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.06em;
+}
+.diff-badge-danger { background: var(--danger); color: var(--text-strong); }
+.diff-badge-new    { background: var(--success); color: var(--bg); }
+
+.exercise-diff-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.field-change {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.field-change-label {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.field-change-vals {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--text);
+}
+
+.field-change-old { color: var(--warn); }
+.field-change-new { color: var(--accent); font-weight: 600; }
+.field-change-arrow { color: var(--muted); }
+.field-change-same { color: var(--text); }
+.field-change-nochange { color: var(--muted); font-size: 11px; }
+
+.field-delta.up   { color: var(--danger); font-weight: 700; }
+.field-delta.down { color: var(--success); font-weight: 700; }
+
+/* Prose fields (load, regression, progression) stack before/after so the
+   full text is readable rather than truncated. */
+.field-change-prose .field-change-prose-vals {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.field-change-prose .field-change-old {
+  background: rgba(232, 181, 74, 0.12);
+  border-radius: 4px;
+  padding: 6px 8px;
+  line-height: 1.45;
+}
+.field-change-prose .field-change-new {
+  background: rgba(79, 179, 196, 0.14);
+  border-radius: 4px;
+  padding: 6px 8px;
+  line-height: 1.45;
+  font-weight: 400;
+}
+.field-change-prose .field-change-arrow { font-size: 12px; }
+
+.exercise-diff-summary {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+}
+.exercise-diff-summary.removed-summary { opacity: 0.7; }
+.ex-sum-head { font-weight: 600; color: var(--text-strong); margin-bottom: 4px; }
+.ex-sum-line { margin-top: 4px; }
+.ex-sum-cap {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  margin-right: 4px;
+}
+
+.removed-guard {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-radius: 4px;
+  padding: 6px 8px;
+  line-height: 1.45;
+}
+
+.ref-chip {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: ui-monospace, SF Mono, Menlo, monospace;
+}
+.ref-chip-added   { background: rgba(95, 208, 154, 0.18); color: var(--success); }
+.ref-chip-removed { background: rgba(255, 107, 122, 0.18); color: var(--danger); text-decoration: line-through; }
+
+/* Raw JSON diff demoted to a collapsed advanced toggle. */
+.clinician-diff-raw {
+  margin-bottom: 18px;
+}
+.clinician-diff-raw > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  user-select: none;
+  padding: 4px 0;
+}
+.clinician-diff-raw .clinician-diff { margin-top: 10px; margin-bottom: 0; }
+
 .clinician-notes {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -813,6 +1059,8 @@
   .clinician-main { grid-template-columns: 1fr; }
   .clinician-queue { max-height: 240px; }
   .clinician-diff { grid-template-columns: 1fr; }
+  .field-change { grid-template-columns: 1fr; gap: 2px; }
+  .exercise-diff-badges { margin-left: 0; }
 }
 
 /* Last 7 days of sessions panel (PR-A) */

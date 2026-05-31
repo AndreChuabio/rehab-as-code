@@ -29,6 +29,30 @@
   let pendingAction = null; // 'approve' | 'reject'
   let currentPatientToken = null; // for raw-context audit logging
 
+  // Guided onboarding tour (tour.js). Detail-pane steps (#patientSummary,
+  // #diffStructured, #safetyConcerns, the action buttons) resolve only when a
+  // queue item is open — on first landing they are filtered out, so the
+  // auto-tour covers the queue + controls and the full walk appears once the
+  // clinician opens a patient and re-runs via "Take the tour". Bump `key` to
+  // re-show after a material change.
+  const CLINICIAN_TOUR = {
+    key: "clinician_v1",
+    steps: [
+      { selector: ".clinician-queue", placement: "right", title: "Your review queue",
+        body: "Every AI-drafted protocol revision waiting for your sign-off. Rows flagged SAFETY jump to the top. Click any patient to open their draft." },
+      { selector: "#patientSummary", placement: "right", title: "Patient at a glance",
+        body: "A scannable summary — injury, phase, pain trend, symptoms, goals — so you have context before reading the changes." },
+      { selector: "#diffStructured", placement: "left", title: "What changed",
+        body: "The proposed changes as readable exercise cards. Clinically significant changes — reps up, ROM down, a removed safety regression — are pinned at the top and cannot be collapsed." },
+      { selector: "#safetyConcerns", placement: "left", title: "Safety review",
+        body: "Concerns the safety reviewer flagged on this draft. Read these before approving." },
+      { selector: ".clinician-detail-actions", placement: "bottom", title: "Approve or reject",
+        body: "You are the gate — nothing reaches the patient until you approve. Rejections require a note that flows back to the pipeline." },
+      { selector: "#clinicianAsPatient", placement: "bottom", title: "View as patient",
+        body: "See exactly what the patient sees, without leaving your session." },
+    ],
+  };
+
   async function bootstrap() {
     if (!window.RehabAuth) {
       redirectToPatient("auth library missing");
@@ -73,6 +97,9 @@
 
     bindHandlers();
     await loadQueue();
+    // First-run tour once the dashboard is up. Delay lets the queue render so
+    // the spotlight can anchor to it.
+    if (window.Tour) setTimeout(() => window.Tour.autoStart(CLINICIAN_TOUR), 600);
   }
 
   function redirectToPatient(reason) {
@@ -97,6 +124,9 @@
     $("clinicianAsPatient")?.addEventListener("click", () => {
       sessionStorage.setItem("asPatient", "1");
       window.location.replace("/");
+    });
+    $("clinicianTourTrigger")?.addEventListener("click", () => {
+      window.Tour?.start(CLINICIAN_TOUR);
     });
     $("approveBtn")?.addEventListener("click", () => beginAction("approve"));
     $("rejectBtn")?.addEventListener("click", () => beginAction("reject"));
@@ -296,6 +326,13 @@
       || target.status === "needs_clinician_review";
     renderNarrator(detail.narrator_summary, detail.narrator_status, safetyConcernsExist);
 
+    // Structured, exercise-level semantic diff (primary view). Readable
+    // exercise cards instead of a JSON wall; significant changes pinned.
+    renderStructuredDiff(active && active.payload, target.payload || {});
+
+    // Raw line-by-line JSON diff retained behind a collapsed <details> as the
+    // advanced/fallback view. Re-collapse on every queue selection.
+    if ($("rawDiffDetails")) $("rawDiffDetails").open = false;
     $("diffProposed").innerHTML = renderDiffPane(target.payload || {}, active && active.payload, "right");
     $("diffActive").innerHTML = renderDiffPane(active && active.payload, target.payload || {}, "left");
 
@@ -659,11 +696,436 @@
     }
   }
 
+  // ---- Structured, exercise-level protocol diff ------------------------
+  // Primary clinician view. Computed entirely client-side from
+  // active.payload + target.payload (no backend change). Renders readable
+  // exercise cards instead of a wall of JSON. Deterministic significance
+  // flags only — no free-text "load" prose direction parsing (that heuristic
+  // is clinically loaded and needs clinician sign-off; deferred). The raw
+  // line diff (renderDiffPane below) is retained behind a collapsed
+  // "advanced" <details> as the escape hatch.
+
+  // Ordered field spec drives both the per-field diff and the render order.
+  // kind: num (signed-delta compare) | prose (whole-value old → new) |
+  // list (references: added/removed entries).
+  const EX_FIELD_SPEC = [
+    { field: "sets", label: "Sets", kind: "num" },
+    { field: "reps", label: "Reps", kind: "num" },
+    { field: "load", label: "Load", kind: "prose" },
+    { field: "ROM_target_deg", label: "ROM target", kind: "num", unit: "°" },
+    { field: "intensity", label: "Intensity", kind: "prose" },
+    { field: "duration_min", label: "Duration", kind: "num", unit: " min" },
+    { field: "progression_criteria", label: "Progression", kind: "prose" },
+    { field: "regression_criteria", label: "Regression", kind: "prose" },
+    { field: "references", label: "References", kind: "list" },
+  ];
+
+  const SESSION_TARGET_SPEC = [
+    { field: "frequency_per_week", label: "Frequency", unit: "×/week" },
+    { field: "duration_min", label: "Duration", unit: " min" },
+    { field: "max_pain_during_session", label: "Max pain", unit: "/10" },
+  ];
+
+  // Lowercase, drop parenthetical suffixes + punctuation, collapse space.
+  // Makes "Seated Heel Raise (Regressed from X)" and
+  // "Seated Heel Raise (Regressed - Reduced Volume)" collide on the stem.
+  function normalizeName(name) {
+    return String(name ?? "")
+      .toLowerCase()
+      .replace(/\([^)]*\)/g, "")
+      .replace(/[^a-z0-9 ]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  function exerciseKey(ex) {
+    if (!ex) return "";
+    return String(ex.id || ex.name || "").trim().toLowerCase();
+  }
+
+  function hasValue(v) {
+    return v !== undefined && v !== null && v !== "";
+  }
+
+  function valuesEqual(kind, a, b) {
+    if (kind === "num") {
+      const na = Number(a);
+      const nb = Number(b);
+      if (Number.isNaN(na) || Number.isNaN(nb)) {
+        return String(a ?? "").trim() === String(b ?? "").trim();
+      }
+      return na === nb;
+    }
+    if (kind === "list") {
+      const la = (Array.isArray(a) ? a : []).map(String).sort();
+      const lb = (Array.isArray(b) ? b : []).map(String).sort();
+      return JSON.stringify(la) === JSON.stringify(lb);
+    }
+    return String(a ?? "").trim() === String(b ?? "").trim();
+  }
+
+  // Returns only the changed fields as { field, label, kind, unit, oldVal,
+  // newVal, delta }. delta present (signed) only for numeric fields.
+  function diffExerciseFields(active, proposed) {
+    const a = active || {};
+    const p = proposed || {};
+    const out = [];
+    for (const spec of EX_FIELD_SPEC) {
+      const oldVal = a[spec.field];
+      const newVal = p[spec.field];
+      if (!hasValue(oldVal) && !hasValue(newVal)) continue;
+      if (valuesEqual(spec.kind, oldVal, newVal)) continue;
+      const change = {
+        field: spec.field,
+        label: spec.label,
+        kind: spec.kind,
+        unit: spec.unit || "",
+        oldVal: hasValue(oldVal) ? oldVal : null,
+        newVal: hasValue(newVal) ? newVal : null,
+      };
+      if (spec.kind === "num") {
+        const na = Number(oldVal);
+        const nb = Number(newVal);
+        if (!Number.isNaN(na) && !Number.isNaN(nb)) change.delta = nb - na;
+      }
+      out.push(change);
+    }
+    return out;
+  }
+
+  // Two-pass greedy match (each exercise consumed once):
+  //   1. exact key (name/id), 2. normalized-name (strips parenthetical
+  //   suffixes so "(Regressed from X)" → "(Reduced Volume)" still pairs).
+  // Deliberately NO index fallback: a single leftover on each side is far
+  // more likely a genuine remove + add than a rename, and pairing them would
+  // bury a removed exercise (and any dropped safety regression) inside a
+  // "modified" card. Unmatched items surface as separate added/removed, both
+  // flagged significant — louder but safe for a clinical approval gate.
+  // Returns rows: { status, active, proposed, changedFields } where status is
+  // added | removed | modified | unchanged.
+  function matchExercises(activeExercises, proposedExercises) {
+    const actives = (Array.isArray(activeExercises) ? activeExercises : []).filter(Boolean);
+    const proposed = (Array.isArray(proposedExercises) ? proposedExercises : []).filter(Boolean);
+    const activeUsed = new Array(actives.length).fill(false);
+    const proposedUsed = new Array(proposed.length).fill(false);
+    const pairs = [];
+
+    // Pass 1: exact key.
+    const byKey = new Map();
+    proposed.forEach((ex, i) => {
+      const k = exerciseKey(ex);
+      if (k && !byKey.has(k)) byKey.set(k, i);
+    });
+    actives.forEach((ex, i) => {
+      const k = exerciseKey(ex);
+      if (!k) return;
+      const j = byKey.get(k);
+      if (j !== undefined && !proposedUsed[j]) {
+        pairs.push({ activeIdx: i, proposedIdx: j });
+        activeUsed[i] = proposedUsed[j] = true;
+      }
+    });
+
+    // Pass 2: normalized name on the leftovers.
+    const byNorm = new Map();
+    proposed.forEach((ex, i) => {
+      if (proposedUsed[i]) return;
+      const n = normalizeName(ex.name);
+      if (n && !byNorm.has(n)) byNorm.set(n, i);
+    });
+    actives.forEach((ex, i) => {
+      if (activeUsed[i]) return;
+      const n = normalizeName(ex.name);
+      if (!n) return;
+      const j = byNorm.get(n);
+      if (j !== undefined && !proposedUsed[j]) {
+        pairs.push({ activeIdx: i, proposedIdx: j });
+        activeUsed[i] = proposedUsed[j] = true;
+      }
+    });
+
+    const pairByProposed = new Map(pairs.map((pr) => [pr.proposedIdx, pr]));
+    const rows = [];
+    // Proposed order for matched/added; removed appended after.
+    proposed.forEach((pex, j) => {
+      const pair = pairByProposed.get(j);
+      if (pair) {
+        const aex = actives[pair.activeIdx];
+        const changedFields = diffExerciseFields(aex, pex);
+        if ((aex.name || "") !== (pex.name || "")) {
+          changedFields.unshift({
+            field: "name", label: "Renamed", kind: "prose", unit: "",
+            oldVal: aex.name || null, newVal: pex.name || null,
+          });
+        }
+        rows.push({
+          status: changedFields.length ? "modified" : "unchanged",
+          active: aex, proposed: pex, changedFields,
+        });
+      } else {
+        rows.push({ status: "added", active: null, proposed: pex, changedFields: [] });
+      }
+    });
+    actives.forEach((aex, i) => {
+      if (!activeUsed[i]) {
+        rows.push({ status: "removed", active: aex, proposed: null, changedFields: [] });
+      }
+    });
+    return rows;
+  }
+
+  // Deterministic significance — exact comparisons only, no prose parsing.
+  // Returns { significant, badges } where badges spell direction in text so
+  // colour is never the only signal.
+  function flagSignificance(row) {
+    const badges = [];
+    if (row.status === "added") badges.push("NEW");
+    if (row.status === "removed") {
+      badges.push("REMOVED");
+      if (row.active && String(row.active.regression_criteria || "").trim()) {
+        badges.push("SAFETY GUARD REMOVED");
+      }
+    }
+    for (const c of row.changedFields) {
+      if (c.field === "reps" && c.delta > 0) badges.push("REPS UP");
+      if (c.field === "sets" && c.delta > 0) badges.push("SETS UP");
+      if (c.field === "ROM_target_deg" && c.delta < 0) badges.push("ROM DOWN");
+      if (c.field === "regression_criteria" && c.oldVal && !c.newVal) {
+        badges.push("SAFETY GUARD REMOVED");
+      }
+    }
+    return { significant: badges.length > 0, badges };
+  }
+
+  function badgesHtml(badges) {
+    return badges.map((b) => {
+      const cls = b === "NEW" ? "diff-badge-new" : "diff-badge-danger";
+      return `<span class="diff-badge ${cls}">${escapeHtml(b)}</span>`;
+    }).join(" ");
+  }
+
+  function fieldChangeHtml(c) {
+    const unit = c.unit || "";
+    if (c.kind === "num") {
+      const oldStr = c.oldVal !== null ? `${escapeHtml(c.oldVal)}${escapeHtml(unit)}` : "(none)";
+      const newStr = c.newVal !== null ? `${escapeHtml(c.newVal)}${escapeHtml(unit)}` : "(none)";
+      let dir = "";
+      let dirCls = "";
+      if (typeof c.delta === "number" && c.delta !== 0) {
+        dir = c.delta > 0 ? "▲" : "▼";
+        dirCls = c.delta > 0 ? "up" : "down";
+      }
+      return `<div class="field-change">
+        <span class="field-change-label">${escapeHtml(c.label)}</span>
+        <span class="field-change-vals">
+          <span class="field-change-old">${oldStr}</span>
+          <span class="field-change-arrow" aria-hidden="true">→</span>
+          <span class="field-change-new">${newStr}</span>
+          ${dir ? `<span class="field-delta ${dirCls}" aria-hidden="true">${dir}</span>` : ""}
+        </span>
+      </div>`;
+    }
+    if (c.kind === "list") {
+      const oldArr = Array.isArray(c.oldVal) ? c.oldVal : [];
+      const newArr = Array.isArray(c.newVal) ? c.newVal : [];
+      const removed = oldArr.filter((x) => !newArr.includes(x));
+      const added = newArr.filter((x) => !oldArr.includes(x));
+      const chips = [
+        ...removed.map((x) => `<span class="ref-chip ref-chip-removed">− ${escapeHtml(x)}</span>`),
+        ...added.map((x) => `<span class="ref-chip ref-chip-added">+ ${escapeHtml(x)}</span>`),
+      ].join(" ");
+      return `<div class="field-change">
+        <span class="field-change-label">${escapeHtml(c.label)}</span>
+        <span class="field-change-vals">${chips || "(changed)"}</span>
+      </div>`;
+    }
+    // prose
+    const oldStr = c.oldVal ? escapeHtml(c.oldVal) : "(none)";
+    const newStr = c.newVal ? escapeHtml(c.newVal) : "(none)";
+    return `<div class="field-change field-change-prose">
+      <span class="field-change-label">${escapeHtml(c.label)}</span>
+      <div class="field-change-prose-vals">
+        <div class="field-change-old">${oldStr}</div>
+        <div class="field-change-arrow" aria-hidden="true">↓</div>
+        <div class="field-change-new">${newStr}</div>
+      </div>
+    </div>`;
+  }
+
+  function summarizeExercise(ex) {
+    if (!ex) return "";
+    const lines = [];
+    const head = [];
+    if (ex.reps != null) head.push(`${escapeHtml(ex.reps)} reps`);
+    if (ex.sets != null) head.push(`${escapeHtml(ex.sets)} sets`);
+    if (head.length) lines.push(`<div class="ex-sum-head">${head.join(" · ")}</div>`);
+    if (ex.load) lines.push(`<div class="ex-sum-line"><span class="ex-sum-cap">Load</span> ${escapeHtml(ex.load)}</div>`);
+    if (ex.regression_criteria) lines.push(`<div class="ex-sum-line"><span class="ex-sum-cap">Regression</span> ${escapeHtml(ex.regression_criteria)}</div>`);
+    return lines.join("");
+  }
+
+  function renderExerciseCard(row) {
+    const { significant, badges } = flagSignificance(row);
+    const name = (row.proposed && row.proposed.name)
+      || (row.active && row.active.name) || "(unnamed exercise)";
+    const statusLabel = { added: "ADDED", removed: "REMOVED", modified: "MODIFIED", unchanged: "UNCHANGED" }[row.status] || row.status.toUpperCase();
+    const glyph = { added: "+", removed: "−", modified: "±", unchanged: "=" }[row.status] || "";
+    let cls = `exercise-diff-card ${row.status}`;
+    if (significant) cls += " significant";
+
+    let body = "";
+    if (row.status === "modified") {
+      body = `<div class="exercise-diff-fields">${row.changedFields.map(fieldChangeHtml).join("")}</div>`;
+    } else if (row.status === "added") {
+      body = `<div class="exercise-diff-summary">${summarizeExercise(row.proposed)}</div>`;
+    } else if (row.status === "removed") {
+      const reg = row.active && String(row.active.regression_criteria || "").trim();
+      body = `<div class="exercise-diff-summary removed-summary">${summarizeExercise(row.active)}</div>`
+        + (reg ? `<div class="removed-guard">⚠ Removed safety regression: ${escapeHtml(reg)}</div>` : "");
+    }
+
+    return `<article class="${cls}">
+      <div class="exercise-diff-head">
+        <span class="exercise-diff-glyph" aria-hidden="true">${glyph}</span>
+        <span class="exercise-diff-status status-${row.status}">${statusLabel}</span>
+        <span class="exercise-diff-name">${escapeHtml(name)}</span>
+        ${badges.length ? `<span class="exercise-diff-badges">${badgesHtml(badges)}</span>` : ""}
+      </div>
+      ${body}
+    </article>`;
+  }
+
+  function targetChanged(oldV, newV) {
+    const na = Number(oldV);
+    const nb = Number(newV);
+    if (Number.isNaN(na) || Number.isNaN(nb)) return String(oldV ?? "") !== String(newV ?? "");
+    return na !== nb;
+  }
+
+  // Returns { html, significant }. html is "" when nothing changed.
+  function renderSessionTargetsDiff(activeTargets, proposedTargets) {
+    if (activeTargets == null && proposedTargets == null) return { html: "", significant: false };
+    const a = activeTargets || {};
+    const p = proposedTargets || {};
+    const rows = [];
+    let anyChange = false;
+    let significant = false;
+    for (const spec of SESSION_TARGET_SPEC) {
+      const oldV = a[spec.field];
+      const newV = p[spec.field];
+      if (!hasValue(oldV) && !hasValue(newV)) continue;
+      const oldStr = hasValue(oldV) ? `${escapeHtml(oldV)}${escapeHtml(spec.unit)}` : "(none)";
+      const newStr = hasValue(newV) ? `${escapeHtml(newV)}${escapeHtml(spec.unit)}` : "(none)";
+      if (!targetChanged(oldV, newV)) {
+        rows.push(`<div class="field-change field-change-static">
+          <span class="field-change-label">${escapeHtml(spec.label)}</span>
+          <span class="field-change-vals"><span class="field-change-same">${newStr}</span> <span class="field-change-nochange">no change</span></span>
+        </div>`);
+        continue;
+      }
+      anyChange = true;
+      const painUp = spec.field === "max_pain_during_session"
+        && hasValue(oldV) && hasValue(newV) && Number(newV) > Number(oldV);
+      if (painUp) significant = true;
+      let dir = "";
+      let dirCls = "";
+      if (hasValue(oldV) && hasValue(newV) && Number(newV) !== Number(oldV)) {
+        dir = Number(newV) > Number(oldV) ? "▲" : "▼";
+        dirCls = Number(newV) > Number(oldV) ? "up" : "down";
+      }
+      rows.push(`<div class="field-change">
+        <span class="field-change-label">${escapeHtml(spec.label)}</span>
+        <span class="field-change-vals">
+          <span class="field-change-old">${oldStr}</span>
+          <span class="field-change-arrow" aria-hidden="true">→</span>
+          <span class="field-change-new">${newStr}</span>
+          ${dir ? `<span class="field-delta ${dirCls}" aria-hidden="true">${dir}</span>` : ""}
+          ${painUp ? `<span class="diff-badge diff-badge-danger">PAIN CEILING UP</span>` : ""}
+        </span>
+      </div>`);
+    }
+    if (!anyChange) return { html: "", significant: false };
+    const cls = significant ? "exercise-diff-card session-targets-card significant" : "exercise-diff-card session-targets-card modified";
+    return {
+      significant,
+      html: `<article class="${cls}">
+        <div class="exercise-diff-head">
+          <span class="exercise-diff-status status-modified">SESSION TARGETS</span>
+        </div>
+        <div class="exercise-diff-fields">${rows.join("")}</div>
+      </article>`,
+    };
+  }
+
+  // Orchestrator: writes the structured diff into #diffStructured. Replaces
+  // the raw JSON wall as the primary view; the raw diff lives behind the
+  // collapsed #rawDiffDetails toggle.
+  function renderStructuredDiff(activePayload, proposedPayload) {
+    const host = $("diffStructured");
+    if (!host) return;
+    const ap = activePayload || null;
+    const pp = proposedPayload || {};
+    const rows = matchExercises(ap && ap.exercises, pp.exercises);
+
+    const significant = rows.filter((r) => flagSignificance(r).significant);
+    const otherChanged = rows.filter((r) => !flagSignificance(r).significant && r.status !== "unchanged");
+    const unchanged = rows.filter((r) => r.status === "unchanged");
+    const session = renderSessionTargetsDiff(ap && ap.session_targets, pp.session_targets);
+
+    const parts = [];
+
+    if (!ap) {
+      parts.push(`<div class="structured-diff-banner">Initial protocol — no prior version to compare. All exercises shown as new.</div>`);
+    }
+
+    const sigCount = significant.length + (session.significant ? 1 : 0);
+    const modCount = rows.filter((r) => r.status === "modified").length;
+    const addCount = rows.filter((r) => r.status === "added").length;
+    const remCount = rows.filter((r) => r.status === "removed").length;
+    const counts = [];
+    if (sigCount) counts.push(`<span class="count-sig">${sigCount} significant</span>`);
+    counts.push(`${modCount} modified`, `${addCount} added`, `${remCount} removed`);
+    parts.push(`<div class="structured-diff-summary" aria-live="polite">${counts.join(" · ")}</div>`);
+    parts.push(`<div class="structured-diff-caption">Significant changes flagged by exact rule (added/removed, reps/sets up, ROM down, pain ceiling up, safety regression removed).</div>`);
+
+    if (session.html) parts.push(session.html);
+
+    if (significant.length) {
+      parts.push(`<div class="structured-diff-group structured-diff-significant">
+        <div class="structured-diff-group-label">Significant changes — review before approving</div>
+        ${significant.map(renderExerciseCard).join("")}
+      </div>`);
+    }
+
+    if (otherChanged.length) {
+      parts.push(`<details class="structured-diff-group" open>
+        <summary class="structured-diff-group-label">Other changes (${otherChanged.length})</summary>
+        ${otherChanged.map(renderExerciseCard).join("")}
+      </details>`);
+    }
+
+    if (unchanged.length) {
+      const names = unchanged.map((r) => escapeHtml((r.proposed && r.proposed.name) || (r.active && r.active.name) || "(unnamed)")).join(", ");
+      parts.push(`<details class="structured-diff-group structured-diff-unchanged">
+        <summary class="structured-diff-group-label">${unchanged.length} exercise${unchanged.length === 1 ? "" : "s"} unchanged</summary>
+        <div class="structured-diff-unchanged-list">${names}</div>
+      </details>`);
+    }
+
+    if (!rows.length && !session.html) {
+      parts.push(`<div class="structured-diff-empty">No exercises in this protocol.</div>`);
+    } else if (!significant.length && !otherChanged.length && !session.html) {
+      parts.push(`<div class="structured-diff-empty">No changes detected.</div>`);
+    }
+
+    host.innerHTML = parts.join("");
+  }
+
   // Cheap line-by-line diff: serialize both payloads as pretty JSON, compare
   // line-by-line, mark mismatches. Not a true structural diff (key reorders
   // would be flagged), but JSONB.payload preserves insertion order for the
-  // shape we control, so this reads well enough for the demo. Upgrade to a
-  // proper diff lib in a follow-up if it gets noisy.
+  // shape we control. Retained as the collapsed "advanced" raw view; the
+  // structured diff above is the primary surface.
   function renderDiffPane(self, other, side) {
     const selfText = self ? JSON.stringify(self, null, 2) : "(no active protocol yet)";
     if (!other) {
