@@ -3725,6 +3725,9 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   white-space: nowrap;
 }
 .tour-trigger:hover { background: var(--surface3); }
+/* Patient header: sit beside the logo, away from the fixed top-right auth +
+   review pills (position:fixed) that would otherwise overlap it. */
+.header > .tour-trigger { margin-left: 18px; margin-right: auto; }
 
 .tour-overlay {
   position: fixed;
