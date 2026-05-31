@@ -238,6 +238,54 @@ def test_intake_status_pending_intake_placeholder_is_not_ready(
     assert body["state"] == "needs_intake"
 
 
+def test_intake_status_real_protocol_tagged_pending_intake_is_ready(
+    authed_client, fake_user_id, monkeypatch,
+):
+    """A real protocol whose phase field never advanced off 'pending_intake'
+    but that carries real exercises MUST count as has_protocol.
+
+    Guards against the over-coarse phase-tag gate: the placeholder check keys
+    on emptiness (empty or single clinician_review_required sentinel), not the
+    tag — so a real plan tagged pending_intake doesn't falsely re-trigger
+    intake for an onboarded patient.
+    """
+    monkeypatch.setattr("main.ensure_user", lambda token, slack_user_id=None: token)
+    monkeypatch.setattr(
+        "main.user_store.load_user",
+        lambda token: {
+            "token": token,
+            "patient_name": "Nikki",
+            "intake": {"name": "Nikki", "injury": "shoulder"},
+            "protocol_state": None,
+            "session_history": [],
+            "last_active": None,
+        },
+    )
+    monkeypatch.setattr("main.user_store.get_display_name", lambda token: "Nikki")
+    monkeypatch.setattr(
+        "protocol_repo.get_active",
+        lambda token: {
+            "id": "real-1",
+            "token": token,
+            "status": "active",
+            "payload": {
+                "phase": "pending_intake",  # stale tag, but real content below
+                "week": 0,
+                "exercises": [
+                    {"name": "Pendulum (Codman)", "sets": 3, "reps": 10},
+                    {"name": "Scapular Retraction", "sets": 3, "reps": 12},
+                ],
+            },
+        },
+    )
+
+    resp = authed_client.get("/patient/me/intake-status")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["has_protocol"] is True
+    assert body["state"] == "ready"
+
+
 def test_intake_status_rejects_unauthenticated(unauthed_client):
     resp = unauthed_client.get("/patient/me/intake-status")
     assert resp.status_code == 401, resp.text
