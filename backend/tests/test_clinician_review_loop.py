@@ -65,6 +65,18 @@ def test_review_status_pending_then_approved_round_trip(
         "get_review_status",
         lambda token: dict(fake_db),
     )
+    # Onboarded patient (subacute wk 4) with a revision in review — "ready"
+    # now derives from an active protocol row, not protocol_state.last_pr_url.
+    monkeypatch.setattr(
+        protocol_repo,
+        "get_active",
+        lambda token: {
+            "id": "active-1",
+            "token": token,
+            "status": "active",
+            "payload": {"phase": "subacute", "week": 4},
+        },
+    )
 
     # Step 1: patient hits /patient/me/intake-status. Pending_review surfaces.
     resp = authed_client.get("/patient/me/intake-status")
