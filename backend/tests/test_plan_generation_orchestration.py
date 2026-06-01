@@ -101,8 +101,8 @@ def stub_subagents(monkeypatch):
             from agents.researcher import ResearcherError
             raise ResearcherError("simulated researcher failure")
         return [
-            {"exercise_id": "mini_squats", "rationale": "closed-chain"},
-            {"exercise_id": "single_leg_balance", "rationale": "neuromuscular"},
+            {"exercise_id": "mini_squat", "rationale": "closed-chain"},
+            {"exercise_id": "single_leg_squat", "rationale": "neuromuscular"},
         ]
 
     def _trend_analyze(*, token, checkins=None, sessions=None, intake=None, weeks=4):
@@ -137,7 +137,7 @@ def stub_subagents(monkeypatch):
             "week": week,
             "exercises": [
                 {
-                    "name": "mini_squats",
+                    "name": "mini_squat",
                     "sets": 3,
                     "reps": 12,
                     "load": "bodyweight",
@@ -334,6 +334,121 @@ def test_orchestrator_safety_error_propagates(
     with pytest.raises(PlanGenerationError):
         asyncio.run(agent.handle(_make_request()))
     assert len(stub_protocol_repo["save_pending_calls"]) == 0
+
+
+def test_planner_succeeds_when_all_ids_valid(
+    monkeypatch, stub_user_store, stub_protocol_repo, stub_subagents,
+):
+    """Happy path: planner returns valid library IDs first try; no retry."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+    # Override the default planner stub with a draft using a real library ID.
+    def _planner_drafts(attempt: int) -> dict[str, Any]:
+        return {
+            "patient": "Test Patient",
+            "phase": "subacute",
+            "week": 4,
+            "exercises": [
+                {
+                    "name": "mini_squat",  # real library id
+                    "sets": 3,
+                    "reps": 12,
+                    "load": "bodyweight",
+                    "references": ["protocols/protocol-library/knee/post-acl-week-4.yaml"],
+                },
+            ],
+            "session_targets": {"frequency_per_week": 4, "duration_min": 35},
+        }
+
+    stub_subagents["planner_drafts"] = _planner_drafts
+
+    from agents.plan_generation_agent import PlanGenerationAgent
+    agent = PlanGenerationAgent()
+    asyncio.run(agent.handle(_make_request()))
+
+    # Exactly one planner call — no retry triggered.
+    assert stub_subagents["planner_calls"] == 1
+    assert len(stub_protocol_repo["save_pending_calls"]) == 1
+
+
+def test_planner_retries_once_on_invalid_ids(
+    monkeypatch, stub_user_store, stub_protocol_repo, stub_subagents,
+):
+    """First call returns invalid IDs, second call returns valid -> success."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+    def _planner_drafts(attempt: int) -> dict[str, Any]:
+        if attempt == 0:
+            # Invalid: "seated_heel_raise" doesn't exist in the library.
+            ex = {"name": "seated_heel_raise", "sets": 3, "reps": 12,
+                  "load": "bodyweight"}
+        else:
+            # Valid on retry.
+            ex = {"name": "mini_squat", "sets": 3, "reps": 12,
+                  "load": "bodyweight"}
+        return {
+            "patient": "Test Patient",
+            "phase": "subacute",
+            "week": 4,
+            "exercises": [ex],
+            "session_targets": {"frequency_per_week": 4, "duration_min": 35},
+        }
+
+    stub_subagents["planner_drafts"] = _planner_drafts
+
+    from agents.plan_generation_agent import PlanGenerationAgent
+    agent = PlanGenerationAgent()
+    asyncio.run(agent.handle(_make_request()))
+
+    # Two planner calls: one invalid, one valid retry. Then safety review
+    # runs once on the valid draft. This is the validator's retry, distinct
+    # from the safety-reviewer's retry path.
+    assert stub_subagents["planner_calls"] == 2
+    assert stub_subagents["safety_calls"] == 1
+    # Save persisted with the valid retry draft.
+    assert len(stub_protocol_repo["save_pending_calls"]) == 1
+    saved = stub_protocol_repo["save_pending_calls"][0]
+    assert saved["payload"]["exercises"][0]["name"] == "mini_squat"
+
+
+def test_planner_hard_fails_after_two_invalid_ids(
+    monkeypatch, stub_user_store, stub_protocol_repo, stub_subagents,
+):
+    """Both compose calls produce invalid IDs -> PlannerInvalidIDsError. No save."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+    def _planner_drafts(attempt: int) -> dict[str, Any]:
+        # Always invalid: planner ignores the retry feedback (worst case).
+        return {
+            "patient": "Test Patient",
+            "phase": "subacute",
+            "week": 4,
+            "exercises": [
+                {"name": "fictional_exercise_id", "sets": 3, "reps": 12,
+                 "load": "bodyweight"},
+            ],
+            "session_targets": {"frequency_per_week": 4, "duration_min": 35},
+        }
+
+    stub_subagents["planner_drafts"] = _planner_drafts
+
+    from agents.plan_generation_agent import (
+        PlanGenerationAgent,
+        PlannerInvalidIDsError,
+    )
+    agent = PlanGenerationAgent()
+    with pytest.raises(PlannerInvalidIDsError) as excinfo:
+        asyncio.run(agent.handle(_make_request()))
+
+    # Two attempts: initial + one retry. Then hard-fail.
+    assert stub_subagents["planner_calls"] == 2
+    # Safety reviewer never sees the invalid draft.
+    assert stub_subagents["safety_calls"] == 0
+    # Nothing persisted — clinician dashboard sees a pipeline error
+    # rather than a polluted pending_review.
+    assert len(stub_protocol_repo["save_pending_calls"]) == 0
+    # The error carries the offending IDs for the dashboard / log trail.
+    assert "fictional_exercise_id" in excinfo.value.invalid_ids
 
 
 def test_orchestrator_no_api_key_falls_back_to_stub(

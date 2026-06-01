@@ -703,6 +703,11 @@ def protocol_exercises(user_id: str | None = Depends(optional_user_id)):
             "cues": card.get("cues", []),
             "default_dose": card.get("default_dose", spec),
             "video_source": card.get("video_source"),
+            # P1.1: forwarded so the frontend gates the form-check button on
+            # the explicit library flag rather than inferring from pose.js
+            # EXERCISES membership. Falls through to false when the exercise
+            # didn't resolve to a library entry.
+            "form_check_supported": bool(card.get("form_check_supported", False)),
         })
     return {
         # Don't echo a hardcoded default - the protocol's `patient` field is

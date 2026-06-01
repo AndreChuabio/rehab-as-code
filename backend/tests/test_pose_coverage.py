@@ -57,6 +57,16 @@ def _library_ids() -> set[str]:
     return {ex["id"] for ex in data.get("exercises", []) if ex.get("id")}
 
 
+def _form_check_supported_ids() -> set[str]:
+    """Library ids declared as guided form-check supported."""
+    data = json.loads(LIBRARY_JSON.read_text())
+    return {
+        ex["id"]
+        for ex in data.get("exercises", [])
+        if ex.get("id") and ex.get("form_check_supported") is True
+    }
+
+
 def test_every_pose_form_check_id_exists_in_library():
     """Every id registered with form-check checks must exist in the library.
 
@@ -74,6 +84,47 @@ def test_every_pose_form_check_id_exists_in_library():
         "The form-check button silently fails to render for these ids. "
         "Either add them to knowledge/exercise-library.json or remove "
         "them from frontend/pose.js EXERCISES."
+    )
+
+
+def test_form_check_supported_ids_have_pose_js_entry():
+    """Every library entry with form_check_supported=true MUST be in pose.js EXERCISES.
+
+    Bidirectional schema invariant: the library declares the feature flag,
+    pose.js MUST have a matching check roster. Otherwise the patient sees
+    "Start guided form-check" attached to a card whose pose engine no-ops.
+    """
+    pose_ids = _registered_pose_ids()
+    flagged_ids = _form_check_supported_ids()
+    assert flagged_ids, (
+        "No library entries have form_check_supported=true. Either the flag "
+        "was never written to knowledge/exercise-library.json or the parser "
+        "is broken."
+    )
+    missing = sorted(flagged_ids - pose_ids)
+    assert not missing, (
+        f"Library declares form_check_supported=true for {missing} but "
+        "pose.js EXERCISES has no entry. Either add the check roster to "
+        "frontend/pose.js or set form_check_supported=false in "
+        "knowledge/exercise-library.json."
+    )
+
+
+def test_pose_js_entries_have_form_check_supported_flag():
+    """Every pose.js EXERCISES entry MUST have form_check_supported=true in the library.
+
+    Reverse direction: if pose.js advertises a check roster but the library
+    doesn't flag the exercise as supported, the frontend gate would block
+    the button and the work in pose.js becomes dead code.
+    """
+    pose_ids = _registered_pose_ids()
+    flagged_ids = _form_check_supported_ids()
+    missing = sorted(pose_ids - flagged_ids)
+    assert not missing, (
+        f"pose.js EXERCISES contains {missing} but the library doesn't "
+        "flag them with form_check_supported=true. Either set the flag "
+        "in knowledge/exercise-library.json or remove the entry from "
+        "frontend/pose.js EXERCISES."
     )
 
 

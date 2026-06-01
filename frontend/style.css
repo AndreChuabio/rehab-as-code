@@ -1642,8 +1642,9 @@ body {
   gap: 12px;
   width: 100%;
   align-items: stretch;
-  /* Claim most of the viewport. object-fit: cover (below) fills the column
-     completely so we don't see letterbox bands top + bottom. */
+  /* Claim most of the viewport. object-fit: contain on the ref video means
+     we may show letterbox bands when video aspect != column aspect — that's
+     intentional. Patients need to see the whole demo, not a cropped middle. */
   min-height: 560px;
   height: calc(100vh - 160px);
   max-height: 88vh;
@@ -1693,7 +1694,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .pose-split-ref video {
   width: 100%;
   height: 100%;
-  object-fit: cover;  /* fill the column; mild crop is fine for demo */
+  object-fit: contain;
   display: block;
 }
 .pose-split-ref-label {
@@ -2972,6 +2973,20 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   line-height: 1.45;
   color: rgba(255, 255, 255, 0.72);
 }
+/* P1.4: framing-aware preflight diagram. The icon sits next to the text
+   hint so the patient sees both "lower the camera" and a picture of what
+   "lower" looks like. Currentcolor lets the SVG pick up the help-row's
+   color so palette swaps don't require an SVG edit. */
+#poseStage .pose-preflight-help-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+#poseStage .pose-framing-icon {
+  flex: 0 0 auto;
+  color: rgba(255, 255, 255, 0.78);
+  margin-top: 2px;
+}
 #poseStage .pose-preflight-status {
   font-size: 14px;
   font-weight: 600;
@@ -3643,6 +3658,43 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   gap: 10px;
   font-size: 13px;
   color: var(--muted);
+}
+
+/* P1.4: Self-paced empty state for form_check_supported=false exercises.
+   The pill is a small chip on the title row; the nudge gives a 2-line
+   explanation + Mark done CTA. Both stay neutral so they don't compete
+   visually with safety banners (per Clinical Twilight palette rules). */
+.self-paced-pill {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  vertical-align: middle;
+}
+.self-paced-nudge {
+  align-items: flex-start;
+}
+.self-paced-explainer {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.self-paced-explainer strong {
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+}
+.self-paced-explainer span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 @media (max-width: 480px) {
