@@ -3,6 +3,28 @@ const API_BASE = "";
 let intakeComplete = localStorage.getItem("rehab_intake_complete") === "1";
 let approvedPlanExercises = []; // exercises the user added in step 2
 
+// Guided onboarding tour (tour.js). Steps whose target is missing/hidden are
+// skipped automatically, so conditional cards (Today's Session, the review
+// pill) drop out cleanly when not yet present. Bump the `key` version to
+// re-show the tour after a material change.
+const PATIENT_TOUR = {
+  key: "patient_v1",
+  steps: [
+    { selector: "#healthStats", placement: "right", title: "Your wearable signals",
+      body: "Sleep, HRV, and recovery from your wearable. Coach Maya and your PT use these trends to decide when to progress or hold your plan." },
+    { selector: ".protocol-card", placement: "right", title: "Your current protocol",
+      body: "The exercises your clinician approved for this week. Every change here is reviewed by a real PT before it reaches you." },
+    { selector: ".quick-actions", placement: "top", title: "Quick actions",
+      body: "Start your intake, draft next week's plan, browse the exercise library, or log a daily check-in — all from here." },
+    { selector: "#chatLog", placement: "left", title: "Coach Maya",
+      body: "Chat with Coach Maya any time — ask about an exercise, report pain, or request a swap. She is grounded in your approved plan." },
+    { selector: "#tabVideo", placement: "bottom", title: "Video sessions",
+      body: "Jump into a guided video session for live form coaching when you are ready to move." },
+    { selector: "#reviewPill", placement: "bottom", title: "Review status",
+      body: "Shows where your plan sits in clinician review — pending, approved, or needs attention. You are always in the loop." },
+  ],
+};
+
 // ---------------------------------------------------------------------------
 // Hash-based routing  /#intake  /#plan  /#exercise  /#checkin
 // ---------------------------------------------------------------------------
@@ -38,11 +60,17 @@ async function navigateToIntake() {
   if (window.RehabAuth?.getJwt?.()) {
     const state = await refreshPatientState({ openModalIfNeeded: true })
       .catch((e) => { console.warn("state refresh failed", e); return null; });
-    // openModalIfNeeded handles the needs_intake case (opens intakeModal).
-    // For returning patients (state=needs_plan or ready), clicking Start
-    // intake means "I want to update something" — drop a chat note pointing
-    // them at Maya rather than re-running the demo questionnaire.
-    if (state && state.state !== "needs_intake") {
+    // refreshPatientState no longer auto-opens modals (that fired on every
+    // page load / account switch / "View as patient"). The intake modal
+    // opens ONLY here, on an explicit Start-intake click, and only for a new
+    // patient — so a needs_intake patient isn't silently dead-ended.
+    if (state && state.state === "needs_intake") {
+      hideCoachWorkingIndicator();
+      showIntakeModal();
+    } else if (state) {
+      // Returning patient (needs_plan / ready): clicking Start intake means
+      // "I want to update something" — point them at Maya rather than
+      // re-running the questionnaire.
       switchStage("chat");
       appendChatBubble(
         "coach",
@@ -97,6 +125,10 @@ document.addEventListener("DOMContentLoaded", () => {
   bootstrapAuth();
   wireIntakeModal();
   wirePlanGenModal();
+  // "Take the tour" — always available, re-launches regardless of the flag.
+  document.getElementById("tourTrigger")?.addEventListener("click", () => {
+    window.Tour?.start(PATIENT_TOUR);
+  });
 });
 
 function wireIntakeModal() {
@@ -596,6 +628,10 @@ async function refreshPatientState({ openModalIfNeeded = true } = {}) {
     }
     applyStepLocks();
     loadProtocol();
+    // First-run guided tour — only once the dashboard is populated (ready),
+    // so it never fights the intake/plan-gen modals or points at empty cards.
+    // Delay lets the sidebar + review pill finish rendering before anchoring.
+    setTimeout(() => window.Tour?.autoStart(PATIENT_TOUR), 800);
   }
   return patientState;
 }
@@ -3700,6 +3736,13 @@ const _todaysSessionState = {
   startedAtMs: null,        // performance.now() at startTodaysSession; powers totalTimeMin
 };
 
+// Re-entrancy lock for refreshTodaysFlowCTA. Supabase onChange fires multiple
+// times per load (INITIAL_SESSION -> SIGNED_IN/TOKEN_REFRESHED), each firing
+// refreshPatientState -> refreshTodaysFlowCTA. Without this, two invocations
+// both pass the teardown (DOM empty), both await refreshTodaySession, then
+// both append a CTA — rendering two stacked "Your plan is ready" cards.
+let _todaysFlowCtaRendering = false;
+
 // Pure helper. Given the current state, return the next exercise to play
 // (or null if done). Also returns whether the workout is complete.
 // Exposed on window.__flowHelpers for the unit test.
@@ -3967,66 +4010,80 @@ if (typeof window !== "undefined") {
 // and the sidebar today-session card. Idempotent — safe to call on every
 // patient-state poll.
 async function refreshTodaysFlowCTA() {
-  const sidebarSlot = document.getElementById("todaysFlowSidebarCTA");
-  const chatLog = document.getElementById("chatLog");
+  // Serialize concurrent invocations (see _todaysFlowCtaRendering above). A
+  // second overlapping call would otherwise append a duplicate CTA across the
+  // `await refreshTodaySession()` below. Skipping it is safe — the in-flight
+  // call renders from current state, and any later state change re-invokes.
+  if (_todaysFlowCtaRendering) return;
+  _todaysFlowCtaRendering = true;
+  try {
+    const sidebarSlot = document.getElementById("todaysFlowSidebarCTA");
+    const chatLog = document.getElementById("chatLog");
 
-  // Tear down stale CTAs first; we always rebuild from current state.
-  if (sidebarSlot) {
-    sidebarSlot.innerHTML = "";
-    sidebarSlot.hidden = true;
-  }
-  const existingChatCta = document.getElementById("todaysFlowChatCTA");
-  if (existingChatCta) existingChatCta.remove();
-
-  // Don't show the CTA mid-flow — once the patient clicks Start, the picker
-  // owns the chat scroll. The flow itself surfaces the next-exercise CTA.
-  if (_todaysSessionState.active) return;
-
-  const reviewState = patientState?.review_status?.state;
-  if (reviewState !== "recently_approved") return;
-
-  // Today's session: refresh if we don't already have a fresh mirror, then
-  // gate on completion count. If any row is completed today, the patient
-  // has already started — don't double-prompt.
-  if (window.RehabAuth?.getJwt?.()) {
-    try {
-      await refreshTodaySession();
-    } catch (e) {
-      console.warn("refreshTodaysFlowCTA: refreshTodaySession failed:", e);
+    // Tear down stale CTAs first; we always rebuild from current state.
+    if (sidebarSlot) {
+      sidebarSlot.innerHTML = "";
+      sidebarSlot.hidden = true;
     }
-  }
-  const completedToday = todaySession.filter((s) => s.status === "completed").length;
-  if (completedToday > 0) return;
+    const existingChatCta = document.getElementById("todaysFlowChatCTA");
+    if (existingChatCta) existingChatCta.remove();
 
-  // Render inline CTA at the top of the chat scroll.
-  if (chatLog) {
-    const cta = document.createElement("div");
-    cta.id = "todaysFlowChatCTA";
-    cta.className = "todays-session-cta";
-    cta.innerHTML = `
-      <div class="todays-session-cta-title">Your plan is ready.</div>
-      <div class="todays-session-cta-sub">Start today's session?</div>
-      <button type="button" class="todays-session-cta-btn">Start session →</button>
-    `;
-    cta.querySelector("button").addEventListener("click", startTodaysSession);
-    // Insert right after the chat-empty placeholder if present, else prepend.
-    const empty = document.getElementById("chatEmpty");
-    if (empty && empty.parentElement === chatLog) {
-      empty.insertAdjacentElement("afterend", cta);
-    } else {
-      chatLog.insertBefore(cta, chatLog.firstChild);
+    // Don't show the CTA mid-flow — once the patient clicks Start, the picker
+    // owns the chat scroll. The flow itself surfaces the next-exercise CTA.
+    if (_todaysSessionState.active) return;
+
+    const reviewState = patientState?.review_status?.state;
+    if (reviewState !== "recently_approved") return;
+
+    // Today's session: refresh if we don't already have a fresh mirror, then
+    // gate on completion count. If any row is completed today, the patient
+    // has already started — don't double-prompt.
+    if (window.RehabAuth?.getJwt?.()) {
+      try {
+        await refreshTodaySession();
+      } catch (e) {
+        console.warn("refreshTodaysFlowCTA: refreshTodaySession failed:", e);
+      }
     }
-  }
+    const completedToday = todaySession.filter((s) => s.status === "completed").length;
+    if (completedToday > 0) return;
 
-  // Mirror in the sidebar.
-  if (sidebarSlot) {
-    sidebarSlot.hidden = false;
-    sidebarSlot.innerHTML = `
-      <button type="button" class="todays-session-sidebar-btn">
-        Start today's session →
-      </button>
-    `;
-    sidebarSlot.querySelector("button").addEventListener("click", startTodaysSession);
+    // Render inline CTA at the top of the chat scroll.
+    if (chatLog) {
+      // Atomic teardown-before-insert: defends against any stale node that
+      // slipped in across the await above (belt-and-suspenders with the lock).
+      const stale = document.getElementById("todaysFlowChatCTA");
+      if (stale) stale.remove();
+      const cta = document.createElement("div");
+      cta.id = "todaysFlowChatCTA";
+      cta.className = "todays-session-cta";
+      cta.innerHTML = `
+        <div class="todays-session-cta-title">Your plan is ready.</div>
+        <div class="todays-session-cta-sub">Start today's session?</div>
+        <button type="button" class="todays-session-cta-btn">Start session →</button>
+      `;
+      cta.querySelector("button").addEventListener("click", startTodaysSession);
+      // Insert right after the chat-empty placeholder if present, else prepend.
+      const empty = document.getElementById("chatEmpty");
+      if (empty && empty.parentElement === chatLog) {
+        empty.insertAdjacentElement("afterend", cta);
+      } else {
+        chatLog.insertBefore(cta, chatLog.firstChild);
+      }
+    }
+
+    // Mirror in the sidebar.
+    if (sidebarSlot) {
+      sidebarSlot.hidden = false;
+      sidebarSlot.innerHTML = `
+        <button type="button" class="todays-session-sidebar-btn">
+          Start today's session →
+        </button>
+      `;
+      sidebarSlot.querySelector("button").addEventListener("click", startTodaysSession);
+    }
+  } finally {
+    _todaysFlowCtaRendering = false;
   }
 }
 

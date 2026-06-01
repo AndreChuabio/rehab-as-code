@@ -72,6 +72,10 @@
 
   function _setMode(mode) {
     if (!_isAdmin) return;
+    // clinician.js owns the review<->patients toggle (and the segmented
+    // control for non-admins). This admin handler only drives INTO debug so
+    // the two click listeners on #adminModeSwitch don't fight.
+    if (mode !== "debug") return;
     _activeMode = mode;
     const reviewMain = document.querySelector("main.clinician-main:not(.admin-main)");
     const adminMain = document.getElementById("adminMain");

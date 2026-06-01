@@ -17,6 +17,7 @@ that affect patient state ever go through this router.
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 from typing import Any
@@ -150,11 +151,14 @@ def list_runs(
     with _get_conn() as conn, conn.cursor() as cur:
         cur.execute(sql, params)
         rows = cur.fetchall()
-        cols = [d[0] for d in cur.description]
+        # The pool uses dict_row (backend/db.py), so each row is already a dict
+        # keyed by column name. dict(row) takes a mutable copy.
         for row in rows:
-            r = dict(zip(cols, row))
+            r = dict(row)
             # Pick a "terminal_decision" from the last decision found
             agents = r.get("agents") or []
+            if isinstance(agents, str):  # defensive: jsonb usually auto-decodes
+                agents = json.loads(agents)
             decisions = [a.get("decision") for a in agents if a.get("decision")]
             r["terminal_decision"] = decisions[-1] if decisions else None
             r["started_at"] = r["started_at"].isoformat() if r["started_at"] else None
@@ -187,14 +191,13 @@ def get_run(
     with _get_conn() as conn, conn.cursor() as cur:
         cur.execute(sql, (request_id,))
         rows = cur.fetchall()
-        cols = [d[0] for d in cur.description]
         if not rows:
             raise HTTPException(404, detail="request_id not found")
         agents = []
         patient_uid = None
         protocol_id = None
         for row in rows:
-            d = dict(zip(cols, row))
+            d = dict(row)
             patient_uid = d["patient_uid"]
             protocol_id = d.get("protocol_id") or protocol_id
             for k in ("started_at", "created_at"):
@@ -217,8 +220,7 @@ def get_run(
             )
             row = cur.fetchone()
             if row:
-                cols = [d[0] for d in cur.description]
-                protocol_block = dict(zip(cols, row))
+                protocol_block = dict(row)
                 protocol_block["id"] = str(protocol_block["id"])
     return {
         "request_id": request_id,
@@ -266,9 +268,8 @@ def agent_metrics(
     rows: list[dict[str, Any]] = []
     with _get_conn() as conn, conn.cursor() as cur:
         cur.execute(sql)
-        cols = [d[0] for d in cur.description]
         for row in cur.fetchall():
-            d = dict(zip(cols, row))
+            d = dict(row)
             for k in ("p50_ms", "p95_ms"):
                 if d.get(k) is not None:
                     d[k] = round(float(d[k]))
@@ -320,7 +321,9 @@ def patients_typeahead(
     out: list[dict[str, Any]] = []
     with _get_conn() as conn, conn.cursor() as cur:
         cur.execute(sql, params)
-        for uid, last_run in cur.fetchall():
+        for row in cur.fetchall():  # dict_row: rows are dicts, not tuples
+            uid = row["patient_uid"]
+            last_run = row["last_run"]
             out.append({
                 "uid": uid,
                 "display_name": user_store.get_display_name(uid),

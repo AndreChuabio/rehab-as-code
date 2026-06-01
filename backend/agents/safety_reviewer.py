@@ -159,6 +159,28 @@ def _decision_from_review(result: dict[str, Any]) -> str | None:
     return (result or {}).get("verdict") if isinstance(result, dict) else None
 
 
+_SEVERITY_RANK = {"low": 1, "med": 2, "high": 3}
+
+
+def _derive_overall_severity(concerns: list[Any]) -> str:
+    """overall_severity is, by definition, the highest concern severity.
+
+    Anthropic tool-use does not enforce `required`, so the model sometimes
+    calls submit_verdict and omits overall_severity (commonly a no-concern
+    first protocol where it set ok=true but left the field null). Rather than
+    502 the whole plan run, derive it from the concerns the model DID return:
+    no concerns -> 'low'; otherwise the worst concern severity. An
+    unrecognized concern severity counts as 'med' (conservative — it won't
+    auto-progress). Only used when overall_severity is absent/blank; a value
+    that is present but not in the enum (e.g. 'critical') still fails closed.
+    """
+    worst = 0
+    for c in concerns:
+        sev = c.get("severity") if isinstance(c, dict) else None
+        worst = max(worst, _SEVERITY_RANK.get(sev, 2))
+    return {0: "low", 1: "low", 2: "med", 3: "high"}[worst]
+
+
 from observability import trace_sync
 
 
@@ -247,12 +269,24 @@ def review(
             and getattr(block, "name", "") == "submit_verdict"
         ):
             data = dict(block.input or {})
+            concerns = list(data.get("concerns") or [])
             severity = data.get("overall_severity")
-            if severity not in ("low", "med", "high"):
+            if severity is None or (isinstance(severity, str) and not severity.strip()):
+                # Model called submit_verdict but omitted the summary field
+                # (tool-use does not enforce `required`). Derive it from the
+                # concerns it returned instead of 502-ing the whole plan run.
+                derived = _derive_overall_severity(concerns)
+                logger.warning(
+                    "safety_reviewer overall_severity missing (got %r); "
+                    "derived %s from %d concerns token=%s",
+                    severity, derived, len(concerns), token,
+                )
+                severity = derived
+            elif severity not in ("low", "med", "high"):
+                # Present but not a recognized value -> malformed; fail closed.
                 raise SafetyReviewError(
                     f"safety reviewer returned invalid overall_severity: {severity!r}"
                 )
-            concerns = list(data.get("concerns") or [])
             # Reconcile: if concerns is empty, ok must be True.
             ok = bool(data.get("ok"))
             if not concerns and not ok:

@@ -463,6 +463,14 @@ def draft_and_save_pending(
     # recovery path.
     _validate_region(payload_to_save, expected_region)
 
+    # Persist the resolved body_region on the payload so the canonical taxonomy
+    # field is stored — not just inferred from exercise-name coincidence.
+    # Downstream readers (the cross-region validator, the /sessions/today
+    # out-of-region dimming) key on payload.body_region; it was null on every
+    # row until now.
+    if expected_region and expected_region != "multi":
+        payload_to_save["body_region"] = expected_region
+
     try:
         protocol_id = protocol_repo.save_pending(
             token=token,

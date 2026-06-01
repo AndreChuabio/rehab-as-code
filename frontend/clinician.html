@@ -19,11 +19,13 @@
          /admin/me confirms role). Plain clinicians never see this. -->
     <nav class="admin-mode-switch" id="adminModeSwitch" hidden role="tablist" aria-label="Dashboard mode">
       <button type="button" class="admin-mode-btn active" data-mode="review" role="tab" aria-selected="true">Review queue</button>
-      <button type="button" class="admin-mode-btn" data-mode="debug" role="tab" aria-selected="false">Pipeline debug</button>
+      <button type="button" class="admin-mode-btn" data-mode="patients" id="modePatientsBtn" role="tab" aria-selected="false">Patients</button>
+      <button type="button" class="admin-mode-btn" data-mode="debug" id="modeDebugBtn" role="tab" aria-selected="false">Pipeline debug</button>
     </nav>
 
     <div class="clinician-header-meta">
       <span class="clinician-email" id="clinicianEmail"></span>
+      <button type="button" class="tour-trigger" id="clinicianTourTrigger">Take the tour</button>
       <button type="button" class="clinician-as-patient" id="clinicianAsPatient">
         View as patient
       </button>
@@ -163,16 +165,21 @@
              one-liner pointing the clinician at the safety block. -->
         <div class="narrator-no-diff" id="narratorNoDiff" hidden></div>
 
-        <div class="clinician-diff">
-          <div class="clinician-diff-col">
-            <div class="clinician-diff-label">Current active</div>
-            <pre id="diffActive"></pre>
+        <section class="structured-diff" id="diffStructured"></section>
+
+        <details class="clinician-diff-raw" id="rawDiffDetails">
+          <summary>Show raw JSON diff (advanced)</summary>
+          <div class="clinician-diff">
+            <div class="clinician-diff-col">
+              <div class="clinician-diff-label">Current active</div>
+              <pre id="diffActive"></pre>
+            </div>
+            <div class="clinician-diff-col">
+              <div class="clinician-diff-label">Proposed</div>
+              <pre id="diffProposed"></pre>
+            </div>
           </div>
-          <div class="clinician-diff-col">
-            <div class="clinician-diff-label">Proposed</div>
-            <pre id="diffProposed"></pre>
-          </div>
-        </div>
+        </details>
 
         <div class="clinician-notes" id="notesBlock" hidden>
           <label for="reviewNotes">Review notes <span id="notesRequired" hidden>(required)</span></label>
@@ -236,7 +243,43 @@
     </section>
   </main>
 
+  <!-- Patients / History: clinician-visible roster + per-patient protocol
+       timeline. Shown when the "Patients" tab is active. -->
+  <main class="clinician-main patients-main" id="patientsMain" hidden>
+    <aside class="clinician-queue">
+      <div class="clinician-queue-header">
+        <input type="search" id="patientSearch" class="patient-search"
+               placeholder="Search patients…" aria-label="Search patients" />
+        <button type="button" class="clinician-refresh" id="patientRosterRefresh" title="Refresh">↻</button>
+      </div>
+      <ol class="clinician-queue-list" id="patientRosterList"></ol>
+      <div class="clinician-queue-empty" id="patientRosterEmpty" hidden>No patients yet.</div>
+    </aside>
+
+    <section class="clinician-detail" id="patientHistoryDetail">
+      <div class="clinician-detail-empty" id="historyEmpty">
+        Select a patient to see their history.
+      </div>
+      <article class="clinician-detail-body" id="historyBody" hidden>
+        <header class="clinician-detail-header">
+          <div>
+            <h2 id="historyName"></h2>
+            <div class="clinician-detail-sub" id="historySub"></div>
+          </div>
+        </header>
+        <section class="history-summary" id="historySummary"></section>
+        <h3 class="history-section-label">Protocol timeline</h3>
+        <ol class="history-timeline" id="historyTimeline"></ol>
+        <details class="clinician-sessions history-sessions-wrap" open>
+          <summary>Recent sessions (last 7 days)</summary>
+          <div id="historySessions" class="clinician-sessions-body"></div>
+        </details>
+      </article>
+    </section>
+  </main>
+
   <script src="/static/auth.js"></script>
+  <script src="/static/tour.js"></script>
   <script src="/static/clinician.js"></script>
   <script src="/static/clinician_admin.js"></script>
 </body>

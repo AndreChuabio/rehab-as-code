@@ -756,6 +756,252 @@
 .diff-changed-old { background: rgba(232, 181, 74, 0.18);  display: inline-block; width: 100%; }
 .diff-changed-new { background: rgba(79, 179, 196, 0.22);  display: inline-block; width: 100%; }
 
+/* ---- Structured exercise-level diff (primary clinician view) -----------
+   Readable cards in body sans-serif (NOT 12px monospace — monospace only
+   survives inside the collapsed raw <pre>). Status rail + text label + glyph
+   so colour is never the only signal. */
+.structured-diff {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.structured-diff-banner {
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+
+.structured-diff-summary {
+  font-size: 13px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+.structured-diff-summary .count-sig {
+  color: var(--danger);
+  font-weight: 700;
+}
+
+.structured-diff-caption {
+  font-size: 11px;
+  color: var(--muted);
+  opacity: 0.8;
+  margin-top: -6px;
+}
+
+.structured-diff-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+details.structured-diff-group { display: block; }
+details.structured-diff-group > .exercise-diff-card { margin-top: 8px; }
+
+.structured-diff-group-label {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+}
+.structured-diff-significant > .structured-diff-group-label { color: var(--danger); }
+details.structured-diff-group > summary.structured-diff-group-label {
+  cursor: pointer;
+  list-style: revert;
+}
+
+.structured-diff-unchanged-list {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 6px 2px 2px;
+  line-height: 1.5;
+}
+
+.structured-diff-empty {
+  font-size: 13px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+.exercise-diff-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px;
+}
+.exercise-diff-card.added     { border-left-color: var(--success); }
+.exercise-diff-card.removed    { border-left-color: var(--danger); }
+.exercise-diff-card.modified   { border-left-color: var(--warn); }
+.exercise-diff-card.unchanged  { border-left-color: var(--border); opacity: 0.65; }
+.exercise-diff-card.significant { border-left-color: var(--danger); }
+
+.exercise-diff-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.exercise-diff-glyph {
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--muted);
+  width: 14px;
+  text-align: center;
+}
+
+.exercise-diff-status {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.06em;
+}
+.exercise-diff-status.status-added    { background: rgba(95, 208, 154, 0.18); color: var(--success); }
+.exercise-diff-status.status-removed   { background: rgba(255, 107, 122, 0.18); color: var(--danger); }
+.exercise-diff-status.status-modified  { background: rgba(232, 181, 74, 0.18); color: var(--warn); }
+.exercise-diff-status.status-unchanged { background: var(--surface3); color: var(--muted); }
+
+.exercise-diff-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-strong);
+}
+
+.exercise-diff-badges {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.diff-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 6px;
+  border-radius: 3px;
+  letter-spacing: 0.06em;
+}
+.diff-badge-danger { background: var(--danger); color: var(--text-strong); }
+.diff-badge-new    { background: var(--success); color: var(--bg); }
+
+.exercise-diff-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.field-change {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 13px;
+}
+
+.field-change-label {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+
+.field-change-vals {
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--text);
+}
+
+.field-change-old { color: var(--warn); }
+.field-change-new { color: var(--accent); font-weight: 600; }
+.field-change-arrow { color: var(--muted); }
+.field-change-same { color: var(--text); }
+.field-change-nochange { color: var(--muted); font-size: 11px; }
+
+.field-delta.up   { color: var(--danger); font-weight: 700; }
+.field-delta.down { color: var(--success); font-weight: 700; }
+
+/* Prose fields (load, regression, progression) stack before/after so the
+   full text is readable rather than truncated. */
+.field-change-prose .field-change-prose-vals {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.field-change-prose .field-change-old {
+  background: rgba(232, 181, 74, 0.12);
+  border-radius: 4px;
+  padding: 6px 8px;
+  line-height: 1.45;
+}
+.field-change-prose .field-change-new {
+  background: rgba(79, 179, 196, 0.14);
+  border-radius: 4px;
+  padding: 6px 8px;
+  line-height: 1.45;
+  font-weight: 400;
+}
+.field-change-prose .field-change-arrow { font-size: 12px; }
+
+.exercise-diff-summary {
+  margin-top: 10px;
+  font-size: 13px;
+  color: var(--text);
+  line-height: 1.5;
+}
+.exercise-diff-summary.removed-summary { opacity: 0.7; }
+.ex-sum-head { font-weight: 600; color: var(--text-strong); margin-bottom: 4px; }
+.ex-sum-line { margin-top: 4px; }
+.ex-sum-cap {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  margin-right: 4px;
+}
+
+.removed-guard {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--danger);
+  background: var(--danger-bg);
+  border-radius: 4px;
+  padding: 6px 8px;
+  line-height: 1.45;
+}
+
+.ref-chip {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: ui-monospace, SF Mono, Menlo, monospace;
+}
+.ref-chip-added   { background: rgba(95, 208, 154, 0.18); color: var(--success); }
+.ref-chip-removed { background: rgba(255, 107, 122, 0.18); color: var(--danger); text-decoration: line-through; }
+
+/* Raw JSON diff demoted to a collapsed advanced toggle. */
+.clinician-diff-raw {
+  margin-bottom: 18px;
+}
+.clinician-diff-raw > summary {
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  user-select: none;
+  padding: 4px 0;
+}
+.clinician-diff-raw .clinician-diff { margin-top: 10px; margin-bottom: 0; }
+
 .clinician-notes {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -813,6 +1059,8 @@
   .clinician-main { grid-template-columns: 1fr; }
   .clinician-queue { max-height: 240px; }
   .clinician-diff { grid-template-columns: 1fr; }
+  .field-change { grid-template-columns: 1fr; gap: 2px; }
+  .exercise-diff-badges { margin-left: 0; }
 }
 
 /* Last 7 days of sessions panel (PR-A) */
@@ -1179,3 +1427,134 @@
 }
 .phi-reveal-btn:hover { background: rgba(120, 130, 200, 0.25); }
 .phi-reveal-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ---- Patients / History mode ---------------------------------------------- */
+/* Hide a mode button (e.g. Pipeline debug for non-admin clinicians). */
+.admin-mode-btn[hidden] { display: none; }
+
+.patient-search {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+}
+.patient-search::placeholder { color: var(--muted); }
+
+.roster-item.selected {
+  background: var(--surface3);
+  border-left: 3px solid var(--accent);
+}
+
+.history-summary {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.history-sum-id { font-weight: 600; color: var(--text-strong); }
+.history-sum-line { font-size: 13px; color: var(--text); line-height: 1.5; }
+.history-sum-muted { color: var(--muted); }
+.history-cap {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  margin-right: 4px;
+}
+.history-region {
+  color: var(--accent2);
+  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.history-section-label {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 10px;
+}
+
+.history-timeline {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.timeline-node {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+/* Status rail + label colour. Text label always shown (colour-blind safe). */
+.timeline-node.status-active { border-left-color: var(--success); }
+.timeline-node.status-superseded { border-left-color: var(--border-strong); opacity: 0.78; }
+.timeline-node.status-rejected { border-left-color: var(--danger); }
+.timeline-node.status-pending_review { border-left-color: var(--accent); }
+.timeline-node.status-needs_clinician_review { border-left-color: var(--warn); }
+
+.timeline-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 13px;
+}
+.timeline-status {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--surface3);
+  color: var(--muted);
+}
+.timeline-status.status-active { background: rgba(95, 208, 154, 0.18); color: var(--success); }
+.timeline-status.status-rejected { background: rgba(255, 107, 122, 0.18); color: var(--danger); }
+.timeline-status.status-pending_review { background: rgba(79, 179, 196, 0.20); color: var(--accent); }
+.timeline-status.status-needs_clinician_review { background: rgba(232, 181, 74, 0.18); color: var(--warn); }
+.timeline-pw { color: var(--text); }
+.timeline-meta {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.timeline-reviewer { color: var(--muted); font-size: 12px; }
+.timeline-when { color: var(--muted); }
+.timeline-notes {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.timeline-review-btn {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: var(--bg);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.timeline-review-btn:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+.history-sessions-wrap { margin-top: 4px; }
+
+@media (max-width: 768px) {
+  .timeline-when { margin-left: 0; }
+}

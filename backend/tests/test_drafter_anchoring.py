@@ -204,6 +204,42 @@ def test_drafter_passes_for_matched_region(
     assert out["phase"] == "subacute"
 
 
+def test_drafter_stamps_body_region_on_payload(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The resolved body_region is PERSISTED on the saved payload, not just
+    injected into the prompt. Guards the anchoring-taxonomy gap where every
+    protocols row had payload.body_region=null (anchoring survived only on
+    exercise-name coincidence)."""
+    import user_store
+    import protocol_repo
+
+    monkeypatch.setattr(user_store, "get_intake", lambda token: ANKLE_INTAKE)
+    monkeypatch.setattr(user_store, "get_display_name", lambda token: ANKLE_INTAKE["name"])
+
+    captured: dict[str, Any] = {}
+
+    def _capture_save(token, payload, created_by_agent=None):
+        captured["payload"] = payload
+        return "pending-id-stub"
+
+    monkeypatch.setattr(protocol_repo, "save_pending", _capture_save)
+    _stub_anthropic(monkeypatch, [_propose_block({
+        "summary": "Ankle work this week.",
+        "patient": "Test Ankle Patient",
+        "phase": "subacute",
+        "week": 2,
+        "exercises": [
+            {"name": "ankle_dorsiflexion_band", "sets": 3, "reps": 15, "load": "yellow band"},
+        ],
+    })])
+
+    import chat_protocol_drafter as drafter
+    drafter.draft_and_save_pending(token="test-token", flow="checkin", payload={})
+
+    assert captured["payload"]["body_region"] == "ankle"
+
+
 def test_drafter_does_not_enforce_when_intake_missing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

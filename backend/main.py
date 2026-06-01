@@ -917,6 +917,130 @@ def list_pending_protocols(
     return {"pending": out}
 
 
+def _name_initials(name: str | None) -> str | None:
+    """First+last initial from a display name. None when unresolved."""
+    if not name:
+        return None
+    parts = [p for p in str(name).split() if p]
+    return "".join(p[0].upper() for p in parts[:2]) or None
+
+
+@app.get("/clinician/patients")
+def list_clinician_patients(
+    user_id: str = Depends(require_clinician_id),  # noqa: ARG001
+    limit: int = 200,
+):
+    """Roster for the clinician Patients/History tab: one row per patient,
+    most-recent activity first, with display name resolved server-side.
+
+    Clinician/admin only (crosses patients) — gated by require_clinician_id,
+    never current_user_id.
+    """
+    import protocol_repo
+    import user_store
+
+    roster = protocol_repo.list_patient_tokens(limit=max(1, min(limit, 500)))
+    out = []
+    for r in roster:
+        token = r["token"]
+        user = user_store.load_user(token) or {}
+        name = user.get("patient_name") or (user.get("intake") or {}).get("name")
+        if not name:
+            # Accounts that are clinicians-also-testing-as-patients have no
+            # intake name — fall back to the display-name chain (auth full_name
+            # -> email local-part) so the roster never shows a raw UUID.
+            try:
+                name = user_store.get_display_name(token)
+            except Exception:  # noqa: BLE001 — best-effort label, never 5xx
+                name = None
+        created = r.get("latest_created_at")
+        out.append({
+            "token": token,
+            "patient_name": name,
+            "body_region": r.get("body_region"),
+            "phase": r.get("phase"),
+            "week": r.get("week"),
+            "latest_status": r.get("latest_status"),
+            "latest_created_at": created.isoformat() if created else None,
+        })
+    return {"patients": out}
+
+
+@app.get("/clinician/patient/{token}/history")
+def get_clinician_patient_history(
+    token: str,
+    user_id: str = Depends(require_clinician_id),  # noqa: ARG001
+):
+    """Full protocol timeline + at-a-glance summary for one patient.
+
+    Clinician/admin only. PHI-minimized: returns the structured patient
+    summary + pain trend + a status timeline (reviewer initials, capped
+    notes excerpt). Does NOT return raw intake JSON — only the structured
+    card crosses the wire, same posture as the review-detail endpoint.
+    """
+    import protocol_repo
+    import user_store
+
+    rows = protocol_repo.list_by_token(token)
+    user = user_store.load_user(token) or {}
+    intake = user.get("intake")
+    recent_sessions = user_store.get_session_history(token, limit=20)
+
+    # Summary from intake + the active (else latest) protocol payload.
+    active = next((r for r in rows if r.get("status") == "active"), None)
+    summary_payload = (active or (rows[0] if rows else {})).get("payload") or {}
+    patient_summary = _build_patient_summary(intake=intake, target_payload=summary_payload)
+    pain_trend = _build_pain_trend(recent_sessions)
+
+    # Resolve the reviewing clinician's identity per row. reviewed_by holds the
+    # auth.uid of whoever approved/rejected (set by protocol_repo.approve/reject),
+    # so this attributes the decision to the specific clinician — answering
+    # "did clinician Andre approve Andre, or was it Nikki / Christian?". Cached
+    # per uid to avoid N display-name lookups across the timeline.
+    reviewer_cache: dict[str, str | None] = {}
+
+    def _reviewer_name(reviewed_by: str | None) -> str | None:
+        if not reviewed_by:
+            return None
+        if reviewed_by not in reviewer_cache:
+            try:
+                reviewer_cache[reviewed_by] = user_store.get_display_name(reviewed_by)
+            except Exception:  # noqa: BLE001 — best-effort, never 5xx history
+                reviewer_cache[reviewed_by] = None
+        return reviewer_cache[reviewed_by]
+
+    timeline = []
+    for r in rows:
+        payload = r.get("payload") or {}
+        notes = r.get("review_notes")
+        notes_excerpt = (notes[:100] + "…") if notes and len(notes) > 100 else notes
+        created = r.get("created_at")
+        reviewed = r.get("reviewed_at")
+        reviewer_name = _reviewer_name(r.get("reviewed_by"))
+        timeline.append({
+            "id": r["id"],
+            "parent_id": r.get("parent_id"),
+            "status": r.get("status"),
+            "phase": payload.get("phase"),
+            "week": payload.get("week"),
+            "body_region": payload.get("body_region"),
+            "created_by_agent": r.get("created_by_agent"),
+            "created_at": created.isoformat() if created else None,
+            "reviewed_at": reviewed.isoformat() if reviewed else None,
+            "reviewer_name": reviewer_name,
+            "reviewer_initials": _name_initials(reviewer_name),
+            "notes_excerpt": notes_excerpt,
+        })
+
+    return {
+        "token": token,
+        "patient_name": user.get("patient_name") or (intake or {}).get("name"),
+        "patient_summary": patient_summary,
+        "pain_trend": pain_trend,
+        "timeline": timeline,
+    }
+
+
 @app.get("/protocols/{protocol_id}")
 def get_protocol_detail(
     protocol_id: str,
@@ -1845,6 +1969,34 @@ async def _kick_plan_generation(user_id: str, message: str) -> dict:
     }
 
 
+def _is_placeholder_protocol(active: dict | None) -> bool:
+    """True if an active protocol row is a pre-intake sentinel, not a real plan.
+
+    A chat/out-of-scope path (or a manual/backfill write) can leave a
+    status='active' row tagged phase='pending_intake' with no real content —
+    either an empty exercises list or a single `clinician_review_required`
+    sentinel. Treating that as a real protocol resolves the patient to
+    state="ready", so the intake modal never opens and "Start intake"
+    dead-ends silently.
+
+    We match on the pre-intake phase tag AND actual emptiness — NOT the phase
+    tag alone. A real protocol whose phase field never advanced off
+    'pending_intake' still carries real exercises and must count as a protocol
+    (otherwise we'd re-trigger intake for an onboarded patient).
+    """
+    if not active:
+        return False
+    payload = active.get("payload") or {}
+    if payload.get("phase") != "pending_intake":
+        return False
+    exercises = payload.get("exercises") or []
+    if not exercises:
+        return True
+    if len(exercises) == 1 and (exercises[0] or {}).get("name") == "clinician_review_required":
+        return True
+    return False
+
+
 @app.get("/patient/me/intake-status")
 def patient_intake_status(user_id: str = Depends(current_user_id)):
     """Server-derived patient state for the frontend state machine.
@@ -1854,8 +2006,8 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
 
     States:
       - "needs_intake"     no intake_records row
-      - "needs_plan"       intake exists, protocol_state has no last_pr_url
-      - "ready"            intake + protocol_state.last_pr_url both present
+      - "needs_plan"       intake exists but no active protocol row
+      - "ready"            intake + an active protocol row both present
 
     Also returns `review_status` (PR-H trust loop): a small dict telling the
     frontend whether the patient has a draft awaiting clinician review, was
@@ -1917,11 +2069,38 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
     intake = user.get("intake")
     ps = user.get("protocol_state") or {}
     has_intake = intake is not None
-    has_pr = bool(ps.get("last_pr_url"))
+
+    # has_protocol must reflect the CANONICAL active protocol row, not the
+    # vestigial protocol_state.last_pr_url. last_pr_url is a dead field from
+    # the retired GitHub-PR-as-message-bus: it is hardwired to None by the
+    # only writers (plan_generation_agent) and never flipped on approval, so
+    # keying state off it collapsed every returning patient to "needs_plan"
+    # and made Maya greet them as if drafting their FIRST plan even at week 5.
+    # Derive from protocol_repo.get_active; degrade to the old signal only if
+    # the protocols table is unreachable (local sqlite / pooler blip) rather
+    # than 5xx-ing this patient-state endpoint.
+    active_protocol = None
+    try:
+        import protocol_repo
+        active_protocol = protocol_repo.get_active(user_id)
+        # A pre-intake placeholder (pending_intake + empty/sentinel exercises)
+        # is NOT a real protocol — counting it as has_protocol resolves the
+        # patient to state="ready" and silently dead-ends "Start intake".
+        # Gate on actual emptiness, not the phase tag alone: a real protocol
+        # can carry the pending_intake tag and must still count.
+        has_protocol = active_protocol is not None and not _is_placeholder_protocol(active_protocol)
+    except protocol_repo.ProtocolRepoError as exc:
+        logger.warning("active-protocol check unavailable (config): %s", exc)
+        has_protocol = bool(ps.get("last_pr_url"))
+    except Exception as exc:
+        logger.exception(
+            "active-protocol check failed token=%s: %s", user_id, exc,
+        )
+        has_protocol = bool(ps.get("last_pr_url"))
 
     if not has_intake:
         state = "needs_intake"
-    elif not has_pr:
+    elif not has_protocol:
         state = "needs_plan"
     else:
         state = "ready"
@@ -1964,15 +2143,26 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
         )
         display_name = None
 
+    # Phase/week from the active protocol payload (canonical), falling back to
+    # the protocol_state mirror only when no active row was resolved.
+    active_payload = (active_protocol or {}).get("payload") or {}
+    current_phase = active_payload.get("phase")
+    if current_phase is None:
+        current_phase = ps.get("current_phase")
+    current_week = active_payload.get("week")
+    if current_week is None:
+        current_week = ps.get("current_week")
+
     return {
         "state": state,
         "patient_name": user.get("patient_name"),
         "display_name": display_name,
         "last_active": prior_last_active,
         "has_intake": has_intake,
-        "has_protocol": has_pr,
-        "current_phase": ps.get("current_phase"),
-        "current_week": ps.get("current_week"),
+        "has_protocol": has_protocol,
+        "current_phase": current_phase,
+        "current_week": current_week,
+        # Retained for backward compat; no longer load-bearing (PR-bus dead).
         "last_pr_url": ps.get("last_pr_url"),
         "session_count": len(user.get("session_history", [])),
         "review_status": review_status,

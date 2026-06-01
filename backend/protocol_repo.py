@@ -184,6 +184,60 @@ def list_pending(limit: int = 50) -> list[dict]:
     return [_normalize_row(row) for row in rows]
 
 
+def list_by_token(token: str) -> list[dict]:
+    """Every protocol row for one patient, newest first, all statuses.
+
+    Powers the clinician patient-history timeline (active / superseded /
+    rejected / pending_review / needs_clinician_review).
+    """
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            "SELECT id, token, parent_id, payload, status, created_by_agent, "
+            "created_at, reviewed_by, reviewed_at, review_notes, safety_concerns "
+            "FROM protocols WHERE token = %s "
+            "ORDER BY created_at DESC",
+            (token,),
+        )
+        rows = cur.fetchall() or []
+    return [_normalize_row(row) for row in rows]
+
+
+def list_patient_tokens(limit: int = 200) -> list[dict]:
+    """One row per patient token for the clinician roster: the latest
+    protocol's status + created_at + region/phase/week. Newest activity first.
+
+    DISTINCT ON (token) picks each token's most-recent row; the outer query
+    re-orders the roster by recency and caps it.
+    """
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            "SELECT * FROM ("
+            "  SELECT DISTINCT ON (token) "
+            "    token, status, created_at, "
+            "    payload->>'body_region' AS body_region, "
+            "    payload->>'phase' AS phase, "
+            "    payload->>'week' AS week "
+            "  FROM protocols "
+            "  ORDER BY token, created_at DESC"
+            ") latest "
+            "ORDER BY created_at DESC "
+            "LIMIT %s",
+            (limit,),
+        )
+        rows = cur.fetchall() or []
+    return [
+        {
+            "token": r["token"],
+            "latest_status": r["status"],
+            "latest_created_at": r["created_at"],
+            "body_region": r.get("body_region"),
+            "phase": r.get("phase"),
+            "week": r.get("week"),
+        }
+        for r in rows
+    ]
+
+
 def approve(
     protocol_id: str,
     reviewed_by: str,
