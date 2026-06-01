@@ -24,10 +24,11 @@ exercises:
     duration_sec: 30
     notes: "Gentle - no bouncing. Should feel a stretch, not pain."
 
-  - name: lb_glute_bridge_lb
+  - name: ankle_eversion_band
     sets: 3
-    reps: 12
-    notes: "Maintain general posterior chain engagement during offloaded period."
+    reps: 15
+    load: light band
+    notes: "Light band, pain-free active eversion only. Re-establishes peroneal control in the acute phase; back off on any sharp lateral pain."
 
 clearance_criteria:
   - swelling: "controlled (no progression day-to-day)"
