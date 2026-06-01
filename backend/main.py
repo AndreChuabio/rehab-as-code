@@ -912,6 +912,116 @@ def list_pending_protocols(
     return {"pending": out}
 
 
+def _name_initials(name: str | None) -> str | None:
+    """First+last initial from a display name. None when unresolved."""
+    if not name:
+        return None
+    parts = [p for p in str(name).split() if p]
+    return "".join(p[0].upper() for p in parts[:2]) or None
+
+
+@app.get("/clinician/patients")
+def list_clinician_patients(
+    user_id: str = Depends(require_clinician_id),  # noqa: ARG001
+    limit: int = 200,
+):
+    """Roster for the clinician Patients/History tab: one row per patient,
+    most-recent activity first, with display name resolved server-side.
+
+    Clinician/admin only (crosses patients) — gated by require_clinician_id,
+    never current_user_id.
+    """
+    import protocol_repo
+    import user_store
+
+    roster = protocol_repo.list_patient_tokens(limit=max(1, min(limit, 500)))
+    out = []
+    for r in roster:
+        token = r["token"]
+        user = user_store.load_user(token) or {}
+        name = user.get("patient_name") or (user.get("intake") or {}).get("name")
+        created = r.get("latest_created_at")
+        out.append({
+            "token": token,
+            "patient_name": name,
+            "body_region": r.get("body_region"),
+            "phase": r.get("phase"),
+            "week": r.get("week"),
+            "latest_status": r.get("latest_status"),
+            "latest_created_at": created.isoformat() if created else None,
+        })
+    return {"patients": out}
+
+
+@app.get("/clinician/patient/{token}/history")
+def get_clinician_patient_history(
+    token: str,
+    user_id: str = Depends(require_clinician_id),  # noqa: ARG001
+):
+    """Full protocol timeline + at-a-glance summary for one patient.
+
+    Clinician/admin only. PHI-minimized: returns the structured patient
+    summary + pain trend + a status timeline (reviewer initials, capped
+    notes excerpt). Does NOT return raw intake JSON — only the structured
+    card crosses the wire, same posture as the review-detail endpoint.
+    """
+    import protocol_repo
+    import user_store
+
+    rows = protocol_repo.list_by_token(token)
+    user = user_store.load_user(token) or {}
+    intake = user.get("intake")
+    recent_sessions = user_store.get_session_history(token, limit=20)
+
+    # Summary from intake + the active (else latest) protocol payload.
+    active = next((r for r in rows if r.get("status") == "active"), None)
+    summary_payload = (active or (rows[0] if rows else {})).get("payload") or {}
+    patient_summary = _build_patient_summary(intake=intake, target_payload=summary_payload)
+    pain_trend = _build_pain_trend(recent_sessions)
+
+    initials_cache: dict[str, str | None] = {}
+
+    def _reviewer_initials(reviewed_by: str | None) -> str | None:
+        if not reviewed_by:
+            return None
+        if reviewed_by not in initials_cache:
+            try:
+                name = user_store.get_display_name(reviewed_by)
+            except Exception:  # noqa: BLE001 — best-effort, never 5xx history
+                name = None
+            initials_cache[reviewed_by] = _name_initials(name)
+        return initials_cache[reviewed_by]
+
+    timeline = []
+    for r in rows:
+        payload = r.get("payload") or {}
+        notes = r.get("review_notes")
+        notes_excerpt = (notes[:100] + "…") if notes and len(notes) > 100 else notes
+        created = r.get("created_at")
+        reviewed = r.get("reviewed_at")
+        timeline.append({
+            "id": r["id"],
+            "parent_id": r.get("parent_id"),
+            "status": r.get("status"),
+            "phase": payload.get("phase"),
+            "week": payload.get("week"),
+            "body_region": payload.get("body_region"),
+            "created_by_agent": r.get("created_by_agent"),
+            "created_at": created.isoformat() if created else None,
+            "reviewed_at": reviewed.isoformat() if reviewed else None,
+            "reviewer_initials": _reviewer_initials(r.get("reviewed_by")),
+            "notes_excerpt": notes_excerpt,
+        })
+
+    return {
+        "token": token,
+        "patient_name": user.get("patient_name") or (intake or {}).get("name"),
+        "patient_summary": patient_summary,
+        "pain_trend": pain_trend,
+        "timeline": timeline,
+    }
+
+
 @app.get("/protocols/{protocol_id}")
 def get_protocol_detail(
     protocol_id: str,

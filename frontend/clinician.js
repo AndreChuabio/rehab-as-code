@@ -96,6 +96,26 @@
     if (user?.email && $("clinicianEmail")) $("clinicianEmail").textContent = user.email;
 
     bindHandlers();
+
+    // Reveal the segmented control for ALL clinicians so they get the
+    // Patients/History tab (admins additionally get Pipeline debug, which
+    // clinician_admin.js owns). This single handler owns the review<->patients
+    // toggle; clinician_admin._setMode reacts to the same click only for debug.
+    const modeSwitch = $("adminModeSwitch");
+    if (modeSwitch) {
+      modeSwitch.hidden = false;
+      if (role !== "admin") {
+        const dbg = $("modeDebugBtn");
+        if (dbg) dbg.hidden = true;
+      }
+      modeSwitch.addEventListener("click", (e) => {
+        const btn = e.target.closest(".admin-mode-btn");
+        if (btn) setDashboardMode(btn.dataset.mode);
+      });
+    }
+    $("patientRosterRefresh")?.addEventListener("click", loadPatientRoster);
+    $("patientSearch")?.addEventListener("input", filterRoster);
+
     await loadQueue();
     // First-run tour once the dashboard is up. Delay lets the queue render so
     // the spotlight can anchor to it.
@@ -344,8 +364,8 @@
     );
   }
 
-  async function loadRecentSessions(patientToken) {
-    const host = $("detailSessions");
+  async function loadRecentSessions(patientToken, hostId = "detailSessions") {
+    const host = $(hostId);
     if (!host) return;
     host.innerHTML = `<div class="clinician-sessions-empty">Loading...</div>`;
     if (!patientToken) {
@@ -425,6 +445,201 @@
   // Renders the structured summary computed by GET /protocols/{id}. We
   // accept a `summary` object and an oldest-first `painTrend` list and
   // populate a fixed-shape card. Missing fields hide their row; we don't
+  // ---- Patients / History mode ----------------------------------------
+  // A clinician-visible third mode (Review queue | Patients | Pipeline debug).
+  // Lets a clinician look back at a patient after the review queue empties:
+  // protocol timeline (all statuses) + at-a-glance summary + recent sessions.
+  // Backed by GET /clinician/patients and /clinician/patient/{token}/history.
+
+  let _roster = [];
+
+  function setDashboardMode(mode) {
+    // reviewMain is the first .clinician-main that is neither admin nor patients.
+    const reviewMain = document.querySelector(
+      "main.clinician-main:not(.admin-main):not(.patients-main)",
+    );
+    const adminMain = $("adminMain");
+    const patientsMain = $("patientsMain");
+    const strip = $("adminModeStrip");
+    const title = $("clinicianHeaderTitle");
+    document.querySelectorAll(".admin-mode-btn").forEach((b) => {
+      const on = b.dataset.mode === mode;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-selected", on ? "true" : "false");
+    });
+    const isReview = mode === "review";
+    const isPatients = mode === "patients";
+    const isDebug = mode === "debug";
+    if (reviewMain) reviewMain.hidden = !isReview;
+    if (patientsMain) patientsMain.hidden = !isPatients;
+    if (adminMain) adminMain.hidden = !isDebug;
+    if (strip) strip.hidden = !isDebug;
+    if (title) {
+      title.textContent = isDebug
+        ? "Pipeline debug"
+        : isPatients ? "Patients" : "Pending review";
+    }
+    if (isPatients) loadPatientRoster();
+    // Debug content load stays owned by clinician_admin.js, which reacts to
+    // the same click for mode === "debug".
+  }
+
+  async function loadPatientRoster() {
+    const list = $("patientRosterList");
+    const empty = $("patientRosterEmpty");
+    if (!list) return;
+    list.innerHTML = `<li class="clinician-queue-empty">Loading…</li>`;
+    if (empty) empty.hidden = true;
+    try {
+      const res = await authedFetch(`${API_BASE}/clinician/patients`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      _roster = data.patients || [];
+    } catch (e) {
+      list.innerHTML = `<li class="clinician-queue-empty">Failed: ${escapeHtml(e.message)}</li>`;
+      return;
+    }
+    renderRoster(_roster);
+  }
+
+  function filterRoster() {
+    const q = ($("patientSearch")?.value || "").toLowerCase().trim();
+    if (!q) return renderRoster(_roster);
+    renderRoster(_roster.filter((p) =>
+      (p.patient_name || p.token || "").toLowerCase().includes(q)
+      || (p.body_region || "").toLowerCase().includes(q)
+    ));
+  }
+
+  function renderRoster(rows) {
+    const list = $("patientRosterList");
+    const empty = $("patientRosterEmpty");
+    if (!list) return;
+    if (!rows.length) {
+      list.innerHTML = "";
+      if (empty) empty.hidden = false;
+      return;
+    }
+    if (empty) empty.hidden = true;
+    list.innerHTML = rows.map((p) => {
+      const name = escapeHtml(p.patient_name || p.token || "(unknown patient)");
+      const region = p.body_region ? escapeHtml(p.body_region) : "";
+      const status = escapeHtml(p.latest_status || "");
+      const when = p.latest_created_at ? relativeTime(p.latest_created_at) : "";
+      return `<li class="queue-item roster-item" data-token="${escapeHtml(p.token)}">
+        <div class="queue-item-name">${name}</div>
+        <div class="queue-item-meta">${region ? region + " · " : ""}${status}${when ? " · " + when : ""}</div>
+      </li>`;
+    }).join("");
+    list.querySelectorAll(".roster-item").forEach((li) => {
+      li.addEventListener("click", () => selectPatient(li.dataset.token));
+    });
+  }
+
+  async function selectPatient(token) {
+    document.querySelectorAll("#patientRosterList .roster-item").forEach((li) => {
+      li.classList.toggle("selected", li.dataset.token === token);
+    });
+    if ($("historyEmpty")) $("historyEmpty").hidden = true;
+    if ($("historyBody")) $("historyBody").hidden = false;
+    if ($("historyTimeline")) {
+      $("historyTimeline").innerHTML = `<li class="clinician-sessions-empty">Loading…</li>`;
+    }
+    let data;
+    try {
+      const res = await authedFetch(
+        `${API_BASE}/clinician/patient/${encodeURIComponent(token)}/history`,
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      data = await res.json();
+    } catch (e) {
+      if ($("historyTimeline")) {
+        $("historyTimeline").innerHTML = `<li class="clinician-sessions-empty">Failed: ${escapeHtml(e.message)}</li>`;
+      }
+      return;
+    }
+    const summary = data.patient_summary || {};
+    if ($("historyName")) $("historyName").textContent = data.patient_name || "(unknown patient)";
+    if ($("historySub")) {
+      const bits = [
+        summary.injury_type ? escapeHtml(summary.injury_type) : null,
+        summary.body_region ? `region: ${escapeHtml(summary.body_region)}` : null,
+      ].filter(Boolean);
+      $("historySub").innerHTML = bits.join(" · ");
+    }
+    renderHistorySummary(summary);
+    renderTimeline(data.timeline || []);
+    loadRecentSessions(token, "historySessions");
+  }
+
+  function renderHistorySummary(s) {
+    const host = $("historySummary");
+    if (!host) return;
+    const parts = [];
+    const idline = [
+      s.display_name ? escapeHtml(s.display_name) : null,
+      s.age != null ? escapeHtml(s.age) : null,
+    ].filter(Boolean).join(" · ");
+    if (idline) parts.push(`<div class="history-sum-id">${idline}</div>`);
+    const pw = [
+      s.phase ? escapeHtml(s.phase) : null,
+      s.week != null ? `week ${escapeHtml(s.week)}` : null,
+    ].filter(Boolean).join(" · ");
+    if (pw) parts.push(`<div class="history-sum-line history-sum-muted">${pw}</div>`);
+    const sym = (s.symptoms || []).slice(0, 4).map(escapeHtml).join(", ");
+    if (sym) parts.push(`<div class="history-sum-line"><span class="history-cap">Symptoms</span> ${sym}</div>`);
+    const goals = (s.goals || []).slice(0, 3).map(escapeHtml).join(", ");
+    if (goals) parts.push(`<div class="history-sum-line"><span class="history-cap">Goals</span> ${goals}</div>`);
+    host.innerHTML = parts.join("");
+  }
+
+  const _STATUS_LABEL = {
+    active: "ACTIVE",
+    superseded: "SUPERSEDED",
+    rejected: "REJECTED",
+    pending_review: "PENDING",
+    needs_clinician_review: "NEEDS REVIEW",
+  };
+
+  function renderTimeline(timeline) {
+    const host = $("historyTimeline");
+    if (!host) return;
+    if (!timeline.length) {
+      host.innerHTML = `<li class="clinician-sessions-empty">No protocols yet.</li>`;
+      return;
+    }
+    host.innerHTML = timeline.map((t) => {
+      const status = t.status || "";
+      const label = _STATUS_LABEL[status] || status.toUpperCase();
+      const pw = [
+        t.phase ? escapeHtml(t.phase) : null,
+        t.week != null ? `wk ${escapeHtml(t.week)}` : null,
+      ].filter(Boolean).join(" · ");
+      const when = t.created_at ? relativeTime(t.created_at) : "";
+      const rev = t.reviewer_initials ? ` · ${escapeHtml(t.reviewer_initials)}` : "";
+      const notes = t.notes_excerpt
+        ? `<div class="timeline-notes">${escapeHtml(t.notes_excerpt)}</div>` : "";
+      const reviewBtn = (status === "pending_review" || status === "needs_clinician_review")
+        ? `<button type="button" class="timeline-review-btn" data-id="${escapeHtml(t.id)}">Review →</button>`
+        : "";
+      return `<li class="timeline-node status-${escapeHtml(status)}">
+        <div class="timeline-row">
+          <span class="timeline-status status-${escapeHtml(status)}">${escapeHtml(label)}</span>
+          <span class="timeline-pw">${pw}</span>
+          <span class="timeline-when">${when}${rev}</span>
+          ${reviewBtn}
+        </div>
+        ${notes}
+      </li>`;
+    }).join("");
+    host.querySelectorAll(".timeline-review-btn").forEach((b) => {
+      b.addEventListener("click", () => {
+        setDashboardMode("review");
+        selectItem(b.dataset.id);
+      });
+    });
+  }
+
   // render "—" placeholders that read as broken UI.
   //
   // Colour scale for pain levels follows a 3-band scheme: green ≤3,
