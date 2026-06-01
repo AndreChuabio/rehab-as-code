@@ -200,6 +200,8 @@ def test_orchestrator_happy_path(monkeypatch, stub_user_store, stub_protocol_rep
     assert save["created_by_agent"] == "plan_generation"
     # Patient name anchored to the canonical Supabase value.
     assert save["payload"]["patient"] == "Test Patient"
+    # body_region stamped onto the payload (was null on every row before).
+    assert save["payload"]["body_region"] == "knee"
 
     assert resp.agent_name == "plan_generation"
     assert resp.data["save_status"] == "pending_review"

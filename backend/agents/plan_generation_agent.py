@@ -306,6 +306,14 @@ class PlanGenerationAgent(PatientAgent):
             },
         }
 
+        # Persist the canonical body_region on the payload (was null on every
+        # row). library_match["region"] is resolved from the patient's
+        # injury_type; downstream readers (cross-region validator,
+        # /sessions/today out-of-region dimming) key on payload.body_region.
+        region = library_match.get("region")
+        if region and region not in ("multi", "unknown"):
+            draft = {**draft, "body_region": region}
+
         try:
             protocol_id = protocol_repo.save_pending(
                 token=token,
