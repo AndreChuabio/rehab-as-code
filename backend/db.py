@@ -94,6 +94,33 @@ def _ipv4_hostaddr(dsn: str) -> str | None:
         return None
 
 
+def _dsn_with_ipv4(dsn: str) -> str:
+    """Return the DSN with hostaddr=<ipv4> injected as a libpq query param.
+
+    Embedding hostaddr in the conninfo (rather than passing it as a psycopg
+    connect kwarg) makes it a plain libpq keyword, honored regardless of the
+    psycopg / psycopg_pool version on the Vercel runtime. `host` stays in the
+    netloc for TLS/SNI + SCRAM; Supavisor routes by the postgres.<ref>
+    username, not SNI, so connecting to the IPv4 literal is safe. Returns the
+    DSN unchanged if no A record resolves or hostaddr is already pinned.
+    """
+    from urllib.parse import urlparse, urlencode, parse_qsl, urlunparse
+
+    ipv4 = _ipv4_hostaddr(dsn)
+    if not ipv4:
+        return dsn
+    try:
+        parsed = urlparse(dsn)
+        query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+        if "hostaddr" in query:  # already pinned upstream; respect it
+            return dsn
+        query["hostaddr"] = ipv4
+        return urlunparse(parsed._replace(query=urlencode(query)))
+    except Exception as exc:  # noqa: BLE001 — fall back to the un-pinned DSN
+        logger.warning("db: failed to inject hostaddr into DSN: %s", exc)
+        return dsn
+
+
 def _open_pool() -> Any:
     try:
         from psycopg.rows import dict_row
@@ -104,19 +131,17 @@ def _open_pool() -> Any:
             "pip install 'psycopg[binary]>=3.2' 'psycopg-pool>=3.2'"
         ) from exc
 
-    dsn = _build_dsn()
+    # Force IPv4: Vercel functions can't egress IPv6, and the Supabase pooler
+    # host is dual-stack. Inject hostaddr=<A record> into the conninfo so libpq
+    # connects over IPv4; host= stays in the DSN for TLS + Supavisor routing.
+    # Falls back to the un-pinned DSN if the host has no A record.
+    dsn = _dsn_with_ipv4(_build_dsn())
     conn_kwargs: dict[str, Any] = {
         "row_factory": dict_row,
         "connect_timeout": 3,
         "prepare_threshold": None,
         "options": "-c statement_timeout=8000 -c application_name=rehab-backend",
     }
-    # Force IPv4: Vercel functions can't egress IPv6, and the Supabase pooler
-    # host is dual-stack. Pin hostaddr to the A record; host= (in the DSN) is
-    # still used for TLS + Supavisor routing. Skips silently if unresolvable.
-    ipv4 = _ipv4_hostaddr(dsn)
-    if ipv4:
-        conn_kwargs["hostaddr"] = ipv4
 
     pool = ConnectionPool(
         conninfo=dsn,

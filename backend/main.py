@@ -189,6 +189,24 @@ def debug_env():
         if not val:
             return "MISSING"
         return f"set ({val[:6]}...)"
+
+    # DB networking diagnostics: confirm in the Vercel runtime whether the
+    # Supabase pooler host resolves to an IPv4 (A) record. Vercel has no IPv6
+    # egress, so a NONE here means every DB connection falls back to IPv6 and
+    # PoolTimeouts. Host + IP are not secrets (shared regional pooler + public
+    # AWS IP); the project ref lives in the username, which is not exposed.
+    db_host = "MISSING"
+    db_ipv4 = "n/a"
+    raw_db = os.getenv("DATABASE_URL", "")
+    if raw_db:
+        try:
+            from urllib.parse import urlparse
+            from db import _ipv4_hostaddr
+            db_host = urlparse(raw_db).hostname or "unparseable"
+            db_ipv4 = _ipv4_hostaddr(raw_db) or "NONE (no A record -> IPv6 fallback)"
+        except Exception as exc:  # noqa: BLE001
+            db_ipv4 = f"diag error: {exc}"
+
     return {
         "ANTHROPIC_API_KEY":   mask(os.getenv("ANTHROPIC_API_KEY")),
         "ANTHROPIC_MODEL":     os.getenv("ANTHROPIC_MODEL") or "claude-sonnet-4-6",
@@ -198,7 +216,9 @@ def debug_env():
         "OPENAI_API_KEY":      mask(os.getenv("OPENAI_API_KEY")),
         "OPENAI_MODEL":        os.getenv("OPENAI_MODEL") or "gpt-4o-mini",
         "PROTOCOL_SOURCE":     os.getenv("PROTOCOL_SOURCE") or "github",
-        "DATABASE_URL":        "set" if os.getenv("DATABASE_URL") else "MISSING",
+        "DATABASE_URL":        "set" if raw_db else "MISSING",
+        "DB_HOST":             db_host,
+        "DB_IPV4_RESOLVED":    db_ipv4,
     }
 
 
