@@ -24,11 +24,18 @@ from unittest.mock import MagicMock
 
 def _conn_with_rows(rows: list[tuple], cols: list[str]):
     """Return a context-manager-yielding fake connection that exposes one
-    cursor whose fetchall() / fetchone() return the supplied rows."""
+    cursor whose fetchall() / fetchone() return DICT rows.
+
+    The real pool (backend/db.py) is configured with row_factory=dict_row, so
+    cursors yield dicts keyed by column name. We zip the supplied tuples into
+    dicts here so the mock matches production — a prior tuple-based fixture
+    masked a dict(zip(...)) bug in api/admin.py that 500'd against dict_row.
+    """
+    dict_rows = [dict(zip(cols, r)) for r in rows]
     cur = MagicMock()
     cur.description = [(c,) for c in cols]
-    cur.fetchall.return_value = rows
-    cur.fetchone.return_value = rows[0] if rows else None
+    cur.fetchall.return_value = dict_rows
+    cur.fetchone.return_value = dict_rows[0] if dict_rows else None
 
     @contextlib.contextmanager
     def _ctx_cur():
@@ -105,6 +112,9 @@ def test_pipeline_runs_list_groups_and_paginates(authed_admin_client, monkeypatc
     assert run["request_id"] == "req-1"
     # terminal_decision pulled from last decision in the agents array
     assert run["terminal_decision"] == "ok"
+    # started_at round-trips as an ISO string (the field whose .isoformat()
+    # blew up against dict_row in the old dict(zip(...)) code path).
+    assert run["started_at"] == "2026-05-07T12:00:00+00:00"
     # next_cursor is None when fewer rows than limit returned
     assert body["next_cursor"] is None
 
