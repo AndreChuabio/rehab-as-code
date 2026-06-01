@@ -19,7 +19,8 @@
          /admin/me confirms role). Plain clinicians never see this. -->
     <nav class="admin-mode-switch" id="adminModeSwitch" hidden role="tablist" aria-label="Dashboard mode">
       <button type="button" class="admin-mode-btn active" data-mode="review" role="tab" aria-selected="true">Review queue</button>
-      <button type="button" class="admin-mode-btn" data-mode="debug" role="tab" aria-selected="false">Pipeline debug</button>
+      <button type="button" class="admin-mode-btn" data-mode="patients" id="modePatientsBtn" role="tab" aria-selected="false">Patients</button>
+      <button type="button" class="admin-mode-btn" data-mode="debug" id="modeDebugBtn" role="tab" aria-selected="false">Pipeline debug</button>
     </nav>
 
     <div class="clinician-header-meta">
@@ -238,6 +239,41 @@
         <section class="admin-decision-trace" id="adminDecisionTrace"></section>
         <section class="admin-timeline" id="adminTimeline"></section>
         <section class="admin-agent-cards" id="adminAgentCards"></section>
+      </article>
+    </section>
+  </main>
+
+  <!-- Patients / History: clinician-visible roster + per-patient protocol
+       timeline. Shown when the "Patients" tab is active. -->
+  <main class="clinician-main patients-main" id="patientsMain" hidden>
+    <aside class="clinician-queue">
+      <div class="clinician-queue-header">
+        <input type="search" id="patientSearch" class="patient-search"
+               placeholder="Search patients…" aria-label="Search patients" />
+        <button type="button" class="clinician-refresh" id="patientRosterRefresh" title="Refresh">↻</button>
+      </div>
+      <ol class="clinician-queue-list" id="patientRosterList"></ol>
+      <div class="clinician-queue-empty" id="patientRosterEmpty" hidden>No patients yet.</div>
+    </aside>
+
+    <section class="clinician-detail" id="patientHistoryDetail">
+      <div class="clinician-detail-empty" id="historyEmpty">
+        Select a patient to see their history.
+      </div>
+      <article class="clinician-detail-body" id="historyBody" hidden>
+        <header class="clinician-detail-header">
+          <div>
+            <h2 id="historyName"></h2>
+            <div class="clinician-detail-sub" id="historySub"></div>
+          </div>
+        </header>
+        <section class="history-summary" id="historySummary"></section>
+        <h3 class="history-section-label">Protocol timeline</h3>
+        <ol class="history-timeline" id="historyTimeline"></ol>
+        <details class="clinician-sessions history-sessions-wrap" open>
+          <summary>Recent sessions (last 7 days)</summary>
+          <div id="historySessions" class="clinician-sessions-body"></div>
+        </details>
       </article>
     </section>
   </main>

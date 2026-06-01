@@ -1427,3 +1427,127 @@ details.structured-diff-group > summary.structured-diff-group-label {
 }
 .phi-reveal-btn:hover { background: rgba(120, 130, 200, 0.25); }
 .phi-reveal-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* ---- Patients / History mode ---------------------------------------------- */
+/* Hide a mode button (e.g. Pipeline debug for non-admin clinicians). */
+.admin-mode-btn[hidden] { display: none; }
+
+.patient-search {
+  flex: 1;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-family: inherit;
+}
+.patient-search::placeholder { color: var(--muted); }
+
+.roster-item.selected {
+  background: var(--surface3);
+  border-left: 3px solid var(--accent);
+}
+
+.history-summary {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.history-sum-id { font-weight: 600; color: var(--text-strong); }
+.history-sum-line { font-size: 13px; color: var(--text); line-height: 1.5; }
+.history-sum-muted { color: var(--muted); }
+.history-cap {
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  margin-right: 4px;
+}
+.history-region {
+  color: var(--accent2);
+  text-transform: uppercase;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.history-section-label {
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0 0 10px;
+}
+
+.history-timeline {
+  list-style: none;
+  margin: 0 0 18px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.timeline-node {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+}
+/* Status rail + label colour. Text label always shown (colour-blind safe). */
+.timeline-node.status-active { border-left-color: var(--success); }
+.timeline-node.status-superseded { border-left-color: var(--border-strong); opacity: 0.78; }
+.timeline-node.status-rejected { border-left-color: var(--danger); }
+.timeline-node.status-pending_review { border-left-color: var(--accent); }
+.timeline-node.status-needs_clinician_review { border-left-color: var(--warn); }
+
+.timeline-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 13px;
+}
+.timeline-status {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 2px 6px;
+  border-radius: 3px;
+  background: var(--surface3);
+  color: var(--muted);
+}
+.timeline-status.status-active { background: rgba(95, 208, 154, 0.18); color: var(--success); }
+.timeline-status.status-rejected { background: rgba(255, 107, 122, 0.18); color: var(--danger); }
+.timeline-status.status-pending_review { background: rgba(79, 179, 196, 0.20); color: var(--accent); }
+.timeline-status.status-needs_clinician_review { background: rgba(232, 181, 74, 0.18); color: var(--warn); }
+.timeline-pw { color: var(--text); }
+.timeline-when { color: var(--muted); margin-left: auto; }
+.timeline-notes {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.timeline-review-btn {
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  color: var(--bg);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.timeline-review-btn:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+.history-sessions-wrap { margin-top: 4px; }
+
+@media (max-width: 768px) {
+  .timeline-when { margin-left: 0; }
+}
