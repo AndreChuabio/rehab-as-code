@@ -460,3 +460,28 @@ def test_clinician_attention_writer_failure_emits_error_tool_result(monkeypatch)
     alert_events = [e for e in events if e.get("type") == "triage_alert"]
     assert len(alert_events) == 1
     assert alert_events[0]["severity"] == "clinician-attention"
+
+
+@pytest.mark.parametrize("phrase", [
+    "my knee gave way going down the stairs",
+    "my knee gave out mid-rep",
+    "my knee buckled",
+    "my knee locked up and now there's sharp pain",
+    "it feels unstable",
+])
+def test_red_flag_phrases_hit_the_symptom_keyword_gate(phrase):
+    """Regression: red-flag phrasings must trip the keyword pre-filter so the
+    classifier fires. 'gave way' was previously missing (only 'gives way' /
+    'giving way' were listed), so 'my knee gave way' silently bypassed the
+    whole escalation chain — no flag, no needs_clinician_review row.
+    """
+    import coach_chat
+    assert coach_chat._first_symptom_keyword(phrase) is not None, (
+        f"red-flag phrase did not hit the symptom keyword gate: {phrase!r}"
+    )
+
+
+def test_non_symptom_message_does_not_hit_keyword_gate():
+    """Cheap guard against the regex going greedy and firing on every message."""
+    import coach_chat
+    assert coach_chat._first_symptom_keyword("feeling great today, ready to progress") is None

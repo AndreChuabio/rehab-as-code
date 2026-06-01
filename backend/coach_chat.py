@@ -53,7 +53,9 @@ logger = logging.getLogger(__name__)
 SYMPTOM_KEYWORD_RE = re.compile(
     r"\b("
     r"pain|hurt|hurts|sore|ache|achey|achy|tweak|tweaky|sharp|sting|stung|"
-    r"swollen|swelling|stiff|stiffness|weak|weakness|giving way|gives way|"
+    r"swollen|swelling|stiff|stiffness|weak|weakness|"
+    r"giving way|gives way|gave way|giving out|gives out|gave out|"
+    r"buckled|buckling|unstable|instability|"
     r"popping|popped|grinding|locked|locking|cant|can'?t|"
     r"numb|numbness|tingling|throbbing|burning"
     r")\b",
