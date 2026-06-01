@@ -940,6 +940,14 @@ def list_clinician_patients(
         token = r["token"]
         user = user_store.load_user(token) or {}
         name = user.get("patient_name") or (user.get("intake") or {}).get("name")
+        if not name:
+            # Accounts that are clinicians-also-testing-as-patients have no
+            # intake name — fall back to the display-name chain (auth full_name
+            # -> email local-part) so the roster never shows a raw UUID.
+            try:
+                name = user_store.get_display_name(token)
+            except Exception:  # noqa: BLE001 — best-effort label, never 5xx
+                name = None
         created = r.get("latest_created_at")
         out.append({
             "token": token,
@@ -979,18 +987,22 @@ def get_clinician_patient_history(
     patient_summary = _build_patient_summary(intake=intake, target_payload=summary_payload)
     pain_trend = _build_pain_trend(recent_sessions)
 
-    initials_cache: dict[str, str | None] = {}
+    # Resolve the reviewing clinician's identity per row. reviewed_by holds the
+    # auth.uid of whoever approved/rejected (set by protocol_repo.approve/reject),
+    # so this attributes the decision to the specific clinician — answering
+    # "did clinician Andre approve Andre, or was it Nikki / Christian?". Cached
+    # per uid to avoid N display-name lookups across the timeline.
+    reviewer_cache: dict[str, str | None] = {}
 
-    def _reviewer_initials(reviewed_by: str | None) -> str | None:
+    def _reviewer_name(reviewed_by: str | None) -> str | None:
         if not reviewed_by:
             return None
-        if reviewed_by not in initials_cache:
+        if reviewed_by not in reviewer_cache:
             try:
-                name = user_store.get_display_name(reviewed_by)
+                reviewer_cache[reviewed_by] = user_store.get_display_name(reviewed_by)
             except Exception:  # noqa: BLE001 — best-effort, never 5xx history
-                name = None
-            initials_cache[reviewed_by] = _name_initials(name)
-        return initials_cache[reviewed_by]
+                reviewer_cache[reviewed_by] = None
+        return reviewer_cache[reviewed_by]
 
     timeline = []
     for r in rows:
@@ -999,6 +1011,7 @@ def get_clinician_patient_history(
         notes_excerpt = (notes[:100] + "…") if notes and len(notes) > 100 else notes
         created = r.get("created_at")
         reviewed = r.get("reviewed_at")
+        reviewer_name = _reviewer_name(r.get("reviewed_by"))
         timeline.append({
             "id": r["id"],
             "parent_id": r.get("parent_id"),
@@ -1009,7 +1022,8 @@ def get_clinician_patient_history(
             "created_by_agent": r.get("created_by_agent"),
             "created_at": created.isoformat() if created else None,
             "reviewed_at": reviewed.isoformat() if reviewed else None,
-            "reviewer_initials": _reviewer_initials(r.get("reviewed_by")),
+            "reviewer_name": reviewer_name,
+            "reviewer_initials": _name_initials(reviewer_name),
             "notes_excerpt": notes_excerpt,
         })
 

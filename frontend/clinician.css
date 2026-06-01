@@ -1527,7 +1527,14 @@ details.structured-diff-group > summary.structured-diff-group-label {
 .timeline-status.status-pending_review { background: rgba(79, 179, 196, 0.20); color: var(--accent); }
 .timeline-status.status-needs_clinician_review { background: rgba(232, 181, 74, 0.18); color: var(--warn); }
 .timeline-pw { color: var(--text); }
-.timeline-when { color: var(--muted); margin-left: auto; }
+.timeline-meta {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.timeline-reviewer { color: var(--muted); font-size: 12px; }
+.timeline-when { color: var(--muted); }
 .timeline-notes {
   margin-top: 6px;
   font-size: 12px;
