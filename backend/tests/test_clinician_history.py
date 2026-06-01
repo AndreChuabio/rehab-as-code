@@ -47,6 +47,27 @@ def test_list_patients_returns_roster(authed_clinician_client, monkeypatch):
     assert patients[1]["patient_name"] == "Christian"
 
 
+def test_list_patients_name_fallback_for_nameless_account(authed_clinician_client, monkeypatch):
+    """An account with no patient_name and no intake (a clinician also testing
+    as a patient) must NOT render a raw UUID — it falls back to the
+    display-name chain (auth full_name / email local-part)."""
+    import protocol_repo
+    import user_store
+
+    monkeypatch.setattr(protocol_repo, "list_patient_tokens", lambda limit=200: [
+        {"token": "0dc9424b-69ad-41f8-8bc4-0b97c73afde6", "latest_status": "active",
+         "latest_created_at": _dt(12), "body_region": "shoulder", "phase": None, "week": None},
+    ])
+    monkeypatch.setattr(user_store, "load_user", lambda t: {"patient_name": None, "intake": None})
+    monkeypatch.setattr(user_store, "get_display_name", lambda t: "nikki.hu42")
+
+    res = authed_clinician_client.get("/clinician/patients")
+    assert res.status_code == 200, res.text
+    p = res.json()["patients"][0]
+    assert p["patient_name"] == "nikki.hu42"   # display-name fallback, not the UUID
+    assert p["patient_name"] != p["token"]
+
+
 def test_list_patients_requires_clinician(authed_client, unauthed_client):
     # A patient (current_user_id overridden, but NOT require_clinician_id) is rejected.
     assert authed_client.get("/clinician/patients").status_code in (401, 403)
@@ -87,6 +108,8 @@ def test_patient_history_returns_all_statuses(authed_clinician_client, monkeypat
     body = res.json()
     tl = body["timeline"]
     assert [t["status"] for t in tl] == ["active", "superseded", "rejected"]
+    # Reviewer attributed to the specific clinician (full name + initials).
+    assert tl[0]["reviewer_name"] == "Nikki Hu"
     assert tl[0]["reviewer_initials"] == "NH"
     assert tl[0]["body_region"] == "ankle"
     # notes_excerpt truncated to ~100 chars + ellipsis

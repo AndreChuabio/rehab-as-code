@@ -616,7 +616,13 @@
         t.week != null ? `wk ${escapeHtml(t.week)}` : null,
       ].filter(Boolean).join(" · ");
       const when = t.created_at ? relativeTime(t.created_at) : "";
-      const rev = t.reviewer_initials ? ` · ${escapeHtml(t.reviewer_initials)}` : "";
+      // Attribute the decision to the specific clinician (which of the
+      // multi-role test accounts approved/rejected this revision).
+      const reviewer = t.reviewer_name || t.reviewer_initials || "";
+      const verb = status === "rejected" ? "rejected by" : "approved by";
+      const revHtml = reviewer
+        ? `<span class="timeline-reviewer">${verb} ${escapeHtml(reviewer)}</span>`
+        : "";
       const notes = t.notes_excerpt
         ? `<div class="timeline-notes">${escapeHtml(t.notes_excerpt)}</div>` : "";
       const reviewBtn = (status === "pending_review" || status === "needs_clinician_review")
@@ -626,7 +632,10 @@
         <div class="timeline-row">
           <span class="timeline-status status-${escapeHtml(status)}">${escapeHtml(label)}</span>
           <span class="timeline-pw">${pw}</span>
-          <span class="timeline-when">${when}${rev}</span>
+          <span class="timeline-meta">
+            ${revHtml}
+            <span class="timeline-when">${when}</span>
+          </span>
           ${reviewBtn}
         </div>
         ${notes}
