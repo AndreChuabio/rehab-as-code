@@ -24,6 +24,20 @@ logger = logging.getLogger(__name__)
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 
+def _resolve_patient_name(patient_name: str | None, fallback: str) -> str:
+    """Canonical patient name for the avatar surface.
+
+    The ONLY accepted source is the caller-supplied `patient_name`, which the
+    authenticated endpoint resolves via user_store.get_display_name(token).
+    We deliberately do NOT read protocol.payload.patient here — that field
+    drifts across revisions (a superseded row can say "Andre" while the
+    canonical intake says "Christian") and once mis-greeted a patient on the
+    live Tavus avatar. No name -> a neutral fallback, never the payload.
+    """
+    name = (patient_name or "").strip()
+    return name or fallback
+
+
 def analyze_rehab_signals(health: dict, protocol: dict) -> list[dict]:
     """
     Map wearable signals + current protocol state into rehab session focus items.
@@ -96,6 +110,7 @@ def _build_context_block(
     focus: list[dict],
     cal_summary: dict,
     protocol: dict,
+    patient_name: str | None = None,
 ) -> str:
     """Format wearable + calendar + protocol state into the Tavus data block.
 
@@ -136,7 +151,7 @@ def _build_context_block(
 
     return f"""--- PATIENT REHAB CONTEXT ---
 
-Patient: {protocol.get('patient', 'the patient')}
+Patient: {_resolve_patient_name(patient_name, 'the patient')}
 Phase: {protocol.get('phase', 'post-op recovery')}
 Week: {protocol.get('week', 'n/a')}
 
@@ -176,6 +191,7 @@ def build_system_prompt(
     health: dict,
     events: list[dict],
     protocol: dict | None = None,
+    patient_name: str | None = None,
 ) -> dict:
     """
     Build the Tavus conversational_context block + a Claude-generated greeting.
@@ -185,19 +201,26 @@ def build_system_prompt(
     protocol resolved via fetch_protocol_for_user(user_id). When omitted we
     fall back to the legacy single-tenant fetch_protocol() so older callers
     keep working.
+
+    `patient_name` is the canonical display name the authenticated caller
+    resolves via user_store.get_display_name(token). It is the ONLY source for
+    the patient's name on the avatar surface; we never read it from the
+    protocol payload (that field drifts and has mis-greeted a live patient).
+    Omitted -> a neutral fallback ("the patient" / "there").
     """
     cal_summary = summarize_calendar(events)
     if protocol is None:
         protocol = fetch_protocol()
     focus = analyze_rehab_signals(health, protocol)
     context_block = _build_context_block(
-        health, events, focus, cal_summary, protocol)
+        health, events, focus, cal_summary, protocol, patient_name)
 
     if not os.getenv("ANTHROPIC_API_KEY"):
         logger.warning("no ANTHROPIC_API_KEY; using fallback greeting")
-        return _fallback_context(health, focus, context_block, protocol)
+        return _fallback_context(
+            health, focus, context_block, protocol, patient_name)
 
-    greeting_prompt = _greeting_prompt(health, focus, protocol)
+    greeting_prompt = _greeting_prompt(health, focus, protocol, patient_name)
     response = client.messages.create(
         model="claude-haiku-4-5",
         max_tokens=200,
@@ -212,7 +235,12 @@ def build_system_prompt(
     }
 
 
-def _greeting_prompt(health: dict, focus: list[dict], protocol: dict) -> str:
+def _greeting_prompt(
+    health: dict,
+    focus: list[dict],
+    protocol: dict,
+    patient_name: str | None = None,
+) -> str:
     hrv_delta = health.get("hrv_ms", 0) - health.get("hrv_7day_avg", 60)
     hrv_trend = "below" if hrv_delta < 0 else "above"
     top_focus = focus[0]["title"] if focus else "running the current protocol"
@@ -221,7 +249,7 @@ def _greeting_prompt(health: dict, focus: list[dict], protocol: dict) -> str:
 Coach Maya is warm, precise, evidence-cited. She knows the patient's wearable data and current rehab protocol.
 
 Patient state:
-- Name: {protocol.get('patient', 'the patient')}
+- Name: {_resolve_patient_name(patient_name, 'the patient')}
 - Phase: {protocol.get('phase', 'post-op recovery')}, week {protocol.get('week', 'n/a')}
 - Sleep last night: {health['sleep_hours']}h (score {health['sleep_score']}/100)
 - HRV: {health['hrv_ms']}ms ({hrv_trend} 7-day average)
@@ -239,10 +267,14 @@ Return only the greeting text, no quotes, no JSON wrapper."""
 
 
 def _fallback_context(
-    health: dict, focus: list[dict], context_block: str, protocol: dict
+    health: dict,
+    focus: list[dict],
+    context_block: str,
+    protocol: dict,
+    patient_name: str | None = None,
 ) -> dict:
     week = protocol.get("week", "n/a")
-    patient = protocol.get("patient", "there")
+    patient = _resolve_patient_name(patient_name, "there")
     top = focus[0]["title"] if focus else "session focus"
     greeting = (
         f"Good morning, {patient}. Week {week} of your rehab — "
