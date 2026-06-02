@@ -66,7 +66,7 @@ def _stub_context(monkeypatch):
     )
     monkeypatch.setattr(
         "main.build_system_prompt",
-        lambda health, events, protocol=None: {
+        lambda health, events, protocol=None, patient_name=None: {
             "system_prompt": "stub system prompt",
             "greeting": "Hi from Maya.",
             "recommendations": [

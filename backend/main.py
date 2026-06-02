@@ -309,7 +309,12 @@ def start_session(
         health = get_health_data()
         events = get_calendar_events()
         protocol_payload = fetch_protocol_for_user(user_id) or fetch_protocol()
-        context = build_system_prompt(health, events, protocol=protocol_payload)
+        # Canonical patient name comes from get_display_name (intake -> auth ->
+        # email), never the protocol payload. Resolve once and reuse for both
+        # the greeting/persona and the Tavus user_name so they can't diverge.
+        display_name = user_store.get_display_name(user_id) or "there"
+        context = build_system_prompt(
+            health, events, protocol=protocol_payload, patient_name=display_name)
     except Exception as exc:
         logger.exception("start_session context_build_failed token=%s", user_id)
         raise HTTPException(status_code=500, detail=f"context build failed: {exc}")
@@ -318,7 +323,7 @@ def start_session(
         conversation = create_conversation(
             system_prompt=context["system_prompt"],
             greeting=context["greeting"],
-            user_name=user_store.get_display_name(user_id) or "there",
+            user_name=display_name,
         )
     except TavusConfigError as exc:
         # Missing env vars - feature is not provisioned. Surface a 503 so the
