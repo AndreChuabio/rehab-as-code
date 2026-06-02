@@ -45,6 +45,12 @@ health_cache.json
 *.sqlite
 *.db
 
+# Session recordings & transcripts (may contain PHI / clinician feedback — never commit)
+*.mp4
+*.mov
+*_transcript.md
+doctor_*Feedback*
+
 # Logs / caches
 *.log
 npm-debug.log*
