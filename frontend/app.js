@@ -597,6 +597,11 @@ async function refreshPatientState({ openModalIfNeeded = true } = {}) {
   // state -> copy mapping.
   renderReviewPill(patientState?.review_status || null);
 
+  // PR-payer: read-only payer mode + payer-aware goals card. The patient
+  // sees which payer mode their plan is written for; only the clinician can
+  // change it. Idempotent — hides the card when no payer_model is present.
+  renderPatientPayerGoals(patientState?.payer_model, patientState?.goals);
+
   // PR-M flow stitching: surface the "Start today's session" CTA when a
   // protocol was recently approved and the patient hasn't started today
   // yet. Decoupled from openModalIfNeeded — the CTA is an inline render,
@@ -711,6 +716,177 @@ function renderReviewPill(reviewStatus) {
     btn.setAttribute("aria-expanded", expanded ? "false" : "true");
     panel.hidden = expanded;
   };
+}
+
+// ── Patient read-only payer mode + payer-aware goals ───────────────────────
+//
+// Mirrors the clinician goal renderer but read-only: the patient sees which
+// payer mode their plan is written for and the generated goals, but cannot
+// change the mode (that toggle lives on /clinician). Hidden entirely when no
+// payer_model is on file so older accounts get a clean dashboard.
+
+const PATIENT_PAYER_LABEL = {
+  insurance: "Insurance",
+  medicare: "Medicare",
+  cash: "Cash / self-pay",
+};
+
+const PATIENT_TIED_TO_LABEL = {
+  adl: "Daily living",
+  fall_risk: "Fall risk",
+  performance: "Performance",
+  load_mgmt: "Load mgmt",
+};
+
+function patientPayerLabel(mode) {
+  return PATIENT_PAYER_LABEL[mode] || (mode ? String(mode) : "Not set");
+}
+
+// Build one read-only goal <li>. Patient-facing: plain-language tie-in chip,
+// the measurable target if present. We intentionally do NOT surface the
+// clinician-only data-integrity flags (needs_clinician_review etc.) — those
+// are review signals for the PT, not something to alarm the patient with.
+function renderPatientPayerGoalItem(goal) {
+  if (!goal || typeof goal !== "object") return "";
+  const text = goal.text || "(goal not set)";
+  const target = goal.measurable_target
+    ? `<span class="payer-goal-target">${escapeHtml(goal.measurable_target)}</span>`
+    : "";
+  const tiedKey = goal.tied_to;
+  const tiedChip = tiedKey
+    ? `<span class="goal-tied-chip goal-tied-${escapeHtml(String(tiedKey))}">${escapeHtml(PATIENT_TIED_TO_LABEL[tiedKey] || String(tiedKey))}</span>`
+    : "";
+  return `<li class="payer-goal">
+    <div class="payer-goal-head">
+      ${tiedChip}
+      <span class="payer-goal-text">${escapeHtml(text)}</span>
+    </div>
+    ${target ? `<div class="payer-goal-meta">${target}</div>` : ""}
+  </li>`;
+}
+
+function renderPatientPayerGoals(payerModel, goals) {
+  const card = document.getElementById("payerGoalsCard");
+  const badge = document.getElementById("patientPayerBadge");
+  const list = document.getElementById("patientPayerGoalsList");
+  if (!card || !badge || !list) return;
+
+  const arr = Array.isArray(goals) ? goals.filter(Boolean) : [];
+  // Show the card when we have either a payer mode or generated goals.
+  if (!payerModel && !arr.length) {
+    card.style.display = "none";
+    return;
+  }
+
+  if (payerModel) {
+    badge.textContent = patientPayerLabel(payerModel);
+    badge.className = "payer-badge payer-badge-" + payerModel;
+    badge.hidden = false;
+  } else {
+    badge.hidden = true;
+  }
+
+  list.innerHTML = arr.length
+    ? arr.map(renderPatientPayerGoalItem).join("")
+    : `<li class="payer-goal-empty">Your goals will appear here once your plan is set.</li>`;
+  card.style.display = "";
+
+  // Draft super-bill self-view. Only relevant when a payer mode is set;
+  // lazy-loaded on first open so the dashboard stays light. Wire the
+  // toggle handler once.
+  const sbWrap = document.getElementById("patientSuperbillWrap");
+  if (sbWrap) {
+    if (payerModel) {
+      sbWrap.hidden = false;
+      if (!sbWrap.dataset.bound) {
+        sbWrap.dataset.bound = "1";
+        sbWrap.addEventListener("toggle", () => {
+          if (sbWrap.open && !sbWrap.dataset.loaded) {
+            loadPatientSuperbill();
+          }
+        });
+      }
+    } else {
+      sbWrap.hidden = true;
+    }
+  }
+}
+
+async function loadPatientSuperbill() {
+  const wrap = document.getElementById("patientSuperbillWrap");
+  const body = document.getElementById("patientSuperbillBody");
+  if (!body) return;
+  body.innerHTML = `<div class="payer-goal-empty">Loading…</div>`;
+  let data;
+  try {
+    const res = await authedFetch(`${API_BASE}/patient/me/superbill`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    data = await res.json();
+  } catch (e) {
+    console.warn("patient superbill load failed", e);
+    body.innerHTML = `<div class="payer-goal-empty">Couldn't load your draft super-bill right now.</div>`;
+    return;
+  }
+  if (wrap) wrap.dataset.loaded = "1";
+  body.innerHTML = renderPatientSuperbill(data);
+}
+
+// Patient-facing draft super-bill. Read-only, plain-language framing. Same
+// DRAFT-attestation banner (dashed MOCK convention) so it is unmistakably
+// not a real, payable bill.
+function renderPatientSuperbill(data) {
+  const items = Array.isArray(data.line_items) ? data.line_items : [];
+  const totals = data.totals || {};
+  const disclaimers = Array.isArray(data.disclaimers) ? data.disclaimers : [];
+
+  const banner = `<div class="superbill-attestation">
+    <span class="superbill-attestation-tag">DRAFT</span>
+    <span class="superbill-attestation-text">This is a draft for your reference,
+    built from your completed sessions. It is not a bill and has not been reviewed
+    or signed by your clinician.</span>
+  </div>`;
+
+  if (!items.length) {
+    return banner +
+      `<div class="payer-goal-empty">No completed sessions yet — nothing to show.</div>`;
+  }
+
+  const rows = items.map((it) => {
+    const dr = it.date_range || {};
+    const range = (dr.start || dr.end)
+      ? `${escapeHtml(dr.start || "?")} → ${escapeHtml(dr.end || "?")}`
+      : "—";
+    return `<tr>
+      <td class="superbill-cpt">${escapeHtml(it.cpt || "—")}</td>
+      <td>${escapeHtml(it.descriptor || "—")}</td>
+      <td class="superbill-num">${escapeHtml(it.units != null ? it.units : "—")}</td>
+      <td class="superbill-range">${range}</td>
+    </tr>`;
+  }).join("");
+
+  const table = `<div class="superbill-table-wrap">
+    <table class="superbill-table">
+      <thead><tr>
+        <th scope="col">CPT</th>
+        <th scope="col">Descriptor</th>
+        <th scope="col">Units</th>
+        <th scope="col">Date range</th>
+      </tr></thead>
+      <tbody>${rows}</tbody>
+    </table>
+  </div>`;
+
+  const totalBits = [
+    totals.total_units != null ? `${escapeHtml(totals.total_units)} units` : null,
+    totals.total_sessions != null ? `${escapeHtml(totals.total_sessions)} sessions` : null,
+  ].filter(Boolean).join(" · ");
+  const totalsRow = totalBits ? `<div class="superbill-totals">${totalBits}</div>` : "";
+
+  const disc = disclaimers.length
+    ? `<ul class="superbill-disclaimers">${disclaimers.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}</ul>`
+    : "";
+
+  return banner + table + totalsRow + disc;
 }
 
 // Render a relative-time label like "10m" / "2h" / "1d" given an ISO8601

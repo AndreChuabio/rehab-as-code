@@ -40,6 +40,26 @@
           <ul class="protocol-exercises" id="protocolExercises"></ul>
         </section>
 
+        <!-- Read-only payer mode + payer-aware goals. The patient can SEE
+             the mode their plan is written for, but only the clinician can
+             change it (toggle lives on /clinician). Hidden until the
+             intake-status response carries a payer_model. -->
+        <section class="card payer-goals-card" id="payerGoalsCard" style="display:none">
+          <h3>My Goals
+            <span class="payer-badge" id="patientPayerBadge"></span>
+          </h3>
+          <ul class="payer-goals-list" id="patientPayerGoalsList"></ul>
+          <!-- Patient self-view of the draft super-bill. Read-only, opens on
+               demand so it never adds noise to the default dashboard.
+               Same DRAFT-attestation framing as the clinician view. -->
+          <details class="patient-superbill" id="patientSuperbillWrap" hidden>
+            <summary class="patient-superbill-summary">View my draft super-bill</summary>
+            <div class="patient-superbill-body" id="patientSuperbillBody">
+              <div class="payer-goal-empty">Loading…</div>
+            </div>
+          </details>
+        </section>
+
         <section class="card today-session-card" id="todaySessionCard"
                  style="display:none">
           <h3>Today's Session</h3>

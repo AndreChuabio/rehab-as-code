@@ -78,7 +78,10 @@
               <span class="patient-summary-name" id="psName"></span>
               <span class="patient-summary-age" id="psAge" hidden></span>
             </div>
-            <span class="patient-summary-region" id="psRegion" hidden></span>
+            <div class="patient-summary-top-right">
+              <span class="payer-badge" id="psPayerBadge" hidden></span>
+              <span class="patient-summary-region" id="psRegion" hidden></span>
+            </div>
           </div>
           <div class="patient-summary-row patient-summary-mid">
             <div class="patient-summary-injury">
@@ -104,6 +107,12 @@
               <span class="patient-summary-meta-cap">Goals:</span>
               <span class="patient-summary-meta-val" id="psGoalsVal"></span>
             </div>
+          </div>
+          <!-- Payer-aware generated goals (distinct from raw intake goals
+               above). Hidden when the protocol carries none. -->
+          <div class="patient-summary-payer-goals" id="psPayerGoals" hidden>
+            <span class="patient-summary-meta-cap">Payer-aware goals:</span>
+            <ul class="payer-goals-list" id="psPayerGoalsList"></ul>
           </div>
         </section>
 
@@ -266,8 +275,49 @@
             <h2 id="historyName"></h2>
             <div class="clinician-detail-sub" id="historySub"></div>
           </div>
+          <!-- Payer-model badge + clinician-only toggle. Drives goal
+               language + whether the super-bill panel is relevant. The
+               badge always shows the current mode; the segmented control
+               POSTs the change and re-renders on success. -->
+          <div class="payer-control" id="historyPayerControl" hidden>
+            <span class="payer-badge" id="historyPayerBadge"></span>
+            <div class="payer-toggle" id="historyPayerToggle"
+                 role="radiogroup" aria-label="Payer model">
+              <button type="button" class="payer-toggle-opt" data-payer="insurance"
+                      role="radio" aria-checked="false">Insurance</button>
+              <button type="button" class="payer-toggle-opt" data-payer="medicare"
+                      role="radio" aria-checked="false">Medicare</button>
+              <button type="button" class="payer-toggle-opt" data-payer="cash"
+                      role="radio" aria-checked="false">Cash</button>
+            </div>
+          </div>
         </header>
         <section class="history-summary" id="historySummary"></section>
+
+        <!-- Payer-aware generated goals. Distinct from the raw intake goals
+             shown inside #historySummary. Each goal carries a tied_to chip
+             and, when the planner flagged it, a dashed review chip. -->
+        <section class="payer-goals" id="historyPayerGoals" hidden>
+          <h3 class="history-section-label">Payer-aware goals</h3>
+          <ul class="payer-goals-list" id="historyPayerGoalsList"></ul>
+        </section>
+
+        <!-- Super-bill DRAFT. Completed-sessions-only. Carries a prominent
+             dashed attestation banner so it can never be mistaken for a
+             signed, billable document. -->
+        <section class="superbill" id="historySuperbill" hidden>
+          <h3 class="history-section-label">Super-bill (draft)</h3>
+          <div class="superbill-body" id="historySuperbillBody"></div>
+        </section>
+
+        <!-- Form-feedback rollup. Per-exercise 2D-webcam trend signal, not a
+             goniometric measure — the honest-framing note is rendered from
+             the backend `notes` array. -->
+        <section class="form-feedback" id="historyFormFeedback" hidden>
+          <h3 class="history-section-label">Form-feedback (last sessions)</h3>
+          <div class="form-feedback-body" id="historyFormFeedbackBody"></div>
+        </section>
+
         <h3 class="history-section-label">Protocol timeline</h3>
         <ol class="history-timeline" id="historyTimeline"></ol>
         <details class="clinician-sessions history-sessions-wrap" open>

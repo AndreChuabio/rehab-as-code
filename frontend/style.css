@@ -3830,3 +3830,146 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   cursor: pointer;
 }
 .tour-next:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+/* ── Payer-aware goals (patient dashboard) ───────────────────────────────
+   Read-only mirror of the clinician goal renderer. The patient sees the
+   payer mode + generated goals but cannot change the mode (clinician-only,
+   on /clinician). Info-coloured; payer mode is not a safety signal. */
+.payer-goals-card .payer-badge {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.payer-badge {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(122, 158, 255, 0.32);
+  background: rgba(122, 158, 255, 0.12);
+  color: var(--accent2);
+  white-space: nowrap;
+}
+.payer-badge-cash {
+  background: var(--surface3);
+  color: var(--muted);
+  border-color: var(--border);
+}
+.payer-badge-unset {
+  background: transparent;
+  color: var(--muted);
+  border-color: var(--border);
+}
+.payer-goals-card .payer-goals-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+}
+.payer-goals-card .payer-goal {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.payer-goals-card .payer-goal-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.payer-goals-card .payer-goal-text { font-size: 14px; color: var(--text); line-height: 1.4; }
+.payer-goals-card .payer-goal-meta { margin-top: 4px; }
+.payer-goals-card .payer-goal-target { font-size: 12px; color: var(--muted); }
+.payer-goals-card .payer-goal-empty { font-size: 13px; color: var(--muted); }
+.payer-goals-card .goal-tied-chip {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(79, 179, 196, 0.14);
+  color: var(--accent);
+  border: 1px solid rgba(79, 179, 196, 0.3);
+  white-space: nowrap;
+}
+.payer-goals-card .goal-tied-fall_risk {
+  background: rgba(232, 181, 74, 0.14);
+  color: var(--warn);
+  border-color: rgba(232, 181, 74, 0.3);
+}
+
+/* ── Patient draft super-bill (self-view) ────────────────────────────────
+   Read-only. DRAFT attestation uses the dashed MOCK convention so it is
+   unmistakably not a payable bill. */
+.patient-superbill { margin-top: 12px; }
+.patient-superbill-summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--accent2);
+  padding: 4px 0;
+  list-style: none;
+}
+.patient-superbill-summary::-webkit-details-marker { display: none; }
+.patient-superbill-summary::before { content: "▸ "; color: var(--muted); }
+.patient-superbill[open] .patient-superbill-summary::before { content: "▾ "; }
+.patient-superbill-body { margin-top: 10px; }
+.payer-goals-card .superbill-attestation {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  border: 2px dashed var(--mock-border);
+  border-radius: 8px;
+  background: transparent;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+}
+.payer-goals-card .superbill-attestation-tag {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  border-radius: 4px;
+  padding: 2px 8px;
+  flex-shrink: 0;
+}
+.payer-goals-card .superbill-attestation-text { font-size: 12px; color: var(--text); line-height: 1.5; }
+.payer-goals-card .superbill-table-wrap { overflow-x: auto; }
+.payer-goals-card .superbill-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.payer-goals-card .superbill-table th {
+  text-align: left;
+  color: var(--muted);
+  text-transform: uppercase;
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  font-weight: 600;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+.payer-goals-card .superbill-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text);
+  vertical-align: top;
+}
+.payer-goals-card .superbill-cpt { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text-strong); }
+.payer-goals-card .superbill-num { text-align: right; font-variant-numeric: tabular-nums; }
+.payer-goals-card .superbill-range { white-space: nowrap; color: var(--muted); }
+.payer-goals-card .superbill-totals { margin-top: 10px; font-size: 12px; color: var(--text); }
+.payer-goals-card .superbill-disclaimers {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.5;
+}

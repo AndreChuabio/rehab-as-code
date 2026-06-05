@@ -568,8 +568,22 @@
       $("historySub").innerHTML = bits.join(" · ");
     }
     renderHistorySummary(summary);
+    // PR-payer: payer-mode badge + clinician toggle, payer-aware goals.
+    // Token (UUID) is held in the control's dataset so the toggle handler
+    // knows which patient to POST against. Never the patient_name.
+    renderPayerControl("historyPayerControl", token, summary.payer_model);
+    renderPayerGoals("historyPayerGoals", "historyPayerGoalsList", summary.protocol_goals);
     renderTimeline(data.timeline || []);
     loadRecentSessions(token, "historySessions");
+    // Demo panels: super-bill draft + form-feedback rollup. Both fetch
+    // independently and self-render loading/empty/error so a slow or
+    // missing endpoint never blanks the history view.
+    loadSuperbill(token, "historySuperbill", "historySuperbillBody").catch((e) =>
+      console.warn("superbill load failed", e),
+    );
+    loadFormFeedback(token, "historyFormFeedback", "historyFormFeedbackBody").catch((e) =>
+      console.warn("form-feedback load failed", e),
+    );
   }
 
   function renderHistorySummary(s) {
@@ -591,6 +605,335 @@
     const goals = (s.goals || []).slice(0, 3).map(escapeHtml).join(", ");
     if (goals) parts.push(`<div class="history-sum-line"><span class="history-cap">Goals</span> ${goals}</div>`);
     host.innerHTML = parts.join("");
+  }
+
+  // ── Payer model + payer-aware goals ──────────────────────────────────
+  //
+  // Three payer modes drive goal language and whether the super-bill is
+  // relevant: insurance | medicare | cash. The badge is calm but
+  // unmistakable; medicare and insurance read as info, cash reads as a
+  // neutral self-pay state. Never uses the danger token — payer mode is
+  // not a safety signal.
+
+  const PAYER_LABEL = {
+    insurance: "Insurance",
+    medicare: "Medicare",
+    cash: "Cash / self-pay",
+  };
+
+  function payerLabel(mode) {
+    return PAYER_LABEL[mode] || (mode ? String(mode) : "Not set");
+  }
+
+  // tied_to taxonomy chips. Plain-language labels so the clinician doesn't
+  // have to decode the enum.
+  const TIED_TO_LABEL = {
+    adl: "ADL",
+    fall_risk: "Fall risk",
+    performance: "Performance",
+    load_mgmt: "Load mgmt",
+  };
+
+  // Goal data-integrity flags -> dashed MOCK-convention chip copy. These
+  // draw the clinician's eye to a goal the planner wasn't confident about.
+  // Order matters: most clinically meaningful flag first.
+  const GOAL_FLAG_CHIPS = [
+    ["needs_clinician_review", "needs review"],
+    ["citation_missing", "citation missing"],
+    ["text_register_warning", "review register"],
+    ["tied_to_coerced", "tie-in inferred"],
+  ];
+
+  function goalFlagChips(goal) {
+    if (!goal || typeof goal !== "object") return "";
+    return GOAL_FLAG_CHIPS
+      .filter(([flag]) => goal[flag])
+      .map(([, label]) => `<span class="goal-flag-chip">${escapeHtml(label)}</span>`)
+      .join("");
+  }
+
+  // Render a single payer-aware goal <li>. Pure string builder so it can be
+  // unit-tested DOM-free (see frontend/tests/payer_goals.test.js).
+  function renderPayerGoalItem(goal) {
+    if (!goal || typeof goal !== "object") return "";
+    const text = goal.text || "(no goal text)";
+    const target = goal.measurable_target
+      ? `<span class="payer-goal-target">${escapeHtml(goal.measurable_target)}</span>`
+      : "";
+    const tiedKey = goal.tied_to;
+    const tiedChip = tiedKey
+      ? `<span class="goal-tied-chip goal-tied-${escapeHtml(String(tiedKey))}">${escapeHtml(TIED_TO_LABEL[tiedKey] || String(tiedKey))}</span>`
+      : "";
+    const flags = goalFlagChips(goal);
+    return `<li class="payer-goal">
+      <div class="payer-goal-head">
+        ${tiedChip}
+        <span class="payer-goal-text">${escapeHtml(text)}</span>
+      </div>
+      <div class="payer-goal-meta">${target}${flags}</div>
+    </li>`;
+  }
+
+  function renderPayerGoals(blockId, listId, goals) {
+    const block = $(blockId);
+    const list = $(listId);
+    if (!block || !list) return;
+    const arr = Array.isArray(goals) ? goals.filter(Boolean) : [];
+    if (!arr.length) {
+      block.hidden = true;
+      list.innerHTML = "";
+      return;
+    }
+    list.innerHTML = arr.map(renderPayerGoalItem).join("");
+    block.hidden = false;
+  }
+
+  // Payer badge + clinician-only segmented toggle. Stores the patient token
+  // on the toggle dataset, marks the active option, and wires a one-time
+  // delegated click that POSTs the change and re-renders on success.
+  function renderPayerControl(controlId, token, mode) {
+    const control = $(controlId);
+    if (!control) return;
+    if (!token) {
+      control.hidden = true;
+      return;
+    }
+    control.hidden = false;
+    control.dataset.token = token;
+
+    const badge = control.querySelector(".payer-badge");
+    if (badge) {
+      badge.textContent = payerLabel(mode);
+      badge.className = "payer-badge payer-badge-" + (mode || "unset");
+    }
+
+    const toggle = control.querySelector(".payer-toggle");
+    if (toggle) {
+      toggle.dataset.token = token;
+      toggle.querySelectorAll(".payer-toggle-opt").forEach((opt) => {
+        const on = opt.dataset.payer === mode;
+        opt.classList.toggle("active", on);
+        opt.setAttribute("aria-checked", on ? "true" : "false");
+      });
+      // Idempotent: bind the delegated handler once per element.
+      if (!toggle.dataset.bound) {
+        toggle.dataset.bound = "1";
+        toggle.addEventListener("click", (ev) => {
+          const opt = ev.target.closest(".payer-toggle-opt");
+          if (!opt) return;
+          setPayerModel(toggle.dataset.token, opt.dataset.payer, control);
+        });
+      }
+    }
+  }
+
+  async function setPayerModel(token, payerModel, control) {
+    if (!token || !payerModel) return;
+    const toggle = control.querySelector(".payer-toggle");
+    // Optimistic disable so a double-click can't fire two writes.
+    if (toggle) toggle.querySelectorAll("button").forEach((b) => (b.disabled = true));
+    try {
+      const res = await authedFetch(
+        `${API_BASE}/clinician/patient/${encodeURIComponent(token)}/payer-model`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ payer_model: payerModel }),
+        },
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const applied = data.payer_model || payerModel;
+      // Re-render the badge + active state from the server's echo. Goal
+      // language is generated server-side on the next plan run, so we do
+      // not mutate protocol_goals here — just confirm the mode flip.
+      renderPayerControl(control.id, token, applied);
+      toast(`Payer mode set to ${payerLabel(applied)}`, "ok");
+    } catch (e) {
+      console.error("payer-model write failed", e);
+      toast(`Couldn't update payer mode: ${e.message}`, "error");
+      if (toggle) toggle.querySelectorAll("button").forEach((b) => (b.disabled = false));
+    }
+  }
+
+  // ── Super-bill DRAFT panel ────────────────────────────────────────────
+  //
+  // Completed-sessions-only draft. The attestation banner uses the dashed
+  // MOCK convention (NOT a solid red fill) so it never competes with the
+  // safety-concerns banner, while still being impossible to mistake for a
+  // signed, billable document. Every line item is a draft suggestion the
+  // clinician must verify and attest.
+  async function loadSuperbill(token, blockId, bodyId) {
+    const block = $(blockId);
+    const body = $(bodyId);
+    if (!block || !body) return;
+    block.hidden = false;
+    body.innerHTML = `<div class="clinician-sessions-empty">Loading…</div>`;
+    let data;
+    try {
+      const res = await authedFetch(
+        `${API_BASE}/clinician/patient/${encodeURIComponent(token)}/superbill`,
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      data = await res.json();
+    } catch (e) {
+      body.innerHTML = `<div class="clinician-sessions-empty">Couldn't load super-bill: ${escapeHtml(e.message)}</div>`;
+      return;
+    }
+    body.innerHTML = renderSuperbill(data);
+  }
+
+  function renderSuperbill(data) {
+    const items = Array.isArray(data.line_items) ? data.line_items : [];
+    const totals = data.totals || {};
+    const disclaimers = Array.isArray(data.disclaimers) ? data.disclaimers : [];
+
+    // Attestation banner — dashed MOCK convention, never solid red.
+    const banner = `<div class="superbill-attestation">
+      <span class="superbill-attestation-tag">DRAFT</span>
+      <span class="superbill-attestation-text">Requires clinician attestation — not a bill.
+      Generated from completed sessions only; verify every line before use.</span>
+    </div>`;
+
+    const metaBits = [
+      data.payer_model ? `Payer: ${escapeHtml(payerLabel(data.payer_model))}` : null,
+      data.body_region ? `Region: ${escapeHtml(String(data.body_region).replace("_", " "))}` : null,
+      data.source ? `Source: ${escapeHtml(String(data.source).replace(/_/g, " "))}` : null,
+    ].filter(Boolean).join(" · ");
+    const meta = metaBits ? `<div class="superbill-meta">${metaBits}</div>` : "";
+
+    if (!items.length) {
+      return banner + meta +
+        `<div class="clinician-sessions-empty">No completed sessions in range — nothing to draft yet.</div>`;
+    }
+
+    const rows = items.map((it) => {
+      const dr = it.date_range || {};
+      const range = (dr.start || dr.end)
+        ? `${escapeHtml(dr.start || "?")} → ${escapeHtml(dr.end || "?")}`
+        : "—";
+      const payerNote = it.payer_note
+        ? `<div class="superbill-payer-note">${escapeHtml(it.payer_note)}</div>`
+        : "";
+      return `<tr>
+        <td class="superbill-cpt">${escapeHtml(it.cpt || "—")}</td>
+        <td>${escapeHtml(it.descriptor || "—")}${payerNote}</td>
+        <td class="superbill-num">${escapeHtml(it.units != null ? it.units : "—")}</td>
+        <td class="superbill-num">${escapeHtml(it.session_count != null ? it.session_count : "—")}</td>
+        <td class="superbill-range">${range}</td>
+        <td class="superbill-just">${escapeHtml(it.justification || "—")}</td>
+      </tr>`;
+    }).join("");
+
+    const table = `<div class="superbill-table-wrap">
+      <table class="superbill-table">
+        <thead><tr>
+          <th scope="col">CPT</th>
+          <th scope="col">Descriptor</th>
+          <th scope="col">Units</th>
+          <th scope="col">Sessions</th>
+          <th scope="col">Date range</th>
+          <th scope="col">Justification</th>
+        </tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    </div>`;
+
+    const totalBits = [
+      totals.total_units != null ? `${escapeHtml(totals.total_units)} units` : null,
+      totals.total_sessions != null ? `${escapeHtml(totals.total_sessions)} sessions` : null,
+      totals.n_line_items != null ? `${escapeHtml(totals.n_line_items)} line items` : null,
+    ].filter(Boolean).join(" · ");
+    const basis = totals.basis ? ` · basis: ${escapeHtml(String(totals.basis).replace(/_/g, " "))}` : "";
+    const verifyNote = totals.needs_verification
+      ? `<span class="superbill-verify">needs verification</span>`
+      : "";
+    const totalsRow = totalBits
+      ? `<div class="superbill-totals">${totalBits}${basis} ${verifyNote}</div>`
+      : "";
+
+    const disc = disclaimers.length
+      ? `<ul class="superbill-disclaimers">${disclaimers.map((d) => `<li>${escapeHtml(d)}</li>`).join("")}</ul>`
+      : "";
+
+    return banner + meta + table + totalsRow + disc;
+  }
+
+  // ── Form-feedback rollup ──────────────────────────────────────────────
+  //
+  // Per-exercise 2D-webcam trend signal. Honest framing: this is a movement
+  // trend, NOT a goniometric measure. worst_status drives a good/warn/fail
+  // chip; warnings render as counted chips. The note from the backend is
+  // pinned at the top so the clinician reads the caveat before the numbers.
+  async function loadFormFeedback(token, blockId, bodyId) {
+    const block = $(blockId);
+    const body = $(bodyId);
+    if (!block || !body) return;
+    block.hidden = false;
+    body.innerHTML = `<div class="clinician-sessions-empty">Loading…</div>`;
+    let data;
+    try {
+      const res = await authedFetch(
+        `${API_BASE}/clinician/patient/${encodeURIComponent(token)}/form-feedback`,
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      data = await res.json();
+    } catch (e) {
+      body.innerHTML = `<div class="clinician-sessions-empty">Couldn't load form-feedback: ${escapeHtml(e.message)}</div>`;
+      return;
+    }
+    body.innerHTML = renderFormFeedback(data);
+  }
+
+  const FORM_STATUS_LABEL = { good: "GOOD", warn: "WARN", fail: "FAIL" };
+
+  function renderFormFeedback(data) {
+    const exercises = Array.isArray(data.exercises) ? data.exercises : [];
+    const totals = data.totals || {};
+    const notes = Array.isArray(data.notes) ? data.notes : [];
+    const windowDays = data.window_days;
+
+    const noteBlock = notes.length
+      ? `<div class="form-feedback-note">${notes.map(escapeHtml).join(" ")}</div>`
+      : "";
+
+    const totalBits = [
+      totals.n_exercises != null ? `${escapeHtml(totals.n_exercises)} exercises` : null,
+      totals.n_sessions != null ? `${escapeHtml(totals.n_sessions)} sessions` : null,
+      totals.n_warnings != null ? `${escapeHtml(totals.n_warnings)} warnings` : null,
+      windowDays != null ? `last ${escapeHtml(windowDays)} days` : null,
+    ].filter(Boolean).join(" · ");
+    const totalsRow = totalBits ? `<div class="form-feedback-totals">${totalBits}</div>` : "";
+
+    if (!exercises.length) {
+      return noteBlock + totalsRow +
+        `<div class="clinician-sessions-empty">No form-checked sessions in range.</div>`;
+    }
+
+    const rows = exercises.map((ex) => {
+      const status = (ex.worst_status || "good").toLowerCase();
+      const statusLabel = FORM_STATUS_LABEL[status] || status.toUpperCase();
+      const warnings = Array.isArray(ex.warnings) ? ex.warnings : [];
+      const warnChips = warnings.map((w) => {
+        const count = w.count != null ? ` ×${escapeHtml(w.count)}` : "";
+        return `<span class="form-warn-chip">${escapeHtml(w.msg || w.id || "warning")}${count}</span>`;
+      }).join("");
+      const metaBits = [
+        ex.n_sessions != null ? `${escapeHtml(ex.n_sessions)} sessions` : null,
+        ex.total_reps != null ? `${escapeHtml(ex.total_reps)} reps` : null,
+        ex.last_seen ? `last ${escapeHtml(relativeTime(ex.last_seen))}` : null,
+      ].filter(Boolean).join(" · ");
+      return `<li class="form-feedback-row form-feedback-${escapeHtml(status)}">
+        <div class="form-feedback-row-head">
+          <span class="form-status-chip form-status-${escapeHtml(status)}">${escapeHtml(statusLabel)}</span>
+          <span class="form-ex-id">${escapeHtml(ex.exercise_id || "(unknown exercise)")}</span>
+        </div>
+        <div class="form-feedback-row-meta">${metaBits}</div>
+        ${warnChips ? `<div class="form-feedback-warns">${warnChips}</div>` : ""}
+      </li>`;
+    }).join("");
+
+    return noteBlock + totalsRow + `<ul class="form-feedback-list">${rows}</ul>`;
   }
 
   const _STATUS_LABEL = {
@@ -679,6 +1022,19 @@
       $("psRegion").hidden = true;
     }
 
+    // Payer-mode badge (read-only here — the toggle lives on the history
+    // surface). Hidden when the patient_summary predates the payer spine.
+    const payerBadge = $("psPayerBadge");
+    if (payerBadge) {
+      if (summary.payer_model) {
+        payerBadge.textContent = payerLabel(summary.payer_model);
+        payerBadge.className = "payer-badge payer-badge-" + summary.payer_model;
+        payerBadge.hidden = false;
+      } else {
+        payerBadge.hidden = true;
+      }
+    }
+
     // Injury / phase row.
     $("psInjury").textContent = summary.injury_type || "Injury type not recorded";
     if (summary.post_op_days != null) {
@@ -728,6 +1084,10 @@
     } else {
       $("psGoals").hidden = true;
     }
+
+    // Payer-aware generated goals (distinct from the raw intake goals
+    // above). Reuses the shared renderPayerGoals builder.
+    renderPayerGoals("psPayerGoals", "psPayerGoalsList", summary.protocol_goals);
   }
 
   function painBandClass(level) {
