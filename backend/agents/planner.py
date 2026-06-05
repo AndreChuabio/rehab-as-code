@@ -194,6 +194,27 @@ _GOAL_TIED_TO_BY_MODE: dict[str, tuple[str, ...]] = {
 _VALID_PAYER_MODELS = ("insurance", "medicare", "cash")
 _DEFAULT_PAYER_MODEL = "cash"
 
+# Lexical lint: vocabulary that signals a goal TEXT is in the wrong payer
+# register even when its structural fields (tied_to / payer_mode) are correct.
+# A soft clinician-facing flag — never an auto-rewrite, never authoritative.
+# Whether a goal reads in the correct register is the clinician's call (Kendell);
+# code only surfaces the suspicion so it isn't silently lent false confidence.
+_PERFORMANCE_VOCAB = ("mile", "mileage", "pace", "1rm", " pr ", "personal record", " load ")
+_NECESSITY_VOCAB = ("adl", "fall", "ambulat", "prior level of function", "activities of daily")
+
+
+def _text_register_mismatch(text: str, payer_model: str) -> bool:
+    """True when goal text uses vocabulary of the OTHER payer register.
+
+    insurance/medicare goal carrying performance vocab (mileage, 1RM), or a
+    cash goal carrying medical-necessity vocab (ADL, fall, ambulation). Soft
+    signal only.
+    """
+    t = f" {text.lower()} "
+    if payer_model in ("insurance", "medicare"):
+        return any(k in t for k in _PERFORMANCE_VOCAB)
+    return any(k in t for k in _NECESSITY_VOCAB)
+
 
 def _model() -> str:
     return os.getenv("PLANNER_MODEL", _DEFAULT_MODEL)
@@ -315,22 +336,36 @@ def _normalize_goals(
         if not text:
             continue
         tied = str(g.get("tied_to") or "").strip().lower()
-        if tied not in allowed:
+        tied_coerced = tied not in allowed
+        if tied_coerced:
             logger.warning(
                 "planner goal tied_to=%r out of payer_mode=%s — coercing token=%s",
                 tied, payer_model, token,
             )
             tied = allowed[0]
         refs = g.get("references")
-        if not isinstance(refs, list) or not refs:
-            refs = ["protocol-library/auto-generated.yaml"]
-        out.append({
+        citation_missing = not (isinstance(refs, list) and refs)
+        refs_out = [str(r) for r in refs] if not citation_missing else []
+        goal: dict[str, Any] = {
             "text": text,
             "measurable_target": str(g.get("measurable_target") or "").strip(),
             "tied_to": tied,
             "payer_mode": payer_model,  # deterministic truth, not the LLM claim
-            "references": [str(r) for r in refs],
-        })
+            "references": refs_out,
+        }
+        # Surface the soft signals as clinician-review flags rather than burying
+        # them in server logs — a coerced anchor or a wrong-register text claims
+        # validity it doesn't have, which is worse than no guard if hidden.
+        if tied_coerced:
+            goal["tied_to_coerced"] = True
+            goal["needs_clinician_review"] = True
+        if citation_missing:
+            # Do NOT fabricate a citation path — flag the gap so it's visible.
+            goal["citation_missing"] = True
+        if _text_register_mismatch(text, payer_model):
+            goal["text_register_warning"] = True
+            goal["needs_clinician_review"] = True
+        out.append(goal)
     return out
 
 
@@ -475,6 +510,14 @@ def compose(
                 payload["goals"] = normalized_goals
             else:
                 payload.pop("goals", None)
+                if payer_model in ("insurance", "medicare"):
+                    # An insurance/medicare protocol with zero goals undercuts
+                    # medical-necessity documentation — flag for a clinician.
+                    logger.warning(
+                        "planner produced zero goals for payer=%s token=%s — "
+                        "medical-necessity documentation will be incomplete",
+                        payer_model, token,
+                    )
             logger.info(
                 "planner ok in %dms in_tokens=%s out_tokens=%s "
                 "n_exercises=%d n_goals=%d payer=%s retry=%s body_region=%s token=%s",

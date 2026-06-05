@@ -38,11 +38,17 @@ _CPT_CATALOG: dict[str, str] = {
 }
 
 # Keyword heuristics over exercise_id -> CPT bucket. Deliberately coarse: this
-# is a draft a clinician corrects, not an authoritative coder.
+# is a draft a clinician corrects, not an authoritative coder. The final
+# exercise->CPT table is a Kendell (PT) artifact — these keywords only seed it.
+# Tightened per clinical review: bare `single_leg` dropped from 97112 (it
+# captures single-leg STRENGTHENING, which is 97110 not neuromuscular re-ed);
+# `lunge`/`step_up` removed from 97116 gait (a lunge is exercise/activity, not
+# gait training — mapping it to gait reads as miscoding to a payer auditor).
 _CPT_KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
-    ("97112", ("balance", "single_leg", "propriocep", "bird_dog", "stability", "wobble")),
-    ("97116", ("gait", "walk", "lunge", "step_up", "stair")),
-    ("97530", ("sit_to_stand", "sts", "functional", "reach", "carry")),
+    ("97112", ("balance", "propriocep", "bird_dog", "stability", "wobble")),
+    ("97116", ("gait", "walk", "treadmill", "ambulat")),
+    ("97530", ("sit_to_stand", "sts", "functional", "reach", "carry", "step_up", "stair")),
+    # lunge / single_leg_* strengthening fall through to 97110 (therapeutic exercise)
     # default below -> 97110
 ]
 _DEFAULT_CPT = "97110"
@@ -160,7 +166,7 @@ def generate_draft(token: str, *, window_days: int = 56) -> dict[str, Any]:
         units = len(rows)
         total_units += units
         dr = _date_range(rows)
-        line_items.append({
+        line = {
             "cpt": code,
             "descriptor": descriptor,
             "units": units,
@@ -172,7 +178,16 @@ def generate_draft(token: str, *, window_days: int = 56) -> dict[str, Any]:
             ),
             "requires_clinician_attestation": True,
             "needs_verification": True,
-        })
+        }
+        # Medicare medical-necessity differs from commercial (skilled-maintenance
+        # vs restorative framing + plan-of-care certification). Lumping it with
+        # commercial insurance is fine for a DRAFT, but the draft must say so.
+        if payer_model == "medicare":
+            line["payer_note"] = (
+                "Medicare: verify restorative vs skilled-maintenance framing and "
+                "plan-of-care certification before submission."
+            )
+        line_items.append(line)
 
     return {
         "status": "draft_unsigned",
@@ -189,6 +204,10 @@ def generate_draft(token: str, *, window_days: int = 56) -> dict[str, Any]:
             "total_units": total_units,
             "total_sessions": len(completed),
             "n_line_items": len(line_items),
+            # The unverified status travels WITH the number so a clinician (or
+            # patient) can't read total_units as a real billable count.
+            "needs_verification": True,
+            "basis": "1-unit-per-session placeholder; 8-minute rule not applied",
         },
         "disclaimers": notes,
     }

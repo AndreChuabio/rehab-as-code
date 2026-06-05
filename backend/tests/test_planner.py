@@ -320,6 +320,57 @@ def test_compose_insurance_mode_in_prompt_and_buckets(monkeypatch):
     assert g["tied_to"] in ("adl", "fall_risk")
 
 
+def test_compose_flags_register_mismatch_and_coercion(monkeypatch):
+    """Review fixes: an insurance goal whose TEXT uses performance vocab is
+    flagged text_register_warning + needs_clinician_review; an out-of-mode
+    tied_to is coerced AND flagged tied_to_coerced (not silently buried)."""
+    draft = _draft_with_goals([
+        {
+            "text": "Ride 25 miles pain-free by week 8",  # performance vocab under insurance
+            "measurable_target": "25 miles",
+            "tied_to": "performance",  # cash bucket -> must coerce under insurance
+            "payer_mode": "insurance",
+            "references": ["protocols/protocol-library/knee/post-acl-week-4.yaml"],
+        },
+    ])
+    _stub_anthropic(monkeypatch, response_blocks=[_draft_block(draft)])
+    from agents.planner import compose
+    out = compose(
+        candidates=[{"exercise_id": "mini_squats"}],
+        signal={"decision": "hold", "reasons": [], "confidence": 0.5},
+        intake={"injury_type": "knee", "name": "P", "payer_model": "insurance"},
+        phase="subacute",
+        week=4,
+        token="t",
+    )
+    g = out["goals"][0]
+    assert g["tied_to"] in ("adl", "fall_risk")
+    assert g["tied_to_coerced"] is True
+    assert g["text_register_warning"] is True
+    assert g["needs_clinician_review"] is True
+
+
+def test_compose_flags_missing_citation_without_fabricating(monkeypatch):
+    """Review fix 7: a goal with no references gets an empty list + a
+    citation_missing flag — never a fabricated 'auto-generated.yaml' path."""
+    draft = _draft_with_goals([
+        {"text": "Ride 25 miles", "tied_to": "load_mgmt", "payer_mode": "cash"},
+    ])
+    _stub_anthropic(monkeypatch, response_blocks=[_draft_block(draft)])
+    from agents.planner import compose
+    out = compose(
+        candidates=[{"exercise_id": "mini_squats"}],
+        signal={"decision": "hold", "reasons": [], "confidence": 0.5},
+        intake={"injury_type": "knee", "name": "P", "payer_model": "cash"},
+        phase="subacute",
+        week=4,
+        token="t",
+    )
+    g = out["goals"][0]
+    assert g["references"] == []
+    assert g["citation_missing"] is True
+
+
 def test_compose_defaults_to_cash_when_payer_model_unset(monkeypatch):
     """No payer_model on intake -> resolves to cash (the GTM default)."""
     draft = _draft_with_goals([
