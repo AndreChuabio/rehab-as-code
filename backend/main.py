@@ -1091,6 +1091,36 @@ def set_clinician_patient_payer_model(
     return {"token": token, "payer_model": stored}
 
 
+@app.get("/clinician/patient/{token}/superbill")
+def get_clinician_patient_superbill(
+    token: str,
+    user_id: str = Depends(require_clinician_id),  # noqa: ARG001
+):
+    """DRAFT super-bill for one patient, built from completed sessions only.
+
+    Clinician/admin only (crosses patients). The artifact is status
+    `draft_unsigned` with every line flagged requires_clinician_attestation +
+    needs_verification — it is a review surface, not a bill. See superbill.py
+    for the hard contract.
+    """
+    import superbill
+
+    return superbill.generate_draft(token)
+
+
+@app.get("/patient/me/superbill")
+def get_my_superbill(user_id: str = Depends(current_user_id)):
+    """The patient's own DRAFT super-bill (read-only self-view).
+
+    Same draft_unsigned artifact the clinician reviews; the patient can see
+    what would be submitted but cannot sign or finalize it. Scoped to the
+    caller's own auth.uid via current_user_id — never a body token.
+    """
+    import superbill
+
+    return superbill.generate_draft(user_id)
+
+
 @app.get("/protocols/{protocol_id}")
 def get_protocol_detail(
     protocol_id: str,
