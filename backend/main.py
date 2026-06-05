@@ -1061,6 +1061,36 @@ def get_clinician_patient_history(
     }
 
 
+class PayerModelUpdate(BaseModel):
+    """Clinician toggle body for a patient's payer model."""
+    payer_model: str
+
+
+@app.post("/clinician/patient/{token}/payer-model")
+def set_clinician_patient_payer_model(
+    token: str,
+    body: PayerModelUpdate,
+    user_id: str = Depends(require_clinician_id),
+):
+    """Set a patient's payer model (insurance | medicare | cash).
+
+    Clinician-owned: the patient never sets this. It drives payer-aware goal
+    language on the next protocol draft and whether the super-bill surfaces.
+    Persisted on the canonical intake payload via user_store.set_payer_model;
+    a bad value 400s rather than being silently coerced.
+    """
+    import user_store
+
+    try:
+        stored = user_store.set_payer_model(token, body.payer_model)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logger.info(
+        "payer_model set token=%s model=%s by_clinician=%s", token, stored, user_id,
+    )
+    return {"token": token, "payer_model": stored}
+
+
 @app.get("/protocols/{protocol_id}")
 def get_protocol_detail(
     protocol_id: str,
@@ -1295,6 +1325,7 @@ def _build_patient_summary(
     write the contents to logs.
     """
     import clinical_taxonomy
+    import user_store
 
     intake = intake or {}
     display_name = intake.get("name")
@@ -1303,6 +1334,16 @@ def _build_patient_summary(
     surgery_date = intake.get("surgery_date")
     symptoms = intake.get("symptoms") or []
     goals = intake.get("goals") or []
+
+    # Payer model (clinician-owned, drives goal language + super-bill). Resolve
+    # from the intake payload with the cash default; never from the protocol
+    # payload (drift trap). protocol_goals are the payer-aware goals the planner
+    # generated — distinct from `goals` above, which are the patient's raw
+    # stated intake goals.
+    payer_model = str(intake.get("payer_model") or "").strip().lower()
+    if payer_model not in user_store.PAYER_MODELS:
+        payer_model = user_store.DEFAULT_PAYER_MODEL
+    protocol_goals = target_payload.get("goals") or []
 
     # body_region uses the deterministic-first map; classify_freetext()
     # is intentionally NOT used here so the at-a-glance card stays
@@ -1335,6 +1376,8 @@ def _build_patient_summary(
         "post_op_days": post_op_days,
         "symptoms": symptoms,
         "goals": goals,
+        "payer_model": payer_model,
+        "protocol_goals": protocol_goals,
     }
 
 
@@ -2173,6 +2216,16 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
     if current_week is None:
         current_week = ps.get("current_week")
 
+    # Payer model + payer-aware goals for the patient dashboard. Both are
+    # READ-ONLY to the patient — payer_model is clinician-owned; the patient
+    # sees which mode they're in (badge) and their generated goals. Resolve the
+    # mode from intake with the cash default; goals come off the active
+    # protocol payload (the payer-aware ones the planner wrote).
+    payer_model = str((intake or {}).get("payer_model") or "").strip().lower()
+    if payer_model not in user_store.PAYER_MODELS:
+        payer_model = user_store.DEFAULT_PAYER_MODEL
+    goals = active_payload.get("goals") or []
+
     return {
         "state": state,
         "patient_name": user.get("patient_name"),
@@ -2182,6 +2235,8 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
         "has_protocol": has_protocol,
         "current_phase": current_phase,
         "current_week": current_week,
+        "payer_model": payer_model,
+        "goals": goals,
         # Retained for backward compat; no longer load-bearing (PR-bus dead).
         "last_pr_url": ps.get("last_pr_url"),
         "session_count": len(user.get("session_history", [])),

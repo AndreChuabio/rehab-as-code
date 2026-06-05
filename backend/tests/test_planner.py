@@ -226,3 +226,115 @@ def test_compose_raises_when_api_key_missing(monkeypatch):
             phase="acute",
             week=1,
         )
+
+
+# --- Payer-aware goals -------------------------------------------------------
+
+def _draft_with_goals(goals: list[dict]) -> dict:
+    return {**SAMPLE_DRAFT, "goals": goals}
+
+
+def test_compose_emits_payer_aware_goals_cash(monkeypatch):
+    """Cash patient: goals carry payer_mode=cash and a load-mgmt/performance
+    tied_to bucket, and survive into the saved payload."""
+    draft = _draft_with_goals([
+        {
+            "text": "Return to pain-free recreational cycling — 25 of 30 miles",
+            "measurable_target": "25 miles, pain <=2/10",
+            "tied_to": "performance",
+            "payer_mode": "cash",
+            "references": ["protocols/protocol-library/knee/post-acl-week-4.yaml"],
+        },
+    ])
+    _stub_anthropic(monkeypatch, response_blocks=[_draft_block(draft)])
+    from agents.planner import compose
+    out = compose(
+        candidates=[{"exercise_id": "mini_squats"}],
+        signal={"decision": "progress", "reasons": [], "confidence": 0.8},
+        intake={"injury_type": "knee", "name": "Test Patient", "payer_model": "cash"},
+        phase="subacute",
+        week=4,
+        token="t",
+    )
+    assert len(out["goals"]) == 1
+    g = out["goals"][0]
+    assert g["payer_mode"] == "cash"
+    assert g["tied_to"] in ("performance", "load_mgmt")
+    assert g["text"]
+
+
+def test_compose_goal_mode_conflation_is_coerced(monkeypatch):
+    """BLOCKER guard: a cash patient whose goal arrives tagged with an
+    insurance bucket (adl) or payer_mode is deterministically forced back to
+    the resolved cash mode — the LLM's self-report is never trusted."""
+    draft = _draft_with_goals([
+        {
+            "text": "Independent stair negotiation without rail",  # insurance-y text
+            "measurable_target": "full flight",
+            "tied_to": "adl",          # insurance bucket
+            "payer_mode": "insurance",  # wrong — patient is cash
+            "references": ["protocols/protocol-library/knee/post-acl-week-4.yaml"],
+        },
+    ])
+    _stub_anthropic(monkeypatch, response_blocks=[_draft_block(draft)])
+    from agents.planner import compose
+    out = compose(
+        candidates=[{"exercise_id": "mini_squats"}],
+        signal={"decision": "hold", "reasons": [], "confidence": 0.5},
+        intake={"injury_type": "knee", "name": "Test Patient", "payer_model": "cash"},
+        phase="subacute",
+        week=4,
+        token="t",
+    )
+    g = out["goals"][0]
+    assert g["payer_mode"] == "cash"          # forced to resolved mode
+    assert g["tied_to"] in ("performance", "load_mgmt")  # coerced out of adl
+
+
+def test_compose_insurance_mode_in_prompt_and_buckets(monkeypatch):
+    """Insurance patient: the user prompt names the payer model and goals are
+    constrained to the adl/fall_risk buckets."""
+    draft = _draft_with_goals([
+        {
+            "text": "Achieve 110 deg knee flexion for independent stairs",
+            "measurable_target": "110 degrees",
+            "tied_to": "performance",  # cash bucket — should be coerced to adl/fall_risk
+            "payer_mode": "cash",
+            "references": ["protocols/protocol-library/knee/post-acl-week-4.yaml"],
+        },
+    ])
+    fake = _stub_anthropic(monkeypatch, response_blocks=[_draft_block(draft)])
+    from agents.planner import compose
+    out = compose(
+        candidates=[{"exercise_id": "mini_squats"}],
+        signal={"decision": "progress", "reasons": [], "confidence": 0.8},
+        intake={"injury_type": "knee", "name": "P", "payer_model": "insurance"},
+        phase="subacute",
+        week=4,
+        token="t",
+    )
+    user_msg = fake.last_kwargs["messages"][0]["content"]
+    assert "Payer model" in user_msg and "insurance" in user_msg
+    g = out["goals"][0]
+    assert g["payer_mode"] == "insurance"
+    assert g["tied_to"] in ("adl", "fall_risk")
+
+
+def test_compose_defaults_to_cash_when_payer_model_unset(monkeypatch):
+    """No payer_model on intake -> resolves to cash (the GTM default)."""
+    draft = _draft_with_goals([
+        {"text": "Ride 25 miles", "tied_to": "load_mgmt", "payer_mode": "cash"},
+    ])
+    fake = _stub_anthropic(monkeypatch, response_blocks=[_draft_block(draft)])
+    from agents.planner import compose
+    out = compose(
+        candidates=[{"exercise_id": "mini_squats"}],
+        signal={"decision": "hold", "reasons": [], "confidence": 0.5},
+        intake={"injury_type": "knee", "name": "P"},  # no payer_model
+        phase="subacute",
+        week=4,
+        token="t",
+    )
+    assert "Payer model (HARD constraint" in fake.last_kwargs["messages"][0]["content"]
+    assert "cash" in fake.last_kwargs["messages"][0]["content"]
+    assert out["goals"][0]["payer_mode"] == "cash"

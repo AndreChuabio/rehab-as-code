@@ -956,6 +956,56 @@ def delete_intake(token: str) -> None:
     )
 
 
+# -- Payer model (clinician-owned billing / goal-language mode) -------------
+#
+# payer_model drives BOTH payer-aware goal language (planner) and whether the
+# super-bill surfaces. It is clinician-owned — the patient never sets it. We
+# store it on the canonical intake_records.payload (the single source already
+# loaded everywhere via get_intake) rather than denormalizing onto the protocol
+# payload; the protocol-payload drift trap is exactly what leaked a stale
+# patient name ("Christian"). Default is "cash": the confirmed
+# insurance-lapse-bridge go-to-market is cash-pay first.
+
+PAYER_MODELS = ("insurance", "medicare", "cash")
+DEFAULT_PAYER_MODEL = "cash"
+
+
+def resolve_payer_model(token: str) -> str:
+    """Return the patient's payer model, defaulting to cash.
+
+    Reads intake_records.payload.payer_model. Any unset / unrecognized value
+    falls back to DEFAULT_PAYER_MODEL so callers always get a valid enum
+    member. Never raises — a missing intake just means the default.
+    """
+    if not token:
+        return DEFAULT_PAYER_MODEL
+    try:
+        intake = get_intake(token) or {}
+    except Exception:  # pragma: no cover - defensive; default beats a 500
+        return DEFAULT_PAYER_MODEL
+    model = str(intake.get("payer_model") or "").strip().lower()
+    return model if model in PAYER_MODELS else DEFAULT_PAYER_MODEL
+
+
+def set_payer_model(token: str, model: str) -> str:
+    """Set the patient's payer model (clinician-owned). Returns the stored value.
+
+    Merges payer_model into the existing intake payload. Raises ValueError on
+    an unrecognized model so the API surfaces a 400 rather than silently
+    storing a value resolve_payer_model would then ignore.
+    """
+    if not token:
+        raise ValueError("token required")
+    normalized = str(model or "").strip().lower()
+    if normalized not in PAYER_MODELS:
+        raise ValueError(
+            f"payer_model must be one of {PAYER_MODELS}, got {model!r}"
+        )
+    intake = get_intake(token) or {}
+    save_intake(token, {**intake, "payer_model": normalized})
+    return normalized
+
+
 def save_protocol_state(token: str, state: dict) -> None:
     return _pick(
         _flat_save_protocol_state, _sql_save_protocol_state, _pg_save_protocol_state,

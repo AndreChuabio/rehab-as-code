@@ -55,8 +55,15 @@ _INTAKE_REQUIRED_KEYS = (
 # Keys we accept from the chat tool. Any key outside this allowlist is
 # dropped on entry — guards against the model hallucinating a column.
 _INTAKE_ALLOWED_KEYS = frozenset(
-    _INTAKE_REQUIRED_KEYS + ("name", "age", "photo_url", "photo_findings")
+    _INTAKE_REQUIRED_KEYS
+    + ("name", "age", "photo_url", "photo_findings", "payer_model")
 )
+
+# Payer model is clinician-owned (set via the clinician toggle, defaults to
+# cash). It is accepted here only so a conversational capture that happens to
+# include it is validated rather than dropped; it is NOT a required intake key
+# and Maya does not ask for it.
+_PAYER_MODELS = ("insurance", "medicare", "cash")
 
 
 class IntakeCaptureError(RuntimeError):
@@ -100,6 +107,14 @@ def _validate_intake_fields(fields: dict[str, Any]) -> dict[str, Any]:
                 cleaned[key] = [str(v) for v in value if str(v).strip()]
             else:
                 raise IntakeCaptureError(f"{key} must be a string or array of strings")
+            continue
+        if key == "payer_model":
+            pm = str(value).strip().lower()
+            if pm not in _PAYER_MODELS:
+                raise IntakeCaptureError(
+                    "payer_model must be one of insurance, medicare, cash"
+                )
+            cleaned[key] = pm
             continue
         if key == "age":
             try:

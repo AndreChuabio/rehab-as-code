@@ -76,7 +76,26 @@ _BASE_SYSTEM_PROMPT = (
     "  4. Set session_targets.frequency_per_week and duration_min based on "
     "     phase (acute: 3x/wk 20-30min; subacute: 4x/wk 30-40min; "
     "     strength: 4-5x/wk 40-50min). Tighten when regress, loosen when progress.\n"
-    "  5. Echo the patient name verbatim from intake.\n\n"
+    "  5. Echo the patient name verbatim from intake.\n"
+    "  6. Emit 2-4 payer-aware rehab goals (see GOAL-WRITING MODE below).\n\n"
+    "GOAL-WRITING MODE (payer-aware — the patient's payer_model is given in "
+    "the user message; goal language is payer-model-dependent and getting it "
+    "wrong gets the goal DENIED or reads as nonsense):\n"
+    "  NEVER mix modes. A cash goal written in insurance/medical-necessity "
+    "language — or an insurance goal written as a personal-training goal — is "
+    "a billing error, not a style choice.\n"
+    "    - insurance / medicare: every goal MUST be measurable, time-bound, "
+    "and tied to a functional ADL or fall-risk / medical-necessity rationale "
+    "(independent ambulation, ADL performance, fall-risk reduction, return to "
+    "prior level of function). measurable_target is a concrete number "
+    "(degrees, reps, distance, seconds); tied_to is `adl` or `fall_risk`.\n"
+    "    - cash / concierge: goals are load-management / performance goals in "
+    "personal-training framing (mileage, load, pain ceiling during activity). "
+    "measurable_target is the performance milestone; tied_to is `performance` "
+    "or `load_mgmt`.\n"
+    "  Base each goal on the patient's stated intake goals, reframed into the "
+    "active mode. Set payer_mode to the patient's payer_model. Cite at least "
+    "one exercise reference path per goal.\n\n"
     "Output only via the compose_protocol tool."
 )
 
@@ -121,10 +140,59 @@ _TOOL = {
                     "required": ["name", "sets", "reps"],
                 },
             },
+            "goals": {
+                "type": "array",
+                "description": (
+                    "2-4 payer-aware rehab goals. Language MUST match the "
+                    "patient's payer_model: insurance/medicare = measurable "
+                    "medical-necessity/ADL/fall-risk; cash = load-management/"
+                    "performance. See GOAL-WRITING MODE in the system prompt."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "text": {"type": "string"},
+                        "measurable_target": {
+                            "type": "string",
+                            "description": (
+                                "Concrete number the goal is judged against "
+                                "(degrees, reps, distance, seconds, mileage)."
+                            ),
+                        },
+                        "tied_to": {
+                            "type": "string",
+                            "enum": ["adl", "fall_risk", "performance", "load_mgmt"],
+                        },
+                        "payer_mode": {
+                            "type": "string",
+                            "enum": ["insurance", "medicare", "cash"],
+                        },
+                        "references": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                        },
+                    },
+                    "required": ["text", "tied_to", "payer_mode"],
+                },
+            },
         },
         "required": ["patient", "phase", "week", "exercises"],
     },
 }
+
+
+# tied_to values that are valid for each payer mode. Insurance/Medicare goals
+# are anchored to functional/medical-necessity buckets; cash goals to
+# performance/load-management. Enforced deterministically in _normalize_goals
+# so the LLM cannot conflate the two modes (the load-bearing guardrail).
+_GOAL_TIED_TO_BY_MODE: dict[str, tuple[str, ...]] = {
+    "insurance": ("adl", "fall_risk"),
+    "medicare": ("adl", "fall_risk"),
+    "cash": ("performance", "load_mgmt"),
+}
+
+_VALID_PAYER_MODELS = ("insurance", "medicare", "cash")
+_DEFAULT_PAYER_MODEL = "cash"
 
 
 def _model() -> str:
@@ -139,12 +207,15 @@ def _build_user_prompt(
     week: int,
     concerns: list[dict[str, Any]] | None,
     body_region: str | None = None,
+    payer_model: str = _DEFAULT_PAYER_MODEL,
 ) -> str:
     parts: list[str] = [
         f"Target phase: {phase}",
         f"Target week: {week}",
         f"Body region (HARD constraint - all exercises must target this): "
         f"{body_region or 'unspecified'}",
+        f"Payer model (HARD constraint - drives goal language, do not mix "
+        f"modes): {payer_model}",
     ]
     if intake:
         parts.append("Patient intake:\n" + json.dumps(intake, indent=2, default=str))
@@ -206,7 +277,61 @@ def _validate(proposal: dict[str, Any]) -> dict[str, Any]:
     }
     if "session_targets" in proposal and proposal["session_targets"]:
         payload["session_targets"] = proposal["session_targets"]
+    # Carry the raw goals through; compose() normalizes + enforces payer-mode
+    # consistency once the resolved payer_model is in scope.
+    if proposal.get("goals"):
+        payload["goals"] = proposal["goals"]
     return payload
+
+
+def _normalize_goals(
+    goals: Any,
+    payer_model: str,
+    *,
+    token: str | None = None,
+) -> list[dict[str, Any]]:
+    """Coerce planner goals into the stored shape + enforce payer-mode consistency.
+
+    Deterministic guard against the mode-conflation BLOCKER: `payer_mode` is
+    overwritten with the resolved payer_model (the LLM's self-report is not
+    trusted), and `tied_to` is constrained to the bucket set valid for that
+    mode. A goal whose tied_to is out-of-mode is coerced to the mode's first
+    bucket and logged — it signals the planner drifted toward the wrong payer
+    framing, which the clinician should eyeball at review time.
+
+    The goal *text* language correctness is what the clinician verifies; we
+    can only deterministically enforce the structural fields here.
+    """
+    if not isinstance(goals, list):
+        return []
+    allowed = _GOAL_TIED_TO_BY_MODE.get(
+        payer_model, _GOAL_TIED_TO_BY_MODE[_DEFAULT_PAYER_MODEL]
+    )
+    out: list[dict[str, Any]] = []
+    for g in goals:
+        if not isinstance(g, dict):
+            continue
+        text = str(g.get("text") or "").strip()
+        if not text:
+            continue
+        tied = str(g.get("tied_to") or "").strip().lower()
+        if tied not in allowed:
+            logger.warning(
+                "planner goal tied_to=%r out of payer_mode=%s — coercing token=%s",
+                tied, payer_model, token,
+            )
+            tied = allowed[0]
+        refs = g.get("references")
+        if not isinstance(refs, list) or not refs:
+            refs = ["protocol-library/auto-generated.yaml"]
+        out.append({
+            "text": text,
+            "measurable_target": str(g.get("measurable_target") or "").strip(),
+            "tied_to": tied,
+            "payer_mode": payer_model,  # deterministic truth, not the LLM claim
+            "references": [str(r) for r in refs],
+        })
+    return out
 
 
 def _summarize_protocol(result: dict[str, Any]) -> dict[str, Any]:
@@ -216,11 +341,13 @@ def _summarize_protocol(result: dict[str, Any]) -> dict[str, Any]:
     if not isinstance(result, dict):
         return {"_unknown_shape": str(type(result))}
     exercises = result.get("exercises", []) or []
+    goals = result.get("goals", []) or []
     return {
         "phase": result.get("phase"),
         "week": result.get("week"),
         "body_region": result.get("body_region"),
         "n_exercises": len(exercises),
+        "n_goals": len(goals),
         "exercise_ids": [str(e.get("id", ""))[:80] for e in exercises[:12]],
     }
 
@@ -294,17 +421,25 @@ def compose(
         logger.warning("planner: body_region resolve failed: %s", exc)
         resolved_region = None
 
+    # Payer model drives goal language. Canonical source is intake (set by the
+    # clinician, defaults to cash — the insurance-lapse-bridge GTM is cash-pay
+    # first). Never denormalized onto the protocol payload; resolve it here.
+    payer_model = str((intake or {}).get("payer_model") or "").strip().lower()
+    if payer_model not in _VALID_PAYER_MODELS:
+        payer_model = _DEFAULT_PAYER_MODEL
+
     client = anthropic.Anthropic(api_key=api_key)
     prompt = _build_user_prompt(
         candidates, signal, intake, phase, week, concerns,
         body_region=resolved_region,
+        payer_model=payer_model,
     )
 
     started = time.monotonic()
     try:
         resp = client.messages.create(
             model=_model(),
-            max_tokens=2000,
+            max_tokens=2600,
             system=_BASE_SYSTEM_PROMPT,
             tools=[_TOOL],
             tool_choice={"type": "tool", "name": "compose_protocol"},
@@ -330,12 +465,23 @@ def compose(
         ):
             payload = _validate(dict(block.input or {}))
             _validate_region(payload, resolved_region, token=token)
+            # Normalize goals + enforce payer-mode consistency now that the
+            # resolved payer_model is in scope. Drop the key if no goals so
+            # downstream readers can treat absence uniformly.
+            normalized_goals = _normalize_goals(
+                payload.get("goals"), payer_model, token=token
+            )
+            if normalized_goals:
+                payload["goals"] = normalized_goals
+            else:
+                payload.pop("goals", None)
             logger.info(
                 "planner ok in %dms in_tokens=%s out_tokens=%s "
-                "n_exercises=%d retry=%s body_region=%s token=%s",
+                "n_exercises=%d n_goals=%d payer=%s retry=%s body_region=%s token=%s",
                 elapsed_ms, in_tokens, out_tokens,
                 len(payload.get("exercises") or []),
-                bool(concerns), resolved_region, token,
+                len(payload.get("goals") or []),
+                payer_model, bool(concerns), resolved_region, token,
             )
             return payload
 
