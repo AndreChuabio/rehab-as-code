@@ -1121,6 +1121,23 @@ def get_my_superbill(user_id: str = Depends(current_user_id)):
     return superbill.generate_draft(user_id)
 
 
+@app.get("/clinician/patient/{token}/form-feedback")
+def get_clinician_patient_form_feedback(
+    token: str,
+    user_id: str = Depends(require_clinician_id),  # noqa: ARG001
+):
+    """Aggregated camera form-feedback for one patient (clinician view).
+
+    Rolls up the per-rep form warnings already persisted on completed pose
+    sessions into a per-exercise breakdown so the PT can see where the
+    patient's form is breaking down. A 2D-webcam trend signal, not a
+    goniometric measure — see form_feedback.py. Clinician/admin only.
+    """
+    import form_feedback
+
+    return form_feedback.summarize_form(token)
+
+
 @app.get("/protocols/{protocol_id}")
 def get_protocol_detail(
     protocol_id: str,
