@@ -65,3 +65,8 @@ users/
 .vercel
 .env*.local
 .mcp.json
+
+# Clinician/doctor feedback session recordings + transcripts (may contain PHI)
+doctor_*Feedback*
+*.mp4
+supabase/.temp/
