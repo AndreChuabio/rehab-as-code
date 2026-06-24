@@ -70,3 +70,4 @@ users/
 doctor_*Feedback*
 *.mp4
 supabase/.temp/
+.env*
