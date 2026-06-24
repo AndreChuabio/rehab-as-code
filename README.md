@@ -23,6 +23,15 @@ production: deployed on Vercel, backed by Supabase Postgres + Supabase
 Auth (HS256 / ES256 JWT, magic-link or email+password sign-in). Live at
 https://rehab-as-code-five.vercel.app.
 
+The 2026-06-24 sprint made the video coach a real two-way agent. The Tavus
+avatar now runs Coach Maya's own brain via a **bring-your-own-LLM** proxy
+(`/tavus/llm/chat/completions`) instead of a generic hosted model; it counts
+the patient's real calf-raise reps live (MediaPipe pose on the call's camera
+→ the avatar speaks each *detected* rep via the Tavus echo interaction); and
+it wires real wearable data through **Junction** (the Vital rebrand) behind
+`get_health_data`, with the existing mock as the documented fallback. All
+three shipped to production. See `docs/ARCHITECTURE.md` for the system shape.
+
 ## How it works
 
 ```
@@ -190,11 +199,30 @@ asks to restart their intake.
 - **Form-check (in-browser)**: MediaPipe Pose Landmarker + custom rep
   counter; per-set summaries POST to `/pose/session` (one row per set).
   Guided exercise mode (PR-J) speaks set / rep cues and real-time form
-  corrections via the Web Speech API
-- **Video coach (Tavus)**: Tavus CVI iframe with `Depends(current_user_id)`
-  on `/start-session`, sessions persisted in `tavus_sessions` table
-- **Wearables**: Apple Health via iOS Shortcut → `/health-sync`, with Open
-  Wearables as an optional read-only source
+  corrections via the Web Speech API. Also runs **live inside the Tavus
+  video call** (fed the call's local camera track) so the avatar coaches
+  real reps — see "Video coach" below
+- **Video coach (Tavus CVI, bring-your-own-LLM)**: `/start-session`
+  (`Depends(current_user_id)`) creates a conversation against a custom
+  persona and persists to `tavus_sessions` (now with a per-conversation
+  `session_ref`). The persona runs in **BYO-LLM mode** — its LLM layer
+  points at our OpenAI-compatible proxy `backend/api/tavus_proxy.py`
+  (`POST /tavus/llm/chat/completions`, shared-secret auth) which drives the
+  **same `coach_chat` brain as the text chat** (no duplication, same tools +
+  clinician-review safety loop). Patient identity on a static persona is
+  recovered via the opaque `session_ref` (or Tavus `conversation_id`) and
+  stripped before the model. The call embeds via the **Daily JS SDK** so the
+  client can send Tavus interactions. **Live rep-counting**: during a
+  calf-raise set, `pose.js` runs MediaPipe on the call's camera and, on each
+  *detected* rep, fires a `conversation.echo` so Maya speaks the count + a
+  form cue — counting is gated strictly on real movement
+- **Wearables**: real multi-device data via **Junction** (the Vital rebrand;
+  300+ devices — Oura, Garmin, Fitbit, Withings, Whoop…) behind the single
+  `get_health_data` seam (`backend/junction_client.py` + `backend/api/junction.py`
+  + the `junction_connections` table); **fail-opens to the mock defaults**
+  when not connected so the pipeline + avatar never break. Apple Health via
+  iOS Shortcut → `/health-sync` and Open Wearables remain as additional
+  sources
 - **Frontend**: Vanilla JS, no build step. Clinical Twilight palette
   (cool navy-slate dark mode, teal CTA, sage success, warm tan AI-accent).
   See `frontend/DESIGN_SYSTEM.md`.
@@ -267,8 +295,13 @@ rehab-as-code/
                                    via JWKS) → current_user_id, is_clinician
     shortcut_template.py           iOS Shortcut binary plist generator
     calendar_fetch.py              Google Calendar
-    context_builder.py             Tavus persona context
-    tavus_client.py                Tavus CVI session client
+    context_builder.py             Tavus persona context (live per-patient block)
+    tavus_client.py                Tavus CVI conversation client (+ session_ref)
+    patient_context.py             per-patient factories shared by /chat + the proxy
+    api/tavus_proxy.py             BYO-LLM proxy: /tavus/llm -> coach_chat (avatar brain)
+    api/junction.py                Junction wearable connect / refresh / status routes
+    junction_client.py             Junction (Vital) API client + health-schema mapping
+    junction_repo.py               read/write helpers for junction_connections
   protocols/
     protocol.yaml                  patient's current program (starts empty)
     protocol-library/              evidence-based progressions (read-only)
@@ -293,9 +326,9 @@ rehab-as-code/
     index.py                       Vercel entrypoint (re-exports backend/main.py)
   supabase/
     migrations/                    SQL files auto-applied on push to main via
-                                   Supabase GitHub integration. 10 applied as
-                                   of 2026-05-07 (init_user_store →
-                                   tavus_sessions)
+                                   Supabase GitHub integration. Latest (2026-06-24):
+                                   tavus_sessions.session_ref + junction_connections
+                                   (RLS: patient-self + clinician-read)
   vercel.json                      Vercel build/route config
   requirements.txt                 Vercel installs from THIS file (root)
   backend/requirements.txt         local dev installs from this one — keep in sync
@@ -320,6 +353,12 @@ cp .env.example .env
 #   DATABASE_URL=postgresql://...           # transaction pooler in prod
 #   PROTOCOL_SOURCE=supabase
 #   STORAGE_BACKEND=sqlite                  # or postgres in prod
+# Video coach (Tavus CVI + BYO-LLM avatar):
+#   TAVUS_API_KEY=...  TAVUS_REPLICA_ID=...  TAVUS_PERSONA_ID=...
+#   TAVUS_PROXY_SECRET=...                   # shared secret == persona llm.api_key
+# Real wearables (Junction / Vital):
+#   VITAL_API_KEY=sk_us_...  JUNCTION_ENV=sandbox  JUNCTION_REGION=us
+#   JUNCTION_REDIRECT_URL=https://<your-app>/
 
 # 3. Boot
 python -m uvicorn main:app --reload --app-dir backend --port 8000
@@ -371,13 +410,44 @@ Production: https://rehab-as-code-five.vercel.app
 | GET | `/sessions/last7?token=...` | Auth-gated (clinician). Adherence panel data |
 | POST | `/pose/session` | Auth-gated. One row per set into `checkins` and (if attached to a planned session) updates `sessions` |
 | POST | `/checkins` | Auth-gated. Manual narrative check-ins (auto-fired card after pose session) |
-| POST | `/start-session` | Auth-gated. Create Tavus CVI session with Coach Maya persona; persists to `tavus_sessions` |
-| GET | `/tavus/sessions` | Auth-gated. Patient's Tavus session history |
+| POST | `/start-session` | Auth-gated. Create a Tavus CVI conversation (custom BYO-LLM persona); mints a `session_ref`, persists to `tavus_sessions` |
+| GET | `/tavus/sessions/recent` | Auth-gated. Patient's recent Tavus sessions (powers "Continue last session") |
+| POST | `/tavus/sessions/{id}/end` | Auth-gated. End an active Tavus session |
+| POST | `/tavus/llm/chat/completions` | **Shared-secret, not patient JWT.** OpenAI-compatible SSE proxy that Tavus CVI calls as its custom LLM; recovers the patient (session_ref / conversation_id) and streams Coach Maya's response |
+| POST | `/api/junction/link` | Auth-gated. Create-or-get the patient's Junction user + return a hosted-Link URL |
+| POST | `/api/junction/refresh` | Auth-gated. Pull + cache latest sleep / HRV / recovery from Junction |
+| GET | `/api/junction/status` | Auth-gated. Wearable connection state for the panel |
+| POST | `/api/junction/demo-connect` | Auth-gated, **sandbox only**. Connect a synthetic device to test without a real wearable |
 | POST | `/health-sync` | Ingest Apple Watch metrics from iOS Shortcut |
 | POST | `/connect/apple-health` | Generate per-user token + onboard URL (QR flow) |
 | GET | `/onboard/{token}` | Mobile HTML onboarding page |
 | GET | `/shortcut/{token}` | Serve `.shortcut` file for iOS import |
 | ~~POST `/agent/invoke`~~ ~~GET `/agent/stream/{id}`~~ ~~POST `/pr/apply`~~ ~~POST `/demo/reset`~~ ~~POST `/triggers/*`~~ | removed 2026-05-06 | Replaced by `/chat` + multi-agent pipeline + `/protocols/*/approve` |
+
+## Wearables (Junction / Vital)
+
+`backend/junction_client.py` + `backend/api/junction.py` integrate
+[Junction](https://docs.junction.com) (the rebrand of Vital) as the real
+wearable source — one API for 300+ devices (Oura, Garmin, Fitbit, Withings,
+Whoop…). It slots in behind the single `get_health_data(token)` seam and
+**fail-opens to the mock defaults** on not-connected / stale / error, so the
+clinical pipeline and the avatar always have data. Flow: the patient clicks
+"Connect health data" → `POST /api/junction/link` → Junction's hosted Link →
+on return, `POST /api/junction/refresh` pulls + caches the mapped metrics into
+the `junction_connections` table and the panel badge flips to "Live".
+
+```bash
+VITAL_API_KEY=sk_us_...          # x-vital-api-key, server-side only, never client
+JUNCTION_ENV=sandbox             # sandbox | production
+JUNCTION_REGION=us               # us | eu  -> https://api.{sandbox.}{region}.junction.com
+JUNCTION_REDIRECT_URL=https://rehab-as-code-five.vercel.app/
+```
+
+Sandbox supports **synthetic-device** connections for testing without a real
+wearable (`POST /api/junction/demo-connect`). Notes: Apple Health is
+iOS-SDK-only (not in the web Link flow); a production key + real patient PHI
+require Junction's **BAA** (sandbox/test patients only until then). On success
+`GET /health-data` returns `source: junction` and `isLive: true`.
 
 ## Open Wearables (optional read-only source)
 
