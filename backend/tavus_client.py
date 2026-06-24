@@ -31,21 +31,49 @@ EXPIRES_BUFFER_SECONDS = 60
 
 SESSION_RULES = """
 --- SESSION RULES ---
-Objectives (follow strictly in this exact order):
-1. Greetings + review relevant yesterday's metrics + health trends -> provide overall advice.
-2. Face / Tongue reading based on traditional Chinese medicine -> provide nutritional advice based on observations.
-3. Goal Setting: Look at the user's calendar and ask them about their goals for the day.
-4. Guided affirmations + visualizations relevant to their stated goals -> motivate them.
-5. Quick relaxation exercise (maximum 20 seconds) - reference the salamander exercise or similar quick resets.
-6. End with a relevant motivational quote tailored to the user's day, then wish them a great day and close the session.
+You are Coach Maya, a physical-therapy coach running a short spoken check-in.
+This is a coaching conversation, not a therapy session and not a diagnosis.
+You cover knee and ankle rehab only; anything else is out of scope.
 
-Guardrails:
-- CRITICAL: Never suggest lengthy box breathing or long meditations. Only use the 20-second quick relaxation exercise.
-- Keep the entire session under 5 minutes. If it has gone on for 4+ minutes, wrap up immediately.
-- Keep all responses to 2-3 sentences max unless actively guiding an exercise or visualization.
-- Never give medical diagnoses, prescribe medication, or present health data as medical advice.
-- Never discuss topics unrelated to wellness, health, or the user's day ahead.
-- If the user expresses a mental health crisis or emergency, gently refer them to a professional and end the session.
+Tone and pacing:
+- Warm, precise, evidence-cited. Speak like a careful clinician, not a chatbot.
+- Keep replies to 2-3 sentences unless actively guiding a hold or a count.
+- The whole check-in is capped at 5 minutes. At 4 or more minutes, wrap up.
+- When guiding holds or counts, say each number slowly with a full second pause.
+
+Clinical doctrine (apply exactly; do not assume every patient is post-op):
+- Pain ceilings. For post-operative patients: weeks 1-4 keep pain at or below
+  3 out of 10, weeks 5-8 at or below 4 out of 10, week 9 and later at or below
+  5 out of 10. If the patient is not post-op, use the lower end as a safe default.
+- Range of motion. Never tell the patient to decrease a range-of-motion target
+  unless they report pain at or near that range of motion.
+- Load. Never prescribe load above the previous week's regression threshold.
+- Library only. Never invent or name an exercise that is not in the knee or
+  ankle library. If the patient asks for an off-library exercise, say you will
+  flag it for the human therapist rather than making one up.
+- Wearables. Reference HRV, sleep, or recovery numbers only when they justify a
+  recommendation. HRV up about 5ms over the 7-day average clears one exercise to
+  progress; HRV down about 8ms means hold the protocol. Sleep score below 70
+  averaged over 3 or more days means drop intensity 20 percent. Recovery score
+  below 60 means hold. With fewer than 3 days of wearable data in the last week,
+  default to holding.
+
+Symptoms and the trust loop:
+- If the patient reports a symptom, acknowledge it and name the regression you
+  would suggest from the library. Tell them a draft revision will be queued for
+  their clinician to review on the clinician dashboard. You do NOT modify the
+  protocol yourself. There is no automated agent and no code change; a licensed
+  clinician approves any change before it goes active.
+- If a symptom looks like a red flag or the patient describes a crisis or
+  emergency, refer them to a professional and wrap up the call.
+
+Hard guardrails:
+- Never diagnose. Never prescribe medication. Never present wearable data as
+  medical advice.
+- Do not restart or redo intake during this call; if the patient wants to redo
+  intake, tell them to finish it in the app.
+- Stay on knee or ankle rehab, wearables, and today's session. Decline unrelated
+  topics briefly and steer back.
 --- END SESSION RULES ---"""
 
 
@@ -96,8 +124,17 @@ def create_conversation(
     system_prompt: str,
     greeting: str,
     user_name: str = "there",
+    session_ref: str | None = None,
 ) -> dict:
     """Start a Tavus CVI session with injected coaching context.
+
+    `session_ref` is an opaque, single-conversation-scoped reference minted by
+    the caller (main.py /start-session). When present it is appended as a
+    machine-readable sentinel line to conversational_context so the BYO-LLM
+    proxy can recover which patient a custom-LLM call belongs to. It is never
+    spoken: the proxy strips the whole system message that carries it before
+    any model call. The value is not logged at INFO; only a present/absent
+    bool is.
 
     Returns:
         {
@@ -121,12 +158,19 @@ def create_conversation(
     }
 
     # Tavus CVI payload — conversational_context injects our coach-specific
-    # system prompt; custom_greeting is spoken by the avatar on join.
+    # system prompt; custom_greeting is spoken by the avatar on join. When a
+    # session_ref is supplied we append a sentinel line the BYO-LLM proxy can
+    # regex out to map a custom-LLM call back to the patient. The sentinel is
+    # never read aloud: the proxy discards the whole system message it rides in.
+    conversational_context = system_prompt + "\n\n" + SESSION_RULES
+    if session_ref:
+        conversational_context += f"\n\n[RAC_SESSION_REF]: {session_ref}\n"
+
     payload = {
         "replica_id": replica_id,
         "persona_id": persona_id,
         "conversation_name": f"Coach Maya session ({user_name})",
-        "conversational_context": system_prompt + "\n\n" + SESSION_RULES,
+        "conversational_context": conversational_context,
         "custom_greeting": greeting,
         "properties": {
             "max_call_duration": MAX_SESSION_MINUTES * 60,
@@ -142,7 +186,10 @@ def create_conversation(
     # PHI hygiene: log the call but NOT the patient's name, system prompt,
     # or greeting text. replica_id + persona_id are config IDs, not PHI, but
     # we keep the log lean.
-    logger.info("tavus.create_conversation start replica=%s", replica_id)
+    logger.info(
+        "tavus.create_conversation start replica=%s session_ref_present=%s",
+        replica_id, bool(session_ref),
+    )
 
     try:
         response = requests.post(

@@ -23,7 +23,7 @@ def test_chat_trigger_executor_writes_pending_protocol(
 ):
     """The factory-built executor should call the drafter with the JWT user
     and return the pending_protocol_id + summary verbatim."""
-    import main
+    import patient_context
 
     captured: dict = {}
 
@@ -40,15 +40,16 @@ def test_chat_trigger_executor_writes_pending_protocol(
         }
 
     monkeypatch.setattr(
-        main.chat_protocol_drafter, "draft_and_save_pending", _fake_drafter,
+        patient_context.chat_protocol_drafter, "draft_and_save_pending", _fake_drafter,
     )
     # Avoid hitting GitHub for the prior-protocol read; the executor only
     # needs *something* serializable to forward.
     monkeypatch.setattr(
-        main, "fetch_protocol_for_user", lambda _uid: {"patient": "Andre", "week": 3},
+        patient_context, "fetch_protocol_for_user",
+        lambda _uid: {"patient": "Andre", "week": 3},
     )
 
-    executor = main._chat_trigger_executor_factory(fake_user_id)
+    executor = patient_context._chat_trigger_executor_factory(fake_user_id)
     result = asyncio.run(executor(
         "symptom_adjustment",
         {"symptom_text": "knee felt tweaky on single-leg squats"},
@@ -74,18 +75,18 @@ def test_chat_trigger_executor_propagates_drafter_failure(
 ):
     """Drafter raises -> executor raises. coach_chat catches and renders an
     error tool_result; nothing pretends success or silently swaps in a stub."""
-    import main
+    import patient_context
     from chat_protocol_drafter import ProtocolDraftError
 
     def _boom(token, flow, payload, prior_protocol):
         raise ProtocolDraftError("anthropic 503 from upstream")
 
     monkeypatch.setattr(
-        main.chat_protocol_drafter, "draft_and_save_pending", _boom,
+        patient_context.chat_protocol_drafter, "draft_and_save_pending", _boom,
     )
-    monkeypatch.setattr(main, "fetch_protocol_for_user", lambda _uid: None)
+    monkeypatch.setattr(patient_context, "fetch_protocol_for_user", lambda _uid: None)
 
-    executor = main._chat_trigger_executor_factory(fake_user_id)
+    executor = patient_context._chat_trigger_executor_factory(fake_user_id)
 
     import pytest
     with pytest.raises(ProtocolDraftError) as exc_info:

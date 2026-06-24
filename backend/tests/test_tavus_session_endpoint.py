@@ -44,7 +44,7 @@ def _stub_context(monkeypatch):
     """
     monkeypatch.setattr(
         "main.get_health_data",
-        lambda: {
+        lambda user_token=None: {
             "sleep_score": 80,
             "hrv_ms": 60,
             "recovery_score": 75,
@@ -66,7 +66,7 @@ def _stub_context(monkeypatch):
     )
     monkeypatch.setattr(
         "main.build_system_prompt",
-        lambda health, events, protocol=None: {
+        lambda health, events, protocol=None, display_name=None: {
             "system_prompt": "stub system prompt",
             "greeting": "Hi from Maya.",
             "recommendations": [
@@ -84,10 +84,11 @@ def _stub_context(monkeypatch):
 def _stub_tavus_create(monkeypatch, *, replica_id="rep_1", persona_id="per_1"):
     captured: dict = {}
 
-    def _create(system_prompt, greeting, user_name="there"):
+    def _create(system_prompt, greeting, user_name="there", session_ref=None):
         captured["system_prompt"] = system_prompt
         captured["greeting"] = greeting
         captured["user_name"] = user_name
+        captured["session_ref"] = session_ref
         return {
             "conversation_url": "https://tavus.daily.co/abc123",
             "conversation_id": "conv_abc123",
@@ -120,7 +121,7 @@ class _FakeTavusRepo:
         # endpoint code does `tavus_repo.TavusRepoError`.
 
     def insert_active(self, *, token, conversation_id, conversation_url,
-                      replica_id, persona_id, expires_at):
+                      replica_id, persona_id, expires_at, session_ref=None):
         row = {
             "id": f"tavus-{len(self.rows) + 1}",
             "token": token,
@@ -132,9 +133,22 @@ class _FakeTavusRepo:
             "created_at": datetime.now(timezone.utc).isoformat(),
             "expires_at": expires_at,
             "ended_at": None,
+            "session_ref": session_ref,
         }
         self.rows.append(row)
         return row
+
+    def get_token_by_session_ref(self, session_ref):
+        for r in sorted(self.rows, key=lambda x: x["created_at"], reverse=True):
+            if r.get("session_ref") == session_ref and r["status"] == "active":
+                return r["token"]
+        return None
+
+    def get_token_by_conversation_id(self, conversation_id):
+        for r in sorted(self.rows, key=lambda x: x["created_at"], reverse=True):
+            if r["conversation_id"] == conversation_id and r["status"] == "active":
+                return r["token"]
+        return None
 
     def list_recent(self, token, *, limit=5):
         own = [r for r in self.rows if r["token"] == token]
@@ -186,6 +200,11 @@ def test_start_session_happy_path(authed_client, fake_user_id, fake_tavus_repo, 
 
     # Identity is the JWT-derived display name, not anything client-provided.
     assert captured["user_name"] == "Andre"
+
+    # A non-empty opaque session_ref is minted, embedded, and persisted so the
+    # BYO-LLM proxy can recover this patient.
+    assert captured["session_ref"], "session_ref should be minted and embedded"
+    assert fake_tavus_repo.rows[0]["session_ref"] == captured["session_ref"]
 
     # Response shape: includes the conversation handles + a tavus_session_id
     # pointing at the persisted row.

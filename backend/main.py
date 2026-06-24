@@ -30,6 +30,7 @@ import io
 import json
 import logging
 import os
+import secrets
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
@@ -51,7 +52,6 @@ from protocol_loader import (
     fetch_protocol_for_user,
     PROTOCOL_REPO,
 )
-import chat_protocol_drafter
 import user_store
 from user_store import (
     create_token,
@@ -72,6 +72,11 @@ from auth import (
     require_clinician_id,
 )
 from observability import attach_patient, clear_run_context, set_run_context
+from patient_context import (
+    _chat_trigger_executor_factory,
+    _clinician_attention_writer_factory,
+    _last_pose_metrics,
+)
 import coach_chat
 import qrcode
 import qrcode.image.svg
@@ -110,6 +115,11 @@ async def observability_request_context(request, call_next):
 # require_admin_id; mounted under /admin/*.
 from api.admin import router as admin_router  # noqa: E402
 app.include_router(admin_router)
+
+# BYO-LLM Tavus proxy router. OpenAI-compatible SSE endpoint Tavus CVI calls
+# as a custom LLM; shared-secret auth, mounted under /tavus/llm/*.
+from api.tavus_proxy import router as tavus_proxy_router  # noqa: E402
+app.include_router(tavus_proxy_router)
 
 CONTEXT_FILE = Path(__file__).parent.parent / "context.json"
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
@@ -305,11 +315,23 @@ def start_session(
     """
     ensure_user(user_id)
 
+    # Resolve the patient's display name once, fresh from Supabase. Used for
+    # both the injected conversational_context and the Tavus session name.
+    # Never read from protocol.patient (drifts; once leaked "Christian").
+    display_name = user_store.get_display_name(user_id)
+
+    # Mint an opaque, single-conversation-scoped reference BEFORE creating the
+    # conversation so it can be embedded in conversational_context. The BYO-LLM
+    # proxy recovers the patient from it (or from conversation_id). It is not
+    # derived from the patient token and is never reused across conversations.
+    session_ref = secrets.token_urlsafe(32)
+
     try:
-        health = get_health_data()
+        health = get_health_data(user_token=user_id)
         events = get_calendar_events()
         protocol_payload = fetch_protocol_for_user(user_id) or fetch_protocol()
-        context = build_system_prompt(health, events, protocol=protocol_payload)
+        context = build_system_prompt(
+            health, events, protocol=protocol_payload, display_name=display_name)
     except Exception as exc:
         logger.exception("start_session context_build_failed token=%s", user_id)
         raise HTTPException(status_code=500, detail=f"context build failed: {exc}")
@@ -318,7 +340,8 @@ def start_session(
         conversation = create_conversation(
             system_prompt=context["system_prompt"],
             greeting=context["greeting"],
-            user_name=user_store.get_display_name(user_id) or "there",
+            user_name=display_name or "there",
+            session_ref=session_ref,
         )
     except TavusConfigError as exc:
         # Missing env vars - feature is not provisioned. Surface a 503 so the
@@ -350,6 +373,7 @@ def start_session(
             replica_id=conversation.get("replica_id"),
             persona_id=conversation.get("persona_id"),
             expires_at=conversation.get("expires_at"),
+            session_ref=session_ref,
         )
         tavus_session_id = row["id"]
         logger.info(
@@ -1786,121 +1810,10 @@ class ChatRequest(BaseModel):
     history: list[ChatTurn] = []
 
 
-def _last_pose_metrics(user_id: str) -> dict | None:
-    """Return the most-recent completed session's pose_metrics, or None.
-
-    Used as Phase F context for the symptom classifier so it can correlate
-    a complaint ("knee buckled on lunges") with the most recent observed
-    form quality. Best-effort: any DB error returns None; we don't want a
-    failed pose-metrics lookup to block the chat path.
-    """
-    try:
-        import session_repo as _sr
-        rows = _sr.list_recent(token=user_id, days=2)
-    except Exception as exc:
-        logger.info("last_pose_metrics lookup failed user=%s: %s", user_id, exc)
-        return None
-    completed = [
-        r for r in rows
-        if r.get("status") == "completed" and r.get("pose_metrics")
-    ]
-    if not completed:
-        return None
-    return completed[-1].get("pose_metrics")
-
-
-def _clinician_attention_writer_factory(user_id: str):
-    """Build a coach_chat.ClinicianAttentionWriter bound to this patient.
-
-    On a clinician-attention symptom verdict, clone the patient's current
-    active protocol payload (if any) and persist a needs_clinician_review
-    row with safety_concerns set to the classifier output. The clinician
-    dashboard already shows these rows at the top of the queue with a red
-    banner (see PR-C). Returns the new pending row id.
-
-    Cloning rather than synthesizing a fresh payload means the diff view
-    on /clinician renders "no exercise change, but this needs your eyes" -
-    which is the right framing: the agent isn't proposing a regression,
-    it's escalating a red flag.
-    """
-    async def _writer(triage: dict, message_text: str) -> str:
-        active = fetch_protocol_for_user(user_id) or {}
-        # Drop the in-memory _recent_set bag so it doesn't leak into the
-        # persisted payload (it's a runtime overlay, not protocol state).
-        payload = {k: v for k, v in active.items() if not k.startswith("_")}
-        if not payload:
-            payload = {
-                "patient": "unknown",
-                "phase": "rehab",
-                "week": 0,
-                "exercises": [],
-                "_synthetic": True,
-            }
-        concerns = [{
-            "check": "symptom-classifier",
-            "severity": "high",
-            "detail": (
-                f"Patient message: {message_text}\n\n"
-                f"Classifier reasoning: {triage.get('reasoning', '')}"
-            ),
-        }]
-        loop = asyncio.get_running_loop()
-        from protocol_repo import save_pending
-        pending_id = await loop.run_in_executor(
-            None,
-            lambda: save_pending(
-                user_id,
-                payload,
-                created_by_agent="symptom_classifier",
-                status="needs_clinician_review",
-                safety_concerns=concerns,
-            ),
-        )
-        # Log only the id, severity, and that we wrote — never the message.
-        logger.info(
-            "clinician_attention row written user=%s pending_id=%s",
-            user_id, pending_id,
-        )
-        return pending_id
-
-    return _writer
-
-
-def _chat_trigger_executor_factory(user_id: str):
-    """Bind a chat-tool trigger executor to the authenticated patient.
-
-    The executor signature `(flow, payload) -> dict` matches what
-    coach_chat.chat_stream expects. We close over `user_id` here so the
-    drafter row is attributed to the JWT-derived patient (never client-
-    provided), mirroring the auth boundary used by /protocols/*/approve.
-
-    Each fire_*_trigger ultimately runs chat_protocol_drafter.draft_and_save_pending,
-    which writes a `pending_review` row to the `protocols` table. Returns
-    {pending_protocol_id, summary, phase, week, flow} on success; raises on
-    failure so coach_chat._dispatch_tool can render an error tool_result.
-    """
-    async def _executor(flow: str, payload: dict) -> dict:
-        prior_protocol = fetch_protocol_for_user(user_id) or None
-        # draft_and_save_pending is sync (blocks on Anthropic + psycopg). Run
-        # in the default executor so the SSE stream stays responsive.
-        loop = asyncio.get_running_loop()
-        result = await loop.run_in_executor(
-            None,
-            chat_protocol_drafter.draft_and_save_pending,
-            user_id,
-            flow,
-            payload,
-            prior_protocol,
-        )
-        return {
-            "pending_protocol_id": result["pending_protocol_id"],
-            "summary": result["summary"],
-            "phase": result.get("phase"),
-            "week": result.get("week"),
-            "flow": flow,
-        }
-
-    return _executor
+# _last_pose_metrics / _clinician_attention_writer_factory /
+# _chat_trigger_executor_factory now live in backend/patient_context.py so the
+# BYO-LLM Tavus proxy (api/tavus_proxy.py) can reuse them without importing
+# main.py (circular import). They are imported at the top of this module.
 
 
 @app.post("/chat")

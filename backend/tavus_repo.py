@@ -65,8 +65,14 @@ def insert_active(
     replica_id: str | None,
     persona_id: str | None,
     expires_at: str | None,
+    session_ref: str | None = None,
 ) -> dict[str, Any]:
-    """Insert a new tavus_sessions row in `active` state. Returns the row."""
+    """Insert a new tavus_sessions row in `active` state. Returns the row.
+
+    `session_ref` is the opaque per-conversation reference the BYO-LLM proxy
+    uses to recover this patient; it is persisted NULLable (legacy rows and
+    callers that don't mint one stay valid).
+    """
     if not token or not conversation_id:
         raise TavusRepoError("token and conversation_id are required")
 
@@ -74,15 +80,61 @@ def insert_active(
         cur.execute(
             "INSERT INTO tavus_sessions "
             "(token, conversation_id, conversation_url, replica_id, persona_id, "
-            " status, expires_at) "
-            "VALUES (%s, %s, %s, %s, %s, 'active', %s) "
+            " status, expires_at, session_ref) "
+            "VALUES (%s, %s, %s, %s, %s, 'active', %s, %s) "
             "RETURNING id, token, conversation_id, conversation_url, "
-            " replica_id, persona_id, status, created_at, expires_at, ended_at",
-            (token, conversation_id, conversation_url, replica_id, persona_id, expires_at),
+            " replica_id, persona_id, status, created_at, expires_at, ended_at, "
+            " session_ref",
+            (token, conversation_id, conversation_url, replica_id, persona_id,
+             expires_at, session_ref),
         )
         row = cur.fetchone()
         c.commit()
     return _serialize(row)
+
+
+def get_token_by_session_ref(session_ref: str) -> str | None:
+    """Return the patient token for an ACTIVE row matching session_ref.
+
+    Used by the BYO-LLM proxy to map a custom-LLM call back to its patient.
+    Returns None when no active row matches. Raises TavusRepoError on a
+    missing DATABASE_URL (consistent with the other readers).
+    """
+    if not session_ref:
+        return None
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            "SELECT token FROM tavus_sessions "
+            "WHERE session_ref = %s AND status = 'active' "
+            "ORDER BY created_at DESC LIMIT 1",
+            (session_ref,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    return row["token"] if isinstance(row, dict) else row[0]
+
+
+def get_token_by_conversation_id(conversation_id: str) -> str | None:
+    """Return the patient token for an ACTIVE row matching conversation_id.
+
+    Preferred proxy lookup when Tavus forwards the conversation_id to the
+    custom-LLM call. Returns None when no active row matches. Raises
+    TavusRepoError on a missing DATABASE_URL.
+    """
+    if not conversation_id:
+        return None
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            "SELECT token FROM tavus_sessions "
+            "WHERE conversation_id = %s AND status = 'active' "
+            "ORDER BY created_at DESC LIMIT 1",
+            (conversation_id,),
+        )
+        row = cur.fetchone()
+    if not row:
+        return None
+    return row["token"] if isinstance(row, dict) else row[0]
 
 
 def list_recent(token: str, *, limit: int = 5) -> list[dict[str, Any]]:
