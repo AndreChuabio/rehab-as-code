@@ -1342,17 +1342,72 @@ function renderProtocol({ protocol }) {
 // ---------------------------------------------------------------------------
 
 let activeTavusSessionId = null;
+// Daily callObject driving the Tavus conversation (replaces the raw iframe so
+// we can sendAppMessage interactions + read the local camera track). null when
+// no live call is up. tavusConvId is the Tavus conversation id required by the
+// echo/interrupt payloads; null outside a live call so echo helpers no-op.
+let tavusCall   = null;
+let tavusConvId = null;
+let tavusMuted  = false;
+let tavusCamOff = false;
+// During a live call, Maya is the only voice — the local Web-Speech backstop
+// is gated off so it does not double-speak over her echo. Flip to true only
+// for debugging a silent echo.
+const LOCAL_TTS_IN_CALL = false;
 
 function _getVideoEls() {
   return {
     pre: document.getElementById("preSession"),
     loading: document.getElementById("loadingSession"),
     active: document.getElementById("activeSession"),
-    frame: document.getElementById("tavusFrame"),
+    video: document.getElementById("tavusVideo"),
     startBtn: document.getElementById("startBtn"),
     continueBtn: document.getElementById("continueBtn"),
     endBtn: document.getElementById("endBtn"),
   };
+}
+
+// Tear down any existing call object. Safe to call repeatedly; guards against
+// duplicate call objects / mic conflicts on a start-then-continue without end.
+async function _destroyTavusCall() {
+  if (!tavusCall) return;
+  // Tear down any running in-call set first so the pose camera (which consumes
+  // the call's local track) is released before the call is destroyed.
+  try {
+    if (_inCallSetBtn && _inCallSetBtn.dataset.state === "on") {
+      // Log whatever reps were detected before the call ended, then stop pose.
+      try { _activeGuidedPartialPoster?.(); } catch (_) {}
+      window.PoseFormCheck?.stop?.();
+    }
+  } catch (_) {}
+  _activeGuidedPartialPoster = null;
+  _resetInCallSetUi();
+  try { await tavusCall.leave(); } catch (_) {}
+  try { tavusCall.destroy(); } catch (_) {}
+  tavusCall   = null;
+  tavusConvId = null;
+  tavusMuted  = false;
+  tavusCamOff = false;
+  const v = document.getElementById("tavusVideo");
+  const a = document.getElementById("tavusAudio");
+  if (v) v.srcObject = null;
+  if (a) a.srcObject = null;
+}
+
+// Return a MediaStream wrapping the Daily call's local camera track so pose.js
+// can consume the SAME physical camera the call uses (no second getUserMedia).
+// Returns null when the call/track is not yet available; callers fall back to
+// pose.js opening its own camera (opts.stream omitted).
+function _tavusLocalStream() {
+  if (!tavusCall) return null;
+  try {
+    const vt = tavusCall.participants()?.local?.tracks?.video;
+    const mst = vt?.persistentTrack || vt?.track;
+    if (mst) return new MediaStream([mst]);
+  } catch (e) {
+    console.warn("tavus local track unavailable", e);
+  }
+  return null;
 }
 
 function _showVideoLoading() {
@@ -1371,15 +1426,275 @@ function _showVideoPreSession() {
   els.pre.style.display = "flex";
   els.startBtn.disabled = false;
   els.continueBtn.disabled = false;
-  if (els.frame) els.frame.src = "about:blank";
+  if (els.video) els.video.srcObject = null;
 }
 
-function _showVideoActive(conversationUrl) {
+// Render the Tavus conversation via a Daily callObject (not a raw iframe) so
+// the client can sendAppMessage interactions (the per-rep echo) and read the
+// local camera track for pose.js. Maya's remote video is piped into the
+// <video id="tavusVideo"> on her track-started event. conversationId is
+// stashed for the echo payloads.
+async function _showVideoActive(conversationUrl, conversationId) {
   const els = _getVideoEls();
   els.pre.style.display = "none";
   els.loading.style.display = "none";
-  els.frame.src = conversationUrl;
   els.active.style.display = "flex";
+
+  if (!window.Daily || typeof window.Daily.createCallObject !== "function") {
+    showToast("Video SDK failed to load. Hard-refresh and retry.", "error");
+    _showVideoPreSession();
+    return;
+  }
+
+  await _destroyTavusCall();   // guard against duplicate call objects
+  try {
+    tavusCall = window.Daily.createCallObject({ url: conversationUrl });
+    tavusConvId = conversationId || null;
+    tavusMuted = false;
+    tavusCamOff = false;
+    // A custom Daily callObject does NOT auto-play remote media: we attach
+    // Maya's remote video to the <video> and her audio to a dedicated <audio>
+    // element (the iframe used to do this for us). We ignore the local track —
+    // pose.js consumes that separately for rep detection.
+    const audioEl = document.getElementById("tavusAudio");
+    tavusCall.on("track-started", (ev) => {
+      if (!ev || !ev.participant || ev.participant.local) return;
+      try {
+        if (ev.type === "video") {
+          els.video.srcObject = new MediaStream([ev.track]);
+        } else if (ev.type === "audio" && audioEl) {
+          audioEl.srcObject = new MediaStream([ev.track]);
+          audioEl.play?.().catch(() => {});
+        }
+      } catch (_) {}
+    });
+    await tavusCall.join({ url: conversationUrl });
+  } catch (e) {
+    console.error("tavus call join failed", e);
+    showToast(`Could not join video call: ${e.message}`, "error");
+    await _destroyTavusCall();
+    _showVideoPreSession();
+  }
+}
+
+// ── Tavus interactions: make Maya speak a string verbatim via conversation.echo
+// over Daily's data channel (no LLM round-trip, so it works under the custom
+// BYO-LLM persona). Counting drives this: it is called from the per-rep branch
+// in onPosePayload keyed on the SAME detected rep number. No-op when not in a
+// live call. ──────────────────────────────────────────────────────────────
+let _lastEchoTs = 0;
+const ECHO_INTERRUPT_GAP_MS = 900;   // if a rep lands faster than this, de-garble
+
+function _sendTavusInteraction(payload) {
+  if (!tavusCall || !tavusConvId) return false;
+  try {
+    tavusCall.sendAppMessage(payload, "*");
+    return true;
+  } catch (e) {
+    console.warn("sendAppMessage failed", e);
+    return false;
+  }
+}
+
+// Speak a count word (and, optionally, a short form cue) through Maya. `cue`
+// is sent as a second echo shortly after the number so the number is heard
+// first; pass it only when the rep's form was off.
+function echoMayaCount(word, cue) {
+  if (!tavusCall || !tavusConvId || !word) return;
+  const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
+  // Fast back-to-back reps: interrupt the prior (likely still-playing) count
+  // before echoing the new one so the words don't garble together.
+  if (now - _lastEchoTs < ECHO_INTERRUPT_GAP_MS) {
+    _sendTavusInteraction({
+      message_type: "conversation",
+      event_type: "conversation.interrupt",
+      conversation_id: tavusConvId,
+    });
+  }
+  _lastEchoTs = now;
+  _sendTavusInteraction({
+    message_type: "conversation",
+    event_type: "conversation.echo",
+    conversation_id: tavusConvId,
+    properties: { modality: "text", text: String(word), done: true },
+  });
+  if (cue) {
+    setTimeout(() => {
+      _sendTavusInteraction({
+        message_type: "conversation",
+        event_type: "conversation.echo",
+        conversation_id: tavusConvId,
+        properties: { modality: "text", text: String(cue), done: true },
+      });
+    }, 600);
+  }
+}
+
+// ── In-call calf-raise set ──────────────────────────────────────────────────
+// The live loop entry point: a "Start calf-raise set" control in the video
+// stage, co-visible with Maya. It reuses togglePoseFormCheck so the rep count
+// stays the single pose.js-gated source (no separate counting path), feeds the
+// Daily local track in via _tavusLocalStream() inside that function, and echoes
+// each detected rep through Maya. The pose UI shell mounts in the hidden
+// #inCallSetMount; the always-correct backstop is the #inCallRepIndicator
+// overlay pinned on Maya's video.
+//
+// _inCallSetBtn is the synthetic button togglePoseFormCheck drives (it carries
+// the on/off dataset state the function toggles). We hold a reference so Stop
+// can toggle the same instance off.
+let _inCallSetBtn = null;
+// Registered by the active guided session (togglePoseFormCheck closure) so an
+// in-call stop can log the partial set from the real rep history. Null when no
+// guided session is running.
+let _activeGuidedPartialPoster = null;
+
+function _resetInCallSetUi() {
+  const start = document.getElementById("startSetBtn");
+  const stop  = document.getElementById("stopSetBtn");
+  const hurts = document.getElementById("hurtsSetBtn");
+  const mount = document.getElementById("inCallSetMount");
+  const ind   = document.getElementById("inCallRepIndicator");
+  if (start) { start.style.display = ""; start.disabled = false; }
+  if (stop)  stop.style.display = "none";
+  if (hurts) hurts.style.display = "none";
+  if (mount) mount.hidden = true;
+  if (ind)   ind.hidden = true;
+  _inCallSetBtn = null;
+}
+
+// Write the current rep count into the in-call indicator (role=status, so
+// screen readers announce each change). No-op when the indicator is absent.
+function setInCallRep(text) {
+  const pill = document.getElementById("inCallRepPill");
+  if (pill && text) pill.textContent = text;
+}
+
+// Write the live form status into the in-call chip: semantic color via
+// data-status AND text (never color alone). `text` defaults to a per-status
+// label so the chip is always readable.
+function setInCallFormStatus(status, text) {
+  const chip = document.getElementById("inCallFormChip");
+  if (!chip) return;
+  const s = status || "idle";
+  chip.dataset.status = s;
+  if (text) {
+    chip.textContent = text;
+  } else {
+    chip.textContent =
+      s === "good" ? "Good form"
+      : s === "warn" ? "Adjust form"
+      : s === "bad"  ? "Check form"
+      : "Get into frame";
+  }
+}
+
+// Build the calf-raise item the pose shell expects. Prefer the patient's
+// prescribed row (inherits the active-protocol dose) when today's session has
+// loaded; otherwise fall back to the canonical library entry so the in-call
+// set works even before startTodaysSession has run.
+function _calfRaiseItem() {
+  const LIB_ID = "ankle_calf_raises_double_leg";
+  const prescribed = (_todaysSessionState.exercises || []).find(
+    (e) => e && (e.id === LIB_ID || e.library_id === LIB_ID),
+  );
+  if (prescribed) return { ex: prescribed };
+  return {
+    ex: {
+      id: LIB_ID,
+      library_id: LIB_ID,
+      name: "Double-Leg Calf Raises",
+      default_dose: "3 x 15",
+      form_check_supported: true,
+      cues: [
+        "Rise onto balls of both feet",
+        "Pause 1 second at top",
+        "Lower slowly - 3 seconds down",
+      ],
+    },
+  };
+}
+
+async function startInCallCalfSet() {
+  if (!tavusCall) {
+    showToast("Start a video session with Maya first.", "error");
+    return;
+  }
+  const start = document.getElementById("startSetBtn");
+  const stop  = document.getElementById("stopSetBtn");
+  const hurts = document.getElementById("hurtsSetBtn");
+  const mount = document.getElementById("inCallSetMount");
+  const ind   = document.getElementById("inCallRepIndicator");
+  if (!mount) return;
+
+  mount.hidden = false;
+  if (ind) ind.hidden = false;
+  setInCallRep("Rep 0");
+  setInCallFormStatus("idle");
+  if (start) start.style.display = "none";
+  if (stop)  stop.style.display = "";
+  if (hurts) hurts.style.display = "";
+
+  // togglePoseFormCheck owns the camera/skeleton/rep state machine and the
+  // _tavusLocalStream() + echoMayaCount wiring. We hand it the in-call mount
+  // (#inCallSetMount holds the #galleryVideoWrap the function queries) and a
+  // synthetic off-state button it toggles to "on".
+  _inCallSetBtn = mount.querySelector(".incall-set-toggle") || (() => {
+    const b = document.createElement("button");
+    b.className = "incall-set-toggle";
+    b.dataset.state = "off";
+    b.style.display = "none";
+    mount.appendChild(b);
+    return b;
+  })();
+  _inCallSetBtn.dataset.state = "off";
+  await togglePoseFormCheck(mount, _calfRaiseItem(), _inCallSetBtn);
+}
+
+// Stop the current in-call set. `hurt` true => the patient hit "Something
+// hurts": we still log the partial set (postPoseSession runs inside the shell's
+// teardown is NOT guaranteed mid-set, so we do not fabricate a log here) and
+// keep the Maya call alive so she can respond. Either way we tear down the pose
+// shell via the same toggle the shell uses, never via endTavusSession.
+function stopInCallCalfSet(hurt) {
+  const stop  = document.getElementById("stopSetBtn");
+  const hurts = document.getElementById("hurtsSetBtn");
+  if (stop)  stop.disabled = true;
+  if (hurts) hurts.disabled = true;
+  // Log the partial set from the real detected reps BEFORE teardown clears the
+  // guided closure. No-op when zero reps were detected or already submitted.
+  try { _activeGuidedPartialPoster?.(); } catch (_) {}
+  if (_inCallSetBtn && _inCallSetBtn.dataset.state === "on") {
+    // Toggling off runs the shell teardown (PoseFormCheck.stop + in-call UI
+    // reset). The Maya call is untouched.
+    togglePoseFormCheck(document.getElementById("inCallSetMount"),
+                        _calfRaiseItem(), _inCallSetBtn);
+  } else {
+    _resetInCallSetUi();
+  }
+  if (stop)  stop.disabled = false;
+  if (hurts) hurts.disabled = false;
+  if (hurt) {
+    // Surface a spoken acknowledgement through Maya so the stop is felt, and
+    // give the patient an obvious next step without ending the call.
+    echoMayaCount("Okay, stopping the set. Tell me what hurts.");
+    showToast("Set stopped. Tell Maya what hurts.", "info");
+  }
+}
+
+function toggleTavusMute() {
+  if (!tavusCall) return;
+  tavusMuted = !tavusMuted;
+  try { tavusCall.setLocalAudio(!tavusMuted); } catch (_) {}
+  const b = document.getElementById("muteBtn");
+  if (b) b.textContent = tavusMuted ? "Unmute" : "Mute";
+}
+
+function toggleTavusCam() {
+  if (!tavusCall) return;
+  tavusCamOff = !tavusCamOff;
+  try { tavusCall.setLocalVideo(!tavusCamOff); } catch (_) {}
+  const b = document.getElementById("camBtn");
+  if (b) b.textContent = tavusCamOff ? "Camera on" : "Camera off";
 }
 
 async function loadRecentTavusSessions() {
@@ -1404,6 +1719,7 @@ async function loadRecentTavusSessions() {
     if (lastActive && lastActive.conversation_url) {
       continueBtn.dataset.sessionId = lastActive.id;
       continueBtn.dataset.conversationUrl = lastActive.conversation_url;
+      continueBtn.dataset.conversationId = lastActive.conversation_id || "";
       continueBtn.style.display = "inline-block";
     } else {
       continueBtn.style.display = "none";
@@ -1456,7 +1772,7 @@ async function startNewTavusSession() {
       return;
     }
     activeTavusSessionId = data.tavus_session_id || null;
-    _showVideoActive(data.conversation_url);
+    await _showVideoActive(data.conversation_url, data.conversation_id);
 
     if (data.recommendations?.length) {
       const recPanel = document.getElementById("recommendations");
@@ -1476,6 +1792,7 @@ async function continueTavusSession() {
   const continueBtn = document.getElementById("continueBtn");
   const sessionId = continueBtn?.dataset?.sessionId;
   const url = continueBtn?.dataset?.conversationUrl;
+  const convId = continueBtn?.dataset?.conversationId || null;
   if (!sessionId || !url) {
     // No active row found; fall back to start path.
     startNewTavusSession();
@@ -1485,11 +1802,14 @@ async function continueTavusSession() {
   // The conversation URL is reusable for the duration of the call's TTL —
   // no second create_conversation roundtrip needed.
   activeTavusSessionId = sessionId;
-  _showVideoActive(url);
+  await _showVideoActive(url, convId);
 }
 
 async function endTavusSession() {
   const sessionId = activeTavusSessionId;
+  // Always tear down the live call object (camera + mic) first so the device
+  // is released regardless of the persistence call's outcome.
+  await _destroyTavusCall();
   if (!sessionId) {
     _showVideoPreSession();
     return;
@@ -2441,6 +2761,13 @@ function spokenCount(n) {
   return _NUM_WORDS_GUIDED[n] || String(n);
 }
 
+// Map a rep event's metricId (possibly "L_knee_depth") to the corrections-map
+// key ("knee_depth"). Mirrors pose.js correctionKey; used to look up the form
+// cue for a non-good rep when echoing through Maya.
+function correctionKeyOf(metricId) {
+  return String(metricId || "").replace(/^[LR]_/, "");
+}
+
 // Pure correction-throttle decision. Given a list of check transitions
 // emitted by pose.js this frame, the per-exercise corrections map, and a
 // stateful throttle record, returns the cue to speak (or null). Mutates
@@ -2770,11 +3097,19 @@ async function togglePoseFormCheck(wrap, item, btn) {
 
   if (btn.dataset.state === "on") {
     window.PoseFormCheck.stop();
+    _activeGuidedPartialPoster = null;
     btn.dataset.state = "off";
     btn.textContent = "Start guided form-check";
     document.body.classList.remove("pose-active");
     try { window.speechSynthesis?.cancel?.(); } catch (_) {}
-    if (wrap.classList.contains("exercise-card")) {
+    if (wrap.classList.contains("incall-set-mount")) {
+      // In-call wrap: reset the mount to an empty placeholder; do NOT touch
+      // the gallery (it is on the hidden chat stage). The call stays live.
+      videoWrap.innerHTML = "";
+      videoWrap.className = "exercise-video-placeholder";
+      videoWrap.id = "galleryVideoWrap";
+      _resetInCallSetUi();
+    } else if (wrap.classList.contains("exercise-card")) {
       videoWrap.innerHTML = `<span class="video-placeholder-text">Add to today to load video</span>`;
       videoWrap.className = "exercise-video-placeholder";
       videoWrap.id = "galleryVideoWrap";
@@ -2969,6 +3304,20 @@ async function togglePoseFormCheck(wrap, item, btn) {
     lastCorrectionTs: null,  // null = "never fired" so first cue always passes
   };
 
+  // Register a partial-set poster so an in-call "Stop set" / "Something hurts"
+  // can log whatever reps were actually detected before the stop, using the
+  // real rep history from this closure (never fabricated). Guards on
+  // guided.submitted so a natural finish (which posts in finishWorkout) is not
+  // double-logged. Cleared on teardown.
+  _activeGuidedPartialPoster = () => {
+    if (guided.submitted) return;
+    if (!guided.repsHistoryAll.length) return;
+    guided.submitted = true;
+    postPoseSession(item.ex, guided.repsHistoryAll, guided.warningsAll, {
+      repCount: guided.repsHistoryAll.length,
+    });
+  };
+
   function clearTimers() {
     if (guided.restTimer)           { clearInterval(guided.restTimer); guided.restTimer = null; }
     if (guided.correctionFadeTimer) { clearTimeout(guided.correctionFadeTimer); guided.correctionFadeTimer = null; }
@@ -2983,6 +3332,9 @@ async function togglePoseFormCheck(wrap, item, btn) {
       repLabel.textContent = total
         ? `Rep ${repsThis}/${total}`
         : `Rep ${repsThis}`;
+      // In-call backstop: surface the count on the video stage so it is
+      // co-visible with Maya. Single source — the same repsThis the echo uses.
+      setInCallRep(total ? `Rep ${repsThis}/${total}` : `Rep ${repsThis}`);
     } else {
       setLabel.textContent = "";
       repLabel.textContent = "";
@@ -2994,6 +3346,10 @@ async function togglePoseFormCheck(wrap, item, btn) {
     correctionEl.textContent = text;
     correctionEl.dataset.status = status || "warn";
     correctionEl.hidden = false;
+    // Mirror the cue text + status into the in-call chip (text + semantic
+    // color, never color alone) so the patient watching Maya gets the cue
+    // even when the pose shell is the hidden mount.
+    setInCallFormStatus(status || "warn", text);
     if (guided.correctionFadeTimer) clearTimeout(guided.correctionFadeTimer);
     guided.correctionFadeTimer = setTimeout(() => {
       correctionEl.hidden = true;
@@ -3217,6 +3573,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
   function onPosePayload(payload) {
     const overall = statusFromMetrics(payload.metrics);
     pulseEl.dataset.status = overall;
+    setInCallFormStatus(overall);
     renderPoseMetrics(metricsEl, payload, item.ex);
     renderPoseWarnings(warningsEl, payload);
 
@@ -3248,11 +3605,18 @@ async function togglePoseFormCheck(wrap, item, btn) {
     );
     if (decision) {
       guided.lastCorrectionTs = nowTs;
-      speakNow(decision.cue);
+      // In a live Maya call the per-rep cue is echoed through Maya (below);
+      // suppress the local Web-Speech mid-rep cue so the two voices don't
+      // overlap. The on-screen correction bubble still renders either way.
+      const inLiveCall = !!(tavusCall && tavusConvId);
+      if (!inLiveCall || LOCAL_TTS_IN_CALL) speakNow(decision.cue);
       showCorrectionBubble(decision.cue, decision.status);
     }
 
-    // Rep events: append, speak count, redraw the recent-reps list.
+    // Rep events: append, speak count, redraw the recent-reps list. This is
+    // the SINGLE count source — it advances ONLY when pose.js emitted a real
+    // detected rep this frame (repEvents.length > 0). Standing still produces
+    // no repEvents, so the count never moves and Maya stays silent.
     const events = payload.repEvents || [];
     if (events.length) {
       for (const ev of events) {
@@ -3262,7 +3626,22 @@ async function togglePoseFormCheck(wrap, item, btn) {
       const repsThis = guided.repsHistoryThisSet.length;
       if (repsThis !== guided.lastSpokenCount) {
         guided.lastSpokenCount = repsThis;
-        speakNow(spokenCount(repsThis));
+        // In a live Maya call, Maya is the voice: echo the detected count
+        // (and a form cue when the rep's form was off) through her instead of
+        // the local Web-Speech backstop, which is gated off to avoid two
+        // overlapping voices. The spoken number == the detected rep number.
+        const inLiveCall = !!(tavusCall && tavusConvId);
+        if (inLiveCall) {
+          const lastEv = events[events.length - 1];
+          const cue =
+            lastEv && lastEv.status && lastEv.status !== "good"
+              ? (payload.corrections?.[correctionKeyOf(lastEv.metricId)] || lastEv.msg)
+              : null;
+          echoMayaCount(spokenCount(repsThis), cue);
+        }
+        if (!inLiveCall || LOCAL_TTS_IN_CALL) {
+          speakNow(spokenCount(repsThis));
+        }
       }
       updateSetRepLabels();
       renderPoseSession(sessionEl, guided.repsHistoryAll, payload.repSummary);
@@ -3293,17 +3672,24 @@ async function togglePoseFormCheck(wrap, item, btn) {
     // exercise_kb.resolve_to_library; fall back to id if unset (Browse all
     // items + legacy library exercises whose id IS the library id).
     const poseExId = item.ex.library_id || item.ex.id;
+    // Camera coexistence: if a live Maya call is up, feed pose.js the SAME
+    // local camera track the call already owns so we don't open a second
+    // getUserMedia (single physical-camera consumer). Omitted (null) on the
+    // plain gallery form-check path → pose.js opens its own camera as before.
+    const liveStream = _tavusLocalStream();
+    const startOpts = {
+      exerciseName:          item.ex.name,
+      targetDose:            item.ex.default_dose,
+      voice:                 speakCue,
+      suppressInternalVoice: true,  // PR-J wrapper drives all voice
+    };
+    if (liveStream) startOpts.stream = liveStream;
     await window.PoseFormCheck.start(
       videoEl,
       canvasEl,
       poseExId,
       onPosePayload,
-      {
-        exerciseName:          item.ex.name,
-        targetDose:            item.ex.default_dose,
-        voice:                 speakCue,
-        suppressInternalVoice: true,  // PR-J wrapper drives all voice
-      },
+      startOpts,
     );
     btn.disabled = false;
     btn.dataset.state = "on";
@@ -3313,9 +3699,13 @@ async function togglePoseFormCheck(wrap, item, btn) {
     btn.textContent = "Form Check";
     document.body.classList.remove("pose-active");
     showToast(`Camera error: ${e.message}`, "error");
-    const activeIdx = Array.from(wrap.querySelectorAll(".gallery-thumb-btn"))
-      .findIndex((b) => b.classList.contains("active"));
-    switchGalleryItem(activeIdx >= 0 ? activeIdx : 0);
+    if (wrap.classList.contains("incall-set-mount")) {
+      _resetInCallSetUi();
+    } else {
+      const activeIdx = Array.from(wrap.querySelectorAll(".gallery-thumb-btn"))
+        .findIndex((b) => b.classList.contains("active"));
+      switchGalleryItem(activeIdx >= 0 ? activeIdx : 0);
+    }
   }
 }
 

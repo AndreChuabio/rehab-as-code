@@ -60,6 +60,90 @@ function rolloverRepThrottle(state, prevInRep, nextInRep) {
   if (prevInRep && !nextInRep) state.spokenKeys.clear();
 }
 
+// ── Calf-raise rise-rep state machine (mirror of pose.js calfRaiseStep) ─────
+// Keep byte-equivalent to pose.js. This is the COUNT GATE for calf raises:
+// the count advances only on a real heel-rise down/up cycle, never on a still
+// patient. statusRank + thresholds mirrored from pose.js.
+function statusRank(s) { return s === "bad" ? 3 : s === "warn" ? 2 : s === "good" ? 1 : 0; }
+const RISE_ENTER = 60;
+const RISE_EXIT  = 25;
+const RISE_GOOD  = 70;
+function calfRaiseStep(state, pct, isIdle, frameWorst) {
+  if (isIdle || pct == null) return null;
+  if (state.state === "idle") {
+    if (pct >= RISE_ENTER) {
+      state.state = "rising";
+      state.peak  = pct;
+      state.worst = "good";
+    }
+    return null;
+  }
+  if (pct > state.peak) state.peak = pct;
+  if (statusRank(frameWorst) > statusRank(state.worst)) state.worst = frameWorst;
+  if (pct <= RISE_EXIT) {
+    state.repCount += 1;
+    const peak = state.peak;
+    let status = state.worst;
+    let msg = null;
+    if (status === "good" && peak < RISE_GOOD) {
+      status = "warn";
+      msg = "rise higher onto your toes";
+    } else if (status !== "good") {
+      msg = "form check";
+    } else {
+      msg = `rise ${Math.round(peak)}%`;
+    }
+    const event = {
+      repNumber: state.repCount,
+      metricId: "calf_rise",
+      label: "calf rise",
+      depthMin: Math.round(peak),
+      target: null,
+      status,
+      msg,
+    };
+    state.state = "idle";
+    state.peak  = 0;
+    return event;
+  }
+  return null;
+}
+function newRiseState() {
+  return { state: "idle", peak: 0, repCount: 0, worst: "good" };
+}
+
+// Mirror of pose.js checkCalfRaiseRise status -> isIdle derivation, the way
+// CalfRaiseRepTracker.observe computes it in production: isIdle is true ONLY
+// while the hip baseline is still pending. Once the baseline is set, a low
+// reading (pct 0-29) is status "good" (standing flat), NOT "idle" — so it
+// flows into calfRaiseStep and can complete the descent. This is the exact
+// coupling the blocking bug fix corrected; modeling isIdle off pct (the old,
+// broken wiring) would make the count gate unreachable.
+function statusForPct(pct, baselinePending) {
+  if (baselinePending) return "idle";
+  if (pct >= 70) return "good";
+  if (pct >= 30) return "warn";
+  return "good";
+}
+// Feed a sequence of pct frames; collect emitted rep events.
+//   opts.baselineFrames: number of leading frames that are baseline-pending
+//     (status "idle" -> isIdle true), mirroring the ~30-sample baseline window.
+//   opts.isIdle: explicit override (i, pct) -> bool, for direct gate tests.
+//   opts.worst:  per-frame worst alignment status.
+function runRise(pcts, opts = {}) {
+  const st = newRiseState();
+  const events = [];
+  const baselineFrames = opts.baselineFrames || 0;
+  const isIdle = opts.isIdle ||
+    ((i, pct) => statusForPct(pct, i < baselineFrames) === "idle");
+  const worst  = opts.worst  || (() => "good");
+  pcts.forEach((p, i) => {
+    const ev = calfRaiseStep(st, p, isIdle(i, p), worst(i, p));
+    if (ev) events.push(ev);
+  });
+  return { st, events };
+}
+
 // ─── parseSetsReps ────────────────────────────────────────────────────────
 {
   assert.deepEqual(parseSetsReps("3 x 10"), { sets: 3, reps: 10 });
@@ -162,4 +246,94 @@ function rolloverRepThrottle(state, prevInRep, nextInRep) {
   assert.equal(r2.cue, "Knees out", "after rep boundary the cue can re-fire");
 }
 
+// ─── calfRaiseStep: stand still → ZERO reps (the core gate) ──────────────
+{
+  // pct hovers near 0 (small sway), never crossing RISE_ENTER.
+  const { events } = runRise([0, 1, 0, 2, 0, 3, 1, 0, 2, 0, 1]);
+  assert.equal(events.length, 0, "standing still must count zero reps");
+}
+
+// ─── calfRaiseStep: idle/baseline frames → ZERO reps ─────────────────────
+{
+  // Even with high pct, while baseline is not set (isIdle true) nothing counts.
+  const { events } = runRise([80, 90, 70, 10, 80], { isIdle: () => true });
+  assert.equal(events.length, 0, "frames during baseline (idle) must not count");
+}
+
+// ─── calfRaiseStep: one full up→down cycle → exactly one rep ─────────────
+{
+  // Rise above RISE_ENTER (60), peak, then back below RISE_EXIT (25).
+  const { events } = runRise([0, 30, 65, 80, 75, 40, 20, 5]);
+  assert.equal(events.length, 1, "one heel-rise cycle is exactly one rep");
+  assert.equal(events[0].repNumber, 1);
+  assert.equal(events[0].metricId, "calf_rise");
+  // Peak 80 >= RISE_GOOD with good alignment → good rep.
+  assert.equal(events[0].status, "good");
+}
+
+// ─── calfRaiseStep: held tip-toe (up, no return) → ZERO reps ─────────────
+{
+  // Crosses RISE_ENTER and stays high — never falls below RISE_EXIT.
+  const { events, st } = runRise([0, 65, 85, 90, 88, 90, 87, 91]);
+  assert.equal(events.length, 0, "held tip-toe without lowering is not a rep");
+  assert.equal(st.state, "rising", "tracker stays mid-rep until the patient lowers");
+}
+
+// ─── calfRaiseStep: two full cycles → repNumber 1 then 2 ─────────────────
+{
+  const { events } = runRise([
+    0, 65, 80, 30, 10,   // cycle 1
+    5, 62, 78, 22, 0,    // cycle 2
+  ]);
+  assert.equal(events.length, 2, "two cycles → two reps");
+  assert.equal(events[0].repNumber, 1);
+  assert.equal(events[1].repNumber, 2);
+}
+
+// ─── calfRaiseStep: low peak → warn rep (rose but not high enough) ───────
+{
+  // Crosses RISE_ENTER (60) but peak 64 < RISE_GOOD (70).
+  const { events } = runRise([0, 60, 64, 62, 20, 0]);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].status, "warn", "shallow rise is a warn rep");
+}
+
+// ─── calfRaiseStep: bad alignment during rep → bad rep, still counts ─────
+{
+  // A real rep cycle but trunk_lean was bad mid-rep → status bad, count holds.
+  const { events } = runRise([0, 65, 85, 30, 0], { worst: () => "bad" });
+  assert.equal(events.length, 1, "a bad-form rep still counts (it happened)");
+  assert.equal(events[0].status, "bad");
+}
+
+// ─── REGRESSION: production status->isIdle coupling counts a real cycle ───
+// This mirrors the exact CalfRaiseRepTracker.observe wiring: isIdle is derived
+// from checkCalfRaiseRise's status, which is "idle" only during baseline. A
+// full cycle [0,30,65,80,75,40,20,5] fed through that derivation must yield
+// exactly one rep. Before the fix, status was "idle" for every pct<30, the
+// descent frames (20,5) returned null at the isIdle guard, and the tracker
+// stuck in "rising" forever -> ZERO reps. This test would have caught it.
+{
+  const { events, st } = runRise([0, 30, 65, 80, 75, 40, 20, 5]);
+  assert.equal(events.length, 1,
+    "real cycle under production status->isIdle wiring must count exactly one rep");
+  assert.equal(events[0].repNumber, 1);
+  assert.equal(st.state, "idle", "tracker must return to idle after the descent completes");
+}
+
+// ─── REGRESSION: baseline-pending frames do not count, real reps after do ──
+// Leading frames are baseline-pending (status "idle"); a held tip-toe during
+// baseline must not count, and the first real cycle AFTER baseline counts.
+{
+  const { events } = runRise(
+    [80, 90, 70,           // baseline window: high pct but isIdle -> no count
+     0, 65, 85, 30, 5],    // first real cycle post-baseline
+    { baselineFrames: 3 },
+  );
+  assert.equal(events.length, 1,
+    "high pct during baseline must not count; the post-baseline cycle counts once");
+  assert.equal(events[0].repNumber, 1);
+}
+
 console.log("PR-J guided-mode pure helpers: all assertions passed.");
+console.log("Calf-raise rise-rep gate: all assertions passed.");

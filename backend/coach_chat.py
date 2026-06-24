@@ -394,6 +394,10 @@ def build_system_prompt(
         "them. If the patient writes in another language, reply in English and "
         "continue normally - do not translate, do not apologize, do not switch "
         "languages mid-conversation.\n"
+        "10. If the patient is about to start a rep-counted set (for example a "
+        "calf-raise set), briefly cue them to begin. The live rep count is "
+        "spoken automatically by the app as each rep is detected on camera, so "
+        "do not try to count reps yourself - just encourage good form.\n"
     )
     if triage_block:
         base = base + triage_block

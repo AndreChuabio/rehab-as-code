@@ -410,7 +410,12 @@ function checkCalfRaiseRise(lms) {
   // ~5% of frame height is a strong calf raise; ~2% is mild.
   const pct = Math.max(0, Math.min(100, Math.round((riseFrac / 0.05) * 100)));
   if (pct > calfRaiseState.peakRise) calfRaiseState.peakRise = pct;
-  let status = "idle";
+  // After the baseline is set, never emit "idle" for a low reading — standing
+  // flat (pct near 0) is a valid resting state, and the rep state machine
+  // depends on low readings flowing through to complete the descent. "idle" is
+  // reserved strictly for the baseline-pending return above; the rep tracker
+  // keys baseline-pending off that status.
+  let status = "good";
   if (pct >= 70) status = "good";
   else if (pct >= 30) status = "warn";
   return {
@@ -820,6 +825,95 @@ class RepTracker {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Calf-raise rep tracker. The angle-based RepTracker above only handles
+// "max" mode (joint angle dropping to a trough). Calf raises emit no joint
+// angle worth counting in 2D, so the rep signal is the body-vertical-rise
+// pct (0-100) from checkCalfRaiseRise. State machine, mirroring RepTracker:
+//   idle -> rising (pct crosses RISE_ENTER, hips actually lifted)
+//        -> complete (pct falls back below RISE_EXIT) -> emit one rep
+//
+// The pct stays near 0 while the patient stands still and never crosses
+// RISE_ENTER, so a still patient counts nothing. A held tip-toe (up but no
+// return below RISE_EXIT) never completes. Counting only ever advances on a
+// real heel-rise down/up cycle. checkCalfRaiseRise returns status "idle"
+// (value 0) until its ~1s hip baseline is set; we ignore those frames so the
+// tracker cannot count during baseline.
+const RISE_ENTER = 60;   // pct of "strong rise" (≈3% frame-height hip lift)
+const RISE_EXIT  = 25;   // back down past here completes the rep
+const RISE_GOOD  = 70;   // peak pct at/above this counts as good depth
+
+// Pure, DOM-free step function so the rep gate is unit-testable. `state` is a
+// plain object {state:"idle"|"rising", peak:Number, repCount:Number,
+// worst:"good"|"warn"|"bad"}; it is mutated in place. `pct` is the calf_rise
+// metric value, `isIdle` is true while the baseline is still being set,
+// `frameWorst` is the worst non-rise alignment status seen this frame. Returns
+// a rep event object when a rep completes this step, else null.
+function calfRaiseStep(state, pct, isIdle, frameWorst) {
+  if (isIdle || pct == null) return null;
+  if (state.state === "idle") {
+    if (pct >= RISE_ENTER) {
+      state.state = "rising";
+      state.peak  = pct;
+      state.worst = "good";
+    }
+    return null;
+  }
+  // rising: track the peak + worst alignment until we come back down.
+  if (pct > state.peak) state.peak = pct;
+  if (statusRank(frameWorst) > statusRank(state.worst)) state.worst = frameWorst;
+  if (pct <= RISE_EXIT) {
+    state.repCount += 1;
+    const peak = state.peak;
+    let status = state.worst;
+    let msg = null;
+    if (status === "good" && peak < RISE_GOOD) {
+      status = "warn";
+      msg = "rise higher onto your toes";
+    } else if (status !== "good") {
+      msg = "form check";
+    } else {
+      msg = `rise ${Math.round(peak)}%`;
+    }
+    const event = {
+      repNumber: state.repCount,
+      metricId: "calf_rise",
+      label: "calf rise",
+      depthMin: Math.round(peak),
+      target: null,
+      status,
+      msg,
+    };
+    state.state = "idle";
+    state.peak  = 0;
+    return event;
+  }
+  return null;
+}
+
+class CalfRaiseRepTracker {
+  constructor() {
+    this.s = { state: "idle", peak: 0, repCount: 0, worst: "good" };
+  }
+  // metric: the calf_rise metric object from runChecks (may have status
+  // "idle" during baseline). frameMetrics: all metrics this frame, used to
+  // capture the worst alignment status (trunk_lean / sway) during the rep.
+  observe(metric, frameMetrics, _ts) {
+    if (!metric) return null;
+    const isIdle = metric.status === "idle";
+    let frameWorst = "good";
+    for (const m of frameMetrics) {
+      if (!m || m.id === "calf_rise") continue;
+      if (m.status === "good" || m.status === "idle") continue;
+      if (statusRank(m.status) > statusRank(frameWorst)) frameWorst = m.status;
+    }
+    return calfRaiseStep(this.s, metric.value, isIdle, frameWorst);
+  }
+  get repCount() { return this.s.repCount; }
+}
+
+let calfRaiseRepTracker = null;   // rebuilt on start() for rise-mode exercises
+
 let trackers = [];   // active RepTrackers, one per depth metric, rebuilt on start
 
 function getOrCreateTracker(metric, ex) {
@@ -838,6 +932,16 @@ function isDepthMetric(m, ex) {
 }
 
 function trackerSummary() {
+  // Rise-mode (calf raise) headline: when the calf-raise tracker has counted
+  // any reps, it is the sole rep source for the exercise. bestDepth is left
+  // null since the "depth" here is a rise pct, not a joint angle.
+  if (calfRaiseRepTracker && calfRaiseRepTracker.repCount > 0) {
+    return {
+      repCount:  calfRaiseRepTracker.repCount,
+      bestDepth: null,
+      label:     "calf rise",
+    };
+  }
   if (!trackers.length) return null;
   // Use the side with the most reps as the headline.
   const headline = trackers.reduce((a, b) => (b.repCount > a.repCount ? b : a), trackers[0]);
@@ -1039,6 +1143,11 @@ function drawTargetGhost(landmarks, metrics, ex) {
 let landmarker = null;
 let visionMod   = null;
 let stream      = null;
+// True when pose.js opened the camera itself (gallery form-check path). When
+// an external MediaStream is passed via opts.stream (e.g. the Daily call's
+// local track during a live Maya video session), we do NOT own it and must
+// never stop its tracks in stop() — that would kill Maya's view of the patient.
+let streamOwned = true;
 let rafHandle   = null;
 let running     = false;
 let videoEl     = null;
@@ -1116,6 +1225,17 @@ function loop() {
         const tracker = getOrCreateTracker(m, ex);
         const ev = tracker.observe(m.value, metrics, ts);
         if (ev) repEvents.push(ev);
+      }
+
+      // Rise-mode (calf raise): feed the per-frame calf_rise pct to the
+      // dedicated rep tracker. Same repEvents[] array, so the entire
+      // downstream chain (count, voice cue, set-complete, payload) is shared.
+      if (ex.mode === "rise" && calfRaiseRepTracker) {
+        const riseMetric = metrics.find((m) => m.id === "calf_rise");
+        if (riseMetric) {
+          const ev = calfRaiseRepTracker.observe(riseMetric, metrics, ts);
+          if (ev) repEvents.push(ev);
+        }
       }
 
       // Voice cues + set-complete detection. We use the headline tracker
@@ -1210,7 +1330,7 @@ function loop() {
         // re-speak a cue if the form error recurs.
         const inRep = trackers.some(
           (t) => t.state === "descending" || t.state === "ascending",
-        );
+        ) || !!(calfRaiseRepTracker && calfRaiseRepTracker.s.state === "rising");
         const exDef = EXERCISES[activeExId] || DEFAULT_EX;
         // PR-U9: framing assessment per frame so the wrapper UI can
         // render exercise-specific guidance ("point camera at your
@@ -1259,14 +1379,26 @@ async function start(_videoEl, _canvasEl, exerciseId, onPayload, opts = {}) {
 
   resetSmoothing();
   resetCalfRaiseTracker();
+  calfRaiseRepTracker = new CalfRaiseRepTracker();
   trackers       = [];
   partialSinceTs = null;
 
-  stream = await navigator.mediaDevices.getUserMedia({
-    video: { width: 640, height: 480, facingMode: "user" },
-    audio: false,
-  });
-  videoEl.srcObject = stream;
+  // Camera coexistence: when opts.stream is provided (a live Maya video call
+  // feeds its own local camera track in), reuse it as the single physical-
+  // camera consumer instead of opening a second getUserMedia. We do not own
+  // that stream, so stop() must not stop its tracks. When omitted (the gallery
+  // form-check path), keep today's behavior and open the camera ourselves.
+  streamOwned = !opts.stream;
+  if (opts.stream) {
+    stream = opts.stream;
+    videoEl.srcObject = stream;
+  } else {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 640, height: 480, facingMode: "user" },
+      audio: false,
+    });
+    videoEl.srcObject = stream;
+  }
   await videoEl.play();
 
   canvasEl.width  = videoEl.videoWidth  || 640;
@@ -1281,9 +1413,15 @@ function stop() {
   if (rafHandle) cancelAnimationFrame(rafHandle);
   rafHandle = null;
   if (stream) {
-    for (const track of stream.getTracks()) track.stop();
+    // Only stop tracks pose.js opened. A Daily-owned stream (opts.stream) is
+    // left alone so the live Maya call keeps the camera.
+    if (streamOwned) {
+      for (const track of stream.getTracks()) track.stop();
+    }
     stream = null;
   }
+  streamOwned = true;
+  calfRaiseRepTracker = null;
   if (videoEl) videoEl.srcObject = null;
   if (ctx && canvasEl) ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
   onPayloadCb = null;
@@ -1292,3 +1430,15 @@ function stop() {
 }
 
 window.PoseFormCheck = { init, start, stop, EXERCISES, FRAMING_CONFIG, assessFraming };
+
+// Expose the pure rise-rep step + thresholds for the DOM-free node test
+// harness (mirrors the __poseGuidedHelpers convention in app.js). Keep the
+// test file's copy byte-equivalent to calfRaiseStep above.
+if (typeof window !== "undefined") {
+  window.__poseCalfRaiseHelpers = {
+    calfRaiseStep,
+    RISE_ENTER,
+    RISE_EXIT,
+    RISE_GOOD,
+  };
+}

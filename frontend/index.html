@@ -131,15 +131,58 @@
               <p>Coach Maya is preparing your session...</p>
             </div>
             <div class="active-session" id="activeSession" style="display:none">
-              <iframe
-                id="tavusFrame"
-                class="tavus-frame"
-                allow="camera; microphone; autoplay"
-                allowfullscreen
-              ></iframe>
-              <button class="end-btn" id="endBtn" onclick="endTavusSession()">
-                End session
-              </button>
+              <div class="tavus-stage">
+                <video
+                  id="tavusVideo"
+                  class="tavus-frame"
+                  autoplay
+                  playsinline
+                ></video>
+                <!-- In-call live rep counter. Pinned top-left, away from Maya's
+                     face, sized under ~25% of the frame. role=status so each
+                     detected rep is announced to screen readers; the count is
+                     the always-correct visual backstop when Maya's echo is
+                     silent. Hidden until a set is running. -->
+                <div class="incall-rep-indicator" id="inCallRepIndicator"
+                     role="status" aria-live="polite" hidden>
+                  <span class="incall-rep-pill" id="inCallRepPill">Rep 0</span>
+                  <span class="incall-form-chip" id="inCallFormChip"
+                        data-status="idle">Get into frame</span>
+                </div>
+              </div>
+              <!-- Custom Daily callObject does not auto-play remote audio, so
+                   Maya's voice track is attached to this dedicated element. -->
+              <audio id="tavusAudio" autoplay></audio>
+              <!-- In-call calf-raise set. The pose UI shell (camera, skeleton,
+                   preflight, rep overlay) mounts inside #galleryVideoWrap; we
+                   reuse togglePoseFormCheck so counting stays the single
+                   pose.js-gated source. Hidden mount keeps the call visible. -->
+              <div class="incall-set" id="inCallSet">
+                <div class="incall-set-mount" id="inCallSetMount" hidden>
+                  <div id="galleryVideoWrap" class="exercise-video-placeholder"></div>
+                </div>
+                <div class="incall-set-controls" id="inCallSetControls">
+                  <button class="end-btn secondary" id="startSetBtn"
+                          onclick="startInCallCalfSet()">Start calf-raise set</button>
+                  <button class="end-btn secondary" id="stopSetBtn"
+                          style="display:none" onclick="stopInCallCalfSet(false)">
+                    Stop set
+                  </button>
+                  <button class="end-btn danger" id="hurtsSetBtn"
+                          style="display:none" onclick="stopInCallCalfSet(true)">
+                    Something hurts &mdash; stop
+                  </button>
+                </div>
+              </div>
+              <div class="video-call-controls">
+                <button class="end-btn secondary" id="muteBtn"
+                        onclick="toggleTavusMute()">Mute</button>
+                <button class="end-btn secondary" id="camBtn"
+                        onclick="toggleTavusCam()">Camera off</button>
+                <button class="end-btn" id="endBtn" onclick="endTavusSession()">
+                  End session
+                </button>
+              </div>
             </div>
           </div>
         </div>
@@ -407,6 +450,7 @@
   </div>
 
   <script src="/static/auth.js"></script>
+  <script src="https://unpkg.com/@daily-co/daily-js"></script>
   <script src="/static/pose.js"></script>
   <script src="/static/tour.js"></script>
   <script src="/static/app.js"></script>

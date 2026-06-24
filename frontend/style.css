@@ -442,6 +442,23 @@ body {
   width: 100%;
   height: 500px;
   border: none;
+  background: #000;
+  object-fit: cover;
+  border-radius: var(--radius);
+}
+
+/* Live-call controls row (mute / camera / end) — replaces the controls the
+   raw Tavus iframe used to provide once we embed via the Daily callObject. */
+.video-call-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+
+.end-btn.secondary {
+  background: var(--surface2);
+  color: var(--text);
 }
 
 /* Start a new / continue session row (PR-P) */
@@ -483,6 +500,91 @@ body {
 .end-btn:hover {
   color: var(--text);
   border-color: var(--text);
+}
+
+/* Destructive in-call control: "Something hurts - stop". Distinct from End
+   session (which tears down the whole call) and from the neutral Stop set. */
+.end-btn.danger {
+  color: #ff8d8d;
+  border-color: rgba(255, 120, 120, 0.55);
+}
+.end-btn.danger:hover {
+  color: #fff;
+  background: rgba(220, 70, 70, 0.9);
+  border-color: rgba(220, 70, 70, 0.9);
+}
+
+/* ── In-call calf-raise set ──────────────────────────────────────────── */
+/* Maya's video + the live rep indicator share one positioned stage so the
+   indicator pins to a corner of HER frame (top-left, away from her face). */
+.tavus-stage {
+  position: relative;
+  width: 100%;
+}
+
+/* Live rep counter overlay — the always-correct backstop when Maya's spoken
+   echo is silent. Kept under ~25% of the frame, top-left. */
+.incall-rep-indicator {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  max-width: 25%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  pointer-events: none;
+}
+.incall-rep-pill {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 6px 14px;
+  border-radius: 999px;
+  font-size: clamp(16px, 3.2vw, 26px);
+  font-weight: 800;
+  color: #fff;
+  background: rgba(12, 16, 28, 0.82);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  letter-spacing: 0.01em;
+}
+/* Form chip: text + semantic color, never color alone. */
+.incall-form-chip {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #0c101c;
+  background: rgba(200, 200, 200, 0.92);
+}
+.incall-form-chip[data-status="good"] { background: rgba(80, 220, 180, 0.95); }
+.incall-form-chip[data-status="warn"] { background: rgba(245, 200, 80, 0.95); }
+.incall-form-chip[data-status="bad"]  { background: rgba(255, 120, 120, 0.95); color: #fff; }
+.incall-form-chip[data-status="idle"] { background: rgba(200, 200, 200, 0.92); }
+
+/* The pose UI shell mounts here, below Maya's video, while a set runs. */
+.incall-set-mount {
+  width: 100%;
+}
+.incall-set-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+}
+/* 44pt min touch targets for the in-call set controls (mobile, one-handed). */
+.incall-set-controls .end-btn {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+/* Honor reduced-motion: the pose status pulse animation falls back to a static
+   color change. Applies to the in-call surface and the gallery shell alike. */
+@media (prefers-reduced-motion: reduce) {
+  #poseStage .pose-overlay-pulse[data-status="warn"],
+  #poseStage .pose-overlay-pulse[data-status="bad"] {
+    animation: none;
+  }
 }
 
 /* ── Recommendations ───────────────────────────────────────────────── */
