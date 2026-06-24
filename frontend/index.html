@@ -32,6 +32,12 @@
             <div class="stat"><span class="stat-label">HRV</span><span class="stat-value" id="hrv">--</span></div>
             <div class="stat"><span class="stat-label">Recovery</span><span class="stat-value" id="recovery">--</span></div>
           </div>
+          <!-- Visible, layout-level disclosure of the connection state. Carries
+               the "sample data" honesty caption when not connected and the
+               "Updated X - provider" recency line when connected. aria-live so
+               screen readers announce the state change after a connect/refresh. -->
+          <p id="healthCaption" class="health-caption" aria-live="polite"></p>
+          <button id="connectHealthBtn" class="start-btn secondary connect-health-btn" hidden>Connect health data</button>
         </section>
 
         <section class="card protocol-card">

@@ -121,6 +121,11 @@ app.include_router(admin_router)
 from api.tavus_proxy import router as tavus_proxy_router  # noqa: E402
 app.include_router(tavus_proxy_router)
 
+# Junction (the rebrand of Vital) wearable-connect router. Hosted-Link flow +
+# refresh + status, all Depends(current_user_id); mounted under /api/junction/*.
+from api.junction import router as junction_router  # noqa: E402
+app.include_router(junction_router)
+
 CONTEXT_FILE = Path(__file__).parent.parent / "context.json"
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 
@@ -272,10 +277,18 @@ def health_sync_status():
 
 
 @app.get("/health-data")
-def health_data(token: str | None = Query(None)):
+def health_data(
+    token: str | None = Query(None),
+    user_id: str | None = Depends(optional_user_id),
+):
     """Return today's wearable health metrics.
-    If ?token= is provided, returns that user's Apple Watch data (if synced)."""
-    return get_health_data(user_token=token)
+
+    Resolution: an explicit ?token= wins (legacy Apple-shortcut path); otherwise
+    the authed patient's JWT id is used so a connected Junction account resolves
+    server-side via the single get_health_data seam. Anonymous + no token falls
+    back to mock defaults. Real Junction data is purely additive."""
+    resolved = token or user_id
+    return get_health_data(user_token=resolved)
 
 
 @app.get("/calendar")
@@ -470,13 +483,15 @@ def end_tavus_session(
 
 
 @app.get("/context")
-def get_context():
+def get_context(user_id: str | None = Depends(optional_user_id)):
     """Return the pre-built context from the morning cron job (if available)."""
     if CONTEXT_FILE.exists():
         with open(CONTEXT_FILE) as f:
             return json.load(f)
-    # Fall back to building live
-    health = get_health_data()
+    # Fall back to building live. Thread the authed token (when present) so a
+    # connected patient's REAL Junction data reaches the live-built context;
+    # anonymous callers still get mock defaults.
+    health = get_health_data(user_token=user_id)
     events = get_calendar_events()
     return build_system_prompt(health, events)
 
@@ -1825,7 +1840,9 @@ async def chat(req: ChatRequest, user_id: str = Depends(current_user_id)):
     """
     attach_patient(user_id)
     ensure_user(user_id)
-    health = get_health_data()
+    # Thread the authed token so a connected patient's REAL Junction data reaches
+    # Maya + the pipeline, not just the dashboard panel (degrades to mock).
+    health = get_health_data(user_token=user_id)
     protocol_payload = fetch_protocol_for_user(user_id) or {}
     recent_set = get_last_set_completion(user_id)
     if recent_set:
