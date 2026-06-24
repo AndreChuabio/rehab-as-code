@@ -249,6 +249,47 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "propose_calendar_event",
+            "description": (
+                "Propose adding an event to the patient's Google Calendar. "
+                "Use when the patient agrees to schedule a session, mobility "
+                "block, or follow-up — e.g., 'block 5pm Tuesday for my knee "
+                "rehab', 'remind me to do mobility tomorrow morning'. This "
+                "DOES NOT create the event; it surfaces a confirm card in the "
+                "chat UI and the patient taps 'Add to calendar' to actually "
+                "write. Times must be RFC3339 (e.g. 2026-05-09T17:00:00-07:00). "
+                "Pick reasonable defaults: a rehab session is 30-45 min unless "
+                "the patient says otherwise. Only call when the patient has "
+                "connected Google Calendar AND has expressed an intent to "
+                "schedule something."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Short event title, e.g. 'Knee rehab session'.",
+                    },
+                    "start_iso": {
+                        "type": "string",
+                        "description": "RFC3339 start time with timezone offset.",
+                    },
+                    "end_iso": {
+                        "type": "string",
+                        "description": "RFC3339 end time with timezone offset.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional notes shown on the calendar event body.",
+                    },
+                },
+                "required": ["title", "start_iso", "end_iso"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "start_intake_tool",
             "description": (
                 "Begin or update a patient intake conversationally. Use when the "
@@ -521,6 +562,29 @@ async def _dispatch_tool(
         return (
             {"ok": True, **result},
             [{"type": "tool_result", "name": name, "result": result}],
+        )
+
+    if name == "propose_calendar_event":
+        # Propose-then-confirm: this tool NEVER writes to the calendar.
+        # It streams a `calendar_proposal` event to the frontend, which
+        # renders a confirm card; on click the frontend POSTs to
+        # /calendar/events with the user's JWT. That keeps event-creation
+        # gated by an explicit user action even if Maya hallucinates.
+        title = (arguments.get("title") or "").strip()
+        start_iso = (arguments.get("start_iso") or "").strip()
+        end_iso = (arguments.get("end_iso") or "").strip()
+        if not (title and start_iso and end_iso):
+            err = {"ok": False, "error": "title, start_iso, end_iso are required"}
+            return (err, [{"type": "tool_result", "name": name, "result": err}])
+        proposal = {
+            "title": title,
+            "start_iso": start_iso,
+            "end_iso": end_iso,
+            "description": arguments.get("description"),
+        }
+        return (
+            {"ok": True, "proposed": True, **proposal},
+            [{"type": "calendar_proposal", "proposal": proposal}],
         )
 
     if name == "start_intake_tool":
