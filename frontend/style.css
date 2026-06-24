@@ -515,67 +515,135 @@ body {
 }
 
 /* ── In-call calf-raise set ──────────────────────────────────────────── */
-/* Maya's video + the live rep indicator share one positioned stage so the
-   indicator pins to a corner of HER frame (top-left, away from her face). */
+/* Two states on one positioned stage:
+   data-set="off" — pre-set: Maya is the full-frame coach, no overlays.
+   data-set="on"  — in-set: the live rep hero pins top-left, the patient's
+                    self-view + pose skeleton dock as a bottom-right PiP, and
+                    Maya recedes to the backdrop. The hero, not Maya, is the
+                    focal element while the patient is moving. */
 .tavus-stage {
   position: relative;
   width: 100%;
 }
 
-/* Live rep counter overlay — the always-correct backstop when Maya's spoken
-   echo is silent. Kept under ~25% of the frame, top-left. */
+/* Live rep hero — the SINGLE rep counter for the call. Top-left, clear of
+   Maya's face. The big number is glanceable from a few feet away; the dose line
+   and form chip are subordinate. */
 .incall-rep-indicator {
   position: absolute;
-  top: 12px;
-  left: 12px;
-  max-width: 25%;
+  top: 16px;
+  left: 16px;
+  display: none;            /* shown only while a set runs (hidden attr removed) */
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  pointer-events: none;
+  max-width: 60%;
+}
+.tavus-stage[data-set="on"] .incall-rep-indicator:not([hidden]) { display: flex; }
+
+/* Hero rep readout: a large count with a small subordinate dose line under it.
+   Backed by a soft scrim so it stays legible over any video frame. */
+.incall-rep-hero {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  pointer-events: none;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 10px 18px 12px;
+  border-radius: 16px;
+  background: rgba(11, 18, 32, 0.72);
+  border: 1px solid var(--border-strong);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
 }
-.incall-rep-pill {
-  display: inline-block;
-  align-self: flex-start;
-  padding: 6px 14px;
-  border-radius: 999px;
-  font-size: clamp(16px, 3.2vw, 26px);
+.incall-rep-count {
+  font-size: clamp(48px, 11vw, 92px);
   font-weight: 800;
-  color: #fff;
-  background: rgba(12, 16, 28, 0.82);
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  letter-spacing: 0.01em;
+  line-height: 0.92;
+  color: var(--text-strong);
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
 }
-/* Form chip: text + semantic color, never color alone. */
-.incall-form-chip {
-  display: inline-block;
-  align-self: flex-start;
-  padding: 4px 10px;
-  border-radius: 8px;
-  font-size: 12px;
-  font-weight: 700;
-  color: #0c101c;
-  background: rgba(200, 200, 200, 0.92);
+.incall-rep-dose {
+  font-size: clamp(12px, 2.2vw, 15px);
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
 }
-.incall-form-chip[data-status="good"] { background: rgba(80, 220, 180, 0.95); }
-.incall-form-chip[data-status="warn"] { background: rgba(245, 200, 80, 0.95); }
-.incall-form-chip[data-status="bad"]  { background: rgba(255, 120, 120, 0.95); color: #fff; }
-.incall-form-chip[data-status="idle"] { background: rgba(200, 200, 200, 0.92); }
 
-/* The pose UI shell mounts here, below Maya's video, while a set runs. */
-.incall-set-mount {
-  width: 100%;
+/* Form chip: state shown three ways (color + glyph + text), never color alone.
+   High-contrast, large enough to read mid-rep. */
+.incall-form-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  align-self: flex-start;
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-size: clamp(13px, 2.4vw, 16px);
+  font-weight: 700;
+  color: var(--bg);
+  background: var(--muted);
 }
+.incall-form-icon {
+  font-size: 1.05em;
+  line-height: 1;
+  font-weight: 800;
+}
+.incall-form-chip[data-status="good"] { background: var(--success); color: var(--bg); }
+.incall-form-chip[data-status="warn"] { background: var(--warn);    color: var(--bg); }
+.incall-form-chip[data-status="bad"]  { background: var(--danger);  color: var(--text-strong); }
+.incall-form-chip[data-status="idle"] { background: var(--muted);   color: var(--bg); }
+
+/* Self-view PiP — the patient's camera + pose skeleton + framing guidance dock
+   in the bottom-right corner while a set runs, instead of a full second panel
+   that competes with Maya. Pointer-events stay live so the preflight Start /
+   voice / fullscreen controls inside the shell remain tappable. */
+.incall-set-mount {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  width: clamp(180px, 34%, 320px);
+  max-height: 56%;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow);
+  background: var(--bg);
+  z-index: 2;
+}
+.incall-set-mount[hidden] { display: none; }
+/* Let the pose shell fill the PiP box. */
+.incall-set-mount .pose-split,
+.incall-set-mount .pose-split-live,
+.incall-set-mount #poseRoot { height: 100%; }
+.incall-set-mount .exercise-video-placeholder { min-height: 0; height: 100%; }
+
+/* Set controls row. Pre-set: one prominent CTA. In-set: stop + safety exit. */
 .incall-set-controls {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
   justify-content: center;
+  align-items: center;
 }
 /* 44pt min touch targets for the in-call set controls (mobile, one-handed). */
 .incall-set-controls .end-btn {
   min-height: 44px;
   min-width: 44px;
+}
+.incall-set-controls .start-btn { min-height: 44px; }
+
+/* On a small phone the PiP would crowd the hero; stack it across the bottom
+   edge and shrink the hero number a touch so both stay readable. */
+@media (max-width: 600px) {
+  .incall-set-mount {
+    width: 42%;
+    right: 10px;
+    bottom: 10px;
+  }
+  .incall-rep-indicator { top: 10px; left: 10px; max-width: 52%; }
 }
 
 /* Honor reduced-motion: the pose status pulse animation falls back to a static
@@ -1766,6 +1834,31 @@ body {
     max-height: none;
   }
 }
+
+/* No reference clip for this exercise: the live pose view claims the full
+   width instead of leaving an empty column (the prior behavior painted a black
+   <video> void with a floating "Reference" label). The slot returns the moment
+   a clip resolves for the exercise. */
+.pose-split--noref { grid-template-columns: 1fr; }
+
+/* ── In-call PiP: trim the pose shell to camera + skeleton ──────────────
+   Inside the bottom-right self-view PiP, the rep hero + form chip own the
+   count and form status, so the shell's full-panel chrome (toolbar, metrics,
+   recent-reps card, the big set/rep overlay labels) is redundant and would be
+   illegible at PiP scale. Keep only what the patient needs to frame up: the
+   camera, the pose skeleton canvas, the framing guide, the preflight card, and
+   the correction bubble. */
+.incall-set-mount .pose-toolbar,
+.incall-set-mount .pose-warnings,
+.incall-set-mount .pose-session-card,
+.incall-set-mount #poseSetLabel,
+.incall-set-mount #poseRepLabel { display: none; }
+.incall-set-mount .pose-split-ref { display: none; }   /* PiP shows live only */
+.incall-set-mount .pose-stage { border-radius: 0; }
+/* Shrink the preflight card's copy so the framing guidance fits the PiP. */
+.incall-set-mount .pose-preflight-card { padding: 12px; gap: 8px; }
+.incall-set-mount .pose-preflight-title { font-size: 14px; }
+.incall-set-mount .pose-preflight-cues { display: none; }
 
 /* When form-check is on, hide chat chrome that's competing for space
    (gallery thumbs strip, Maya header chip, suggestion chips). The chat

@@ -131,49 +131,66 @@
               <p>Coach Maya is preparing your session...</p>
             </div>
             <div class="active-session" id="activeSession" style="display:none">
-              <div class="tavus-stage">
+              <!-- The stage holds Maya's video plus, while a set runs, the
+                   live rep hero, the patient self-view PiP, and the compact
+                   secondary-metrics strip. data-set="on" promotes the in-set
+                   layout. -->
+              <div class="tavus-stage" id="tavusStage" data-set="off">
                 <video
                   id="tavusVideo"
                   class="tavus-frame"
                   autoplay
                   playsinline
                 ></video>
-                <!-- In-call live rep counter. Pinned top-left, away from Maya's
-                     face, sized under ~25% of the frame. role=status so each
-                     detected rep is announced to screen readers; the count is
-                     the always-correct visual backstop when Maya's echo is
-                     silent. Hidden until a set is running. -->
+
+                <!-- Live rep hero. The SINGLE rep counter for the call. Pinned
+                     top-left, clear of Maya's face. role=status so each detected
+                     rep is announced to screen readers. Hidden until a set runs.
+                     The big number is the glanceable focal element; the dose
+                     line is subordinate; the form status carries an icon so the
+                     state is never conveyed by color alone. -->
                 <div class="incall-rep-indicator" id="inCallRepIndicator"
                      role="status" aria-live="polite" hidden>
-                  <span class="incall-rep-pill" id="inCallRepPill">Rep 0</span>
+                  <div class="incall-rep-hero">
+                    <span class="incall-rep-count" id="inCallRepPill">0</span>
+                    <span class="incall-rep-dose" id="inCallRepDose">reps</span>
+                  </div>
                   <span class="incall-form-chip" id="inCallFormChip"
-                        data-status="idle">Get into frame</span>
+                        data-status="idle">
+                    <span class="incall-form-icon" aria-hidden="true"></span>
+                    <span class="incall-form-text">Get into frame</span>
+                  </span>
                 </div>
-              </div>
-              <!-- Custom Daily callObject does not auto-play remote audio, so
-                   Maya's voice track is attached to this dedicated element. -->
-              <audio id="tavusAudio" autoplay></audio>
-              <!-- In-call calf-raise set. The pose UI shell (camera, skeleton,
-                   preflight, rep overlay) mounts inside #galleryVideoWrap; we
-                   reuse togglePoseFormCheck so counting stays the single
-                   pose.js-gated source. Hidden mount keeps the call visible. -->
-              <div class="incall-set" id="inCallSet">
+
+                <!-- Self-view PiP. The patient's own camera + pose skeleton +
+                     framing guidance mount here as a tidy picture-in-picture in
+                     the bottom-right corner instead of a full second panel.
+                     Hidden until a set runs. -->
                 <div class="incall-set-mount" id="inCallSetMount" hidden>
                   <div id="galleryVideoWrap" class="exercise-video-placeholder"></div>
                 </div>
-                <div class="incall-set-controls" id="inCallSetControls">
-                  <button class="end-btn secondary" id="startSetBtn"
-                          onclick="startInCallCalfSet()">Start calf-raise set</button>
-                  <button class="end-btn secondary" id="stopSetBtn"
-                          style="display:none" onclick="stopInCallCalfSet(false)">
-                    Stop set
-                  </button>
-                  <button class="end-btn danger" id="hurtsSetBtn"
-                          style="display:none" onclick="stopInCallCalfSet(true)">
-                    Something hurts &mdash; stop
-                  </button>
-                </div>
               </div>
+
+              <!-- Custom Daily callObject does not auto-play remote audio, so
+                   Maya's voice track is attached to this dedicated element. -->
+              <audio id="tavusAudio" autoplay></audio>
+
+              <!-- Set controls. Pre-set: one clear "Start calf-raise set" CTA.
+                   In-set: an obvious "Stop set" plus the safety "Something
+                   hurts" exit. -->
+              <div class="incall-set-controls" id="inCallSetControls">
+                <button class="start-btn" id="startSetBtn"
+                        onclick="startInCallCalfSet()">Start calf-raise set</button>
+                <button class="end-btn secondary" id="stopSetBtn"
+                        style="display:none" onclick="stopInCallCalfSet(false)">
+                  Stop set
+                </button>
+                <button class="end-btn danger" id="hurtsSetBtn"
+                        style="display:none" onclick="stopInCallCalfSet(true)">
+                  Something hurts &mdash; stop
+                </button>
+              </div>
+
               <div class="video-call-controls">
                 <button class="end-btn secondary" id="muteBtn"
                         onclick="toggleTavusMute()">Mute</button>

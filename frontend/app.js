@@ -1554,38 +1554,95 @@ function _resetInCallSetUi() {
   const hurts = document.getElementById("hurtsSetBtn");
   const mount = document.getElementById("inCallSetMount");
   const ind   = document.getElementById("inCallRepIndicator");
+  const stage = document.getElementById("tavusStage");
   if (start) { start.style.display = ""; start.disabled = false; }
   if (stop)  stop.style.display = "none";
   if (hurts) hurts.style.display = "none";
   if (mount) mount.hidden = true;
   if (ind)   ind.hidden = true;
+  // Drop the in-set layout: Maya returns to full prominence, hero + self-view
+  // PiP retract.
+  if (stage) stage.dataset.set = "off";
   _inCallSetBtn = null;
 }
 
-// Write the current rep count into the in-call indicator (role=status, so
-// screen readers announce each change). No-op when the indicator is absent.
-function setInCallRep(text) {
-  const pill = document.getElementById("inCallRepPill");
-  if (pill && text) pill.textContent = text;
+// Write the current rep count into the in-call hero (role=status, so screen
+// readers announce each change). This is the SINGLE live counter for the call.
+// `count` is the integer rep total; `dose` is the subordinate context line
+// ("of 15", "Set 1 of 3", or "reps"). Accepting a number (not a pre-formatted
+// "Rep N" string) keeps one source of truth — the big number is wired straight
+// to the same repCount the metrics pill uses, so the hero can never drift stale
+// behind it. No-op when the hero is absent.
+function setInCallRep(count, dose) {
+  const num  = document.getElementById("inCallRepPill");
+  const sub  = document.getElementById("inCallRepDose");
+  if (num && count != null) num.textContent = String(count);
+  if (sub && dose != null) sub.textContent = dose;
+  // The whole indicator is role=status aria-live=polite, so SR reads it as a
+  // unit ("7 of 15, Good form") on each detected rep. No per-element aria-label
+  // is set here — that would double-announce against the live region.
 }
 
-// Write the live form status into the in-call chip: semantic color via
-// data-status AND text (never color alone). `text` defaults to a per-status
-// label so the chip is always readable.
+// Write the live form status into the in-call chip. State is conveyed three
+// redundant ways so it is never carried by color alone: data-status (CSS color),
+// a glyph in .incall-form-icon, and the .incall-form-text label. `text`
+// overrides the default per-status label (used for specific correction cues).
+const _FORM_STATUS_GLYPH = { good: "✓", warn: "⚠", bad: "✕", idle: "·" };
 function setInCallFormStatus(status, text) {
   const chip = document.getElementById("inCallFormChip");
   if (!chip) return;
   const s = status || "idle";
   chip.dataset.status = s;
-  if (text) {
-    chip.textContent = text;
-  } else {
-    chip.textContent =
-      s === "good" ? "Good form"
-      : s === "warn" ? "Adjust form"
-      : s === "bad"  ? "Check form"
-      : "Get into frame";
-  }
+  const iconEl = chip.querySelector(".incall-form-icon");
+  const textEl = chip.querySelector(".incall-form-text");
+  if (iconEl) iconEl.textContent = _FORM_STATUS_GLYPH[s] || _FORM_STATUS_GLYPH.idle;
+  const label = text || (
+    s === "good" ? "Good form"
+    : s === "warn" ? "Adjust form"
+    : s === "bad"  ? "Check form"
+    : "Get into frame"
+  );
+  if (textEl) textEl.textContent = label;
+  else chip.textContent = label;   // defensive: pre-restructure markup
+}
+
+// Exercise IDs that ship a demo clip at /static/videos/{id}.mp4. Several
+// library entries carry empty youtube_id / null video_url yet have a real clip
+// on disk under this convention (notably the ankle set, including the calf
+// raises that drive the in-call hero). This set lets _refVideoSrc resolve those
+// without re-introducing a broken <video> for IDs that genuinely have no file —
+// the no-build frontend has no runtime manifest, so the available clips are
+// enumerated here. Source of truth: frontend/videos/*.mp4.
+const STATIC_DEMO_VIDEO_IDS = new Set([
+  "ankle_alphabet", "ankle_calf_raises_double_leg", "ankle_calf_raises_single_leg",
+  "ankle_dorsiflexion_band", "ankle_eversion_band", "ankle_lateral_hops",
+  "ankle_single_leg_balance", "ankle_towel_calf_stretch",
+  "elbow_eccentric_wrist_extension", "elbow_eccentric_wrist_flexion",
+  "elbow_grip_squeeze", "elbow_isometric_extension", "elbow_pronation_supination_band",
+  "elbow_radial_nerve_glide", "elbow_wrist_extensor_stretch", "elbow_wrist_flexor_stretch",
+  "glute_bridge", "ham_bridge_heel_slide", "ham_nordic_eccentric_assisted",
+  "ham_prone_hip_extension", "ham_seated_active_extension", "ham_single_leg_rdl",
+  "ham_supine_active_stretch", "ham_supine_curl_ball", "ham_walking_lunge",
+  "heel_slides", "lb_bird_dog", "lb_cat_cow", "lb_child_pose", "lb_dead_bug",
+  "lb_glute_bridge_lb", "lb_mckenzie_press_up", "lb_pelvic_tilt",
+  "lb_supine_knee_to_chest", "mini_squat", "quad_sets", "shoulder_isometric_er",
+  "shoulder_isometric_ir", "shoulder_pendulum", "shoulder_prone_t",
+  "shoulder_prone_y", "shoulder_scapular_retraction", "shoulder_sleeper_stretch",
+  "shoulder_wall_slides", "single_leg_squat", "stationary_bike",
+  "terminal_knee_extension", "wall_sit",
+]);
+
+// Resolve a reference demo-video URL for an exercise, or "" when none exists.
+// Order: explicit generated/url field → static-path convention for known clips
+// → "". Callers omit the reference panel entirely when this returns "" so an
+// empty source never paints a black void.
+function _refVideoSrc(ex) {
+  if (!ex) return "";
+  if (ex.generated_video_url) return ex.generated_video_url;
+  if (ex.video_url) return ex.video_url;
+  const id = ex.library_id || ex.id;
+  if (id && STATIC_DEMO_VIDEO_IDS.has(id)) return `/static/videos/${id}.mp4`;
+  return "";
 }
 
 // Build the calf-raise item the pose shell expects. Prefer the patient's
@@ -1624,11 +1681,15 @@ async function startInCallCalfSet() {
   const hurts = document.getElementById("hurtsSetBtn");
   const mount = document.getElementById("inCallSetMount");
   const ind   = document.getElementById("inCallRepIndicator");
+  const stage = document.getElementById("tavusStage");
   if (!mount) return;
 
+  // Promote the in-set layout: the rep hero + self-view PiP become the focal
+  // elements, Maya recedes to the coach backdrop.
+  if (stage) stage.dataset.set = "on";
   mount.hidden = false;
   if (ind) ind.hidden = false;
-  setInCallRep("Rep 0");
+  setInCallRep(0);
   setInCallFormStatus("idle");
   if (start) start.style.display = "none";
   if (stop)  stop.style.display = "";
@@ -3134,7 +3195,13 @@ async function togglePoseFormCheck(wrap, item, btn) {
   }
   document.body.classList.add("pose-active");
 
-  const refSrc = item.ex.generated_video_url || item.ex.video_url || "";
+  // Reference demo video. Prefer an explicit URL on the exercise; otherwise
+  // fall back to the static-path convention (/static/videos/{id}.mp4). Several
+  // library entries (the ankle set) carry empty youtube_id / null video_url yet
+  // DO have a real clip on disk under that convention — _refVideoSrc resolves
+  // it. When nothing resolves, refSrc is "" and the reference panel is omitted
+  // entirely (no broken black <video> void).
+  const refSrc = _refVideoSrc(item.ex);
   const voiceOn = poseVoiceEnabled();
 
   // PR-U1: when this exercise IS in the patient's active protocol, render
@@ -3154,12 +3221,21 @@ async function togglePoseFormCheck(wrap, item, btn) {
   const totalSets   = Math.max(1, parsedSets || 1);
   const repsPerSet  = parsedReps;  // null when unparseable
 
-  videoWrap.innerHTML = `
-    <div class="pose-split">
-      <div class="pose-split-ref">
+  // Only render the reference panel when a video actually resolves. An empty
+  // src would paint a black void with a floating "Reference" label (the bug for
+  // ankle exercises with no clip); omitting the panel lets the live pose view
+  // claim the full width via .pose-split--noref. The slot returns automatically
+  // the moment _refVideoSrc resolves a clip for the exercise.
+  const refPanel = refSrc
+    ? `<div class="pose-split-ref">
         <video src="${escapeHtml(refSrc)}" playsinline muted autoplay loop></video>
         <div class="pose-split-ref-label">Reference</div>
-      </div>
+      </div>`
+    : "";
+
+  videoWrap.innerHTML = `
+    <div class="pose-split${refSrc ? "" : " pose-split--noref"}">
+      ${refPanel}
       <div class="pose-root pose-split-live" id="poseRoot">
         <div class="pose-toolbar">
           <div class="pose-title" title="${escapeHtml(item.ex.name)}">
@@ -3332,9 +3408,16 @@ async function togglePoseFormCheck(wrap, item, btn) {
       repLabel.textContent = total
         ? `Rep ${repsThis}/${total}`
         : `Rep ${repsThis}`;
-      // In-call backstop: surface the count on the video stage so it is
-      // co-visible with Maya. Single source — the same repsThis the echo uses.
-      setInCallRep(total ? `Rep ${repsThis}/${total}` : `Rep ${repsThis}`);
+      // In-call hero: the same in-set rep count the gallery shell shows. The
+      // dose line carries the set context ("of 15" within "Set 1 of 3"). This
+      // is one of two writers to the hero; the other is the always-on
+      // repSummary path in onPosePayload, which keeps the hero live during
+      // preflight and rest. Both write the SAME detected count, so they cannot
+      // disagree.
+      const dose = total
+        ? `of ${total} · set ${guided.setIdx + 1}/${guided.totalSets}`
+        : `set ${guided.setIdx + 1}/${guided.totalSets}`;
+      setInCallRep(repsThis, dose);
     } else {
       setLabel.textContent = "";
       repLabel.textContent = "";
@@ -3576,6 +3659,21 @@ async function togglePoseFormCheck(wrap, item, btn) {
     setInCallFormStatus(overall);
     renderPoseMetrics(metricsEl, payload, item.ex);
     renderPoseWarnings(warningsEl, payload);
+
+    // SINGLE-SOURCE hero counter. pose.js publishes the authoritative running
+    // count on EVERY frame via payload.repSummary.repCount — the same value the
+    // metrics reps-pill reads. Driving the hero from it here is the fix for the
+    // stale "Rep 0": the hero now tracks detected reps through preflight and
+    // rest, so it can never sit frozen behind the working pill. During the
+    // active phase the more precise per-set writer (updateSetRepLabels) owns the
+    // hero so the count resets cleanly at a set boundary; this path fills every
+    // other phase. Still gated on real detected reps — repCount only advances
+    // when pose.js completes a rep.
+    if (guided.phase !== "active") {
+      const heroCount = payload.repSummary ? payload.repSummary.repCount : 0;
+      const total = guided.repsPerSet || 0;
+      setInCallRep(heroCount, total ? `of ${total}` : "reps");
+    }
 
     if (guided.phase === "preflight") {
       handlePreflight(payload);
