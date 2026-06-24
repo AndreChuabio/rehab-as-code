@@ -34,20 +34,34 @@ def get_health_data(user_token: str | None = None) -> dict:
     """
     Returns today's health metrics + 7-day history.
 
-    If user_token is provided, reads that user's per-token store first
-    (data posted by their iOS Shortcut). Falls through to Open Wearables /
-    Apple cache / mock if no per-user data exists yet.
+    Resolution precedence when a user_token is supplied:
+      1. Junction (the rebrand of Vital) — when the patient has a connected
+         junction_connections row. Real wearable data is purely ADDITIVE: any
+         Junction failure (not connected, stale, HTTP error, missing env,
+         missing DATABASE_URL, mapping error) falls through to the existing
+         chain and NEVER raises to the caller.
+      2. Per-token user store (data posted by the patient's iOS Shortcut).
+      3. Open Wearables / Apple cache / mock (the existing HEALTH_DATA_SOURCE
+         chain below).
 
-    Source priority without a token is controlled by HEALTH_DATA_SOURCE:
+    Without a token, Junction and the per-user store are skipped; the
+    HEALTH_DATA_SOURCE mode controls the rest:
       - open_wearables: force Open Wearables read path
       - apple_cache: only use Apple cache + mock fallback
       - auto (default): try Open Wearables when configured, then cache, then mock
+
+    Every not-connected / fallback return is stamped via _stamp_not_connected so
+    the dashboard always shows full numeric defaults with a "not_connected" flag.
     """
     if user_token:
+        junction = _get_junction_health_data(user_token)
+        if junction:
+            return junction
+
         from user_store import load_user
         user = load_user(user_token)
         if user and user.get("health"):
-            return user["health"]
+            return _stamp_not_connected(user["health"])
 
     source_mode = (os.getenv("HEALTH_DATA_SOURCE") or "auto").strip().lower()
 
@@ -101,8 +115,171 @@ def ingest_shortcut_payload(payload: dict) -> dict:
 def _get_cache_or_mock() -> dict:
     cache = _load_cache()
     if cache and _is_fresh(cache):
-        return cache
-    return get_mock_health_data()
+        return _stamp_not_connected(cache)
+    return _stamp_not_connected(get_mock_health_data())
+
+
+# ---------------------------------------------------------------------------
+# Junction (the rebrand of Vital) — real wearable source, additive over mock
+# ---------------------------------------------------------------------------
+
+def _stamp_not_connected(health: dict) -> dict:
+    """Overlay not-connected flags WITHOUT clobbering the existing source.
+
+    The dashboard reads `status` + `isLive` to pick the badge state. The mock /
+    cache / per-user dict already carries full numeric defaults (sleep_score,
+    hrv_ms, recovery_score), so the panel never renders '--' or NaN — the
+    defaults are just there. `source` is preserved so the legacy apple_watch
+    "Live" affordance keeps working unchanged.
+    """
+    return {**health, "status": "not_connected", "isLive": False}
+
+
+def _get_junction_health_data(user_token: str) -> dict | None:
+    """Return mapped REAL Junction metrics, or None to fall through to mock.
+
+    Fail-open contract (product owner's hard requirement): the ENTIRE body is
+    wrapped so any failure — not connected, stale cache that can't refresh,
+    JunctionError, JunctionRepoError, missing env, missing DATABASE_URL, or a
+    mapping bug — returns None instead of raising. The resolver then serves the
+    existing mock defaults. A Junction outage can never 500 the dashboard or
+    break the planner pipeline.
+
+    PHI hygiene: logs at WARNING carry no raw metric values or vital_user_id.
+    """
+    try:
+        import junction_repo
+        from junction_repo import JunctionRepoError
+
+        try:
+            row = junction_repo.get_by_token(user_token)
+        except JunctionRepoError:
+            # No DATABASE_URL (local sqlite / CI) or repo unavailable — skip
+            # Junction silently and let the existing chain answer.
+            return None
+
+        if not row or row.get("status") != "connected":
+            return None
+
+        cached = row.get("cached_metrics") or {}
+        if not cached:
+            # Connected but nothing cached yet (link returned before the first
+            # webhook/refresh landed). Don't block the read path on a network
+            # round trip — serve mock and let the frontend trigger
+            # POST /api/junction/refresh out-of-band to populate the cache.
+            return None
+
+        # Serve the cache on the read path REGARDLESS of freshness. The read
+        # path (/health-data, /chat, /context) must never make a 2-leg Junction
+        # round trip — a slow/hung upstream would add seconds of synchronous
+        # latency to a patient-facing request. The frontend repopulates the
+        # cache asynchronously via POST /api/junction/refresh (the refresh seam).
+        # Same-day cache reads as fresh ("Live"); older reads are flagged stale
+        # so the UI can show "Synced {date}" instead of overstating recency.
+        return _stamp_junction(
+            cached, row.get("providers"), row.get("last_synced_at"), stale=not _is_fresh(cached)
+        )
+    except Exception:  # noqa: BLE001 — fail-open: never raise to consumers
+        logger.warning("junction: read path failed, falling back to mock")
+        return None
+
+
+def _refresh_junction_metrics(vital_user_id: str) -> dict | None:
+    """Pull the 7-day window from Junction and map into the health schema.
+
+    Returns the full health dict (today + history + trend), or None on any
+    Junction failure so the caller degrades to mock.
+    """
+    from junction_client import JunctionClient, JunctionError, build_config
+
+    config = build_config()
+    if not config:
+        return None
+    try:
+        client = JunctionClient(config)
+        today = date.today()
+        start_date = today - timedelta(days=6)
+        raw_days = client.fetch_daily(vital_user_id, start_date, today)
+        return _normalize_junction_data(raw_days, today)
+    except JunctionError:
+        logger.warning("junction: fetch_daily failed")
+        return None
+    except Exception:  # noqa: BLE001 — mapping/parse failure also degrades to mock
+        logger.warning("junction: unexpected error mapping data")
+        return None
+
+
+def _normalize_junction_data(raw_days: list[dict], today: date) -> dict:
+    """Build the full 7-day health dict from raw Junction rows.
+
+    Identical pipeline to _normalize_open_wearables_data: each day's raw metrics
+    feed _build_full_record (deriving sleep_score / recovery_score / hrv_7day_avg
+    locally — Junction's per-provider sleep.score is NULL for Apple/Fitbit, and
+    recovery is not a free summary field), then _analyze_trend yields trend{}.
+    Every clinical gate (HRV +5/-8, sleep<70, recovery<60) reads the same keys.
+
+    Missing days are zero-filled (same as the Open Wearables path) so a partial
+    window never shifts the trend window.
+    """
+    by_day = {d["date"]: d for d in raw_days if d.get("date")}
+
+    rows: list[dict] = []
+    raw_history: list[dict] = []
+    for offset in range(6, -1, -1):
+        day = today - timedelta(days=offset)
+        day_key = str(day)
+        raw = by_day.get(day_key) or _empty_junction_raw(day_key)
+        record = _build_full_record(raw, raw_history + [raw])
+        rows.append(record)
+        raw_history.append(raw)
+
+    history = rows[:-1]
+    today_data = rows[-1]
+    trend = _analyze_trend(history, today_data)
+    return {**today_data, "history": history, "trend": trend}
+
+
+def _empty_junction_raw(day_key: str) -> dict:
+    return {
+        "date": day_key,
+        "sleep_hours": 0.0,
+        "hrv_ms": 0,
+        "resting_hr": 0,
+        "steps_yesterday": 0,
+        "calories_burned": 0,
+        "source": "junction",
+    }
+
+
+def _provider_list(mapped: dict) -> list[str]:
+    """Best-effort provider label for the cache; defaults to ['junction']."""
+    src = mapped.get("source")
+    if src and src != "junction":
+        return [src]
+    return ["junction"]
+
+
+def _stamp_junction(health: dict, providers, last_synced_at=None, stale: bool = False) -> dict:
+    """Overlay the connected/Live flags + a provider-derived source label.
+
+    `last_synced_at` (junction_connections.last_synced_at, ISO string) and
+    `stale` are surfaced so the frontend can show a visible "Updated {when}"
+    line and reserve the "Live" wording for genuinely same-day data. A stale
+    cache stays connected (real metrics, real provider) — it is just labelled
+    honestly rather than presented as fresh.
+    """
+    provider = None
+    if isinstance(providers, (list, tuple)) and providers:
+        provider = providers[0]
+    return {
+        **health,
+        "source": provider or health.get("source") or "junction",
+        "data_source": "junction",
+        "status": "connected",
+        "isLive": True,
+        "last_synced_at": last_synced_at,
+        "stale": bool(stale),
+    }
 
 
 def _get_open_wearables_health_data() -> dict | None:

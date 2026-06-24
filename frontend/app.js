@@ -123,6 +123,9 @@ document.addEventListener("DOMContentLoaded", () => {
   applyStepLocks();
   routeFromHash(); // honour URL on load — visual only; no auto-modal-opens.
   bootstrapAuth();
+  // Junction wearable connect: wire the CTA + handle the hosted-Link return.
+  document.getElementById("connectHealthBtn")?.addEventListener("click", connectHealth);
+  handleJunctionReturn();
   wireIntakeModal();
   wirePlanGenModal();
   // "Take the tour" — always available, re-launches regardless of the flag.
@@ -1208,8 +1211,11 @@ function switchStage(mode) {
 
 async function loadSidebar() {
   try {
+    // authedFetch on /health-data so a connected patient's Junction row resolves
+    // server-side via current_user_id (the single get_health_data seam). Falls
+    // back to mock defaults when unauthed or not connected.
     const [healthRes, calRes] = await Promise.all([
-      fetch(`${API_BASE}/health-data`),
+      authedFetch(`${API_BASE}/health-data`),
       fetch(`${API_BASE}/calendar`),
     ]);
     const health = await healthRes.json();
@@ -1222,27 +1228,175 @@ async function loadSidebar() {
   }
 }
 
+// Render the three score values. When `live` is false the values are admittedly
+// synthetic sample data, so we deliberately STRIP the good/ok/low color
+// semantics and dim them — color-coded numbers must never read as real patient
+// health when no device is connected.
 function renderHealth(health) {
+  const connected = health.status === "connected" || health.isLive === true;
+  const appleLive = health.source === "apple_watch";
+  const isLive = connected || appleLive;
+
   const score = (val) => {
-    const pct = val;
-    const cls = pct >= 80 ? "good" : pct >= 60 ? "ok" : "low";
+    if (!isLive) {
+      // Inert: no success/warning color on synthetic numbers.
+      return `<span class="score sample">${val}</span>`;
+    }
+    const cls = val >= 80 ? "good" : val >= 60 ? "ok" : "low";
     return `<span class="score ${cls}">${val}</span>`;
   };
+  // Values always render — the backend mock dict carries full numeric defaults
+  // so the panel never shows '--' / NaN, connected or not.
   document.getElementById("sleepScore").innerHTML =
     score(health.sleep_score) + "<small>/100</small>";
   document.getElementById("hrv").innerHTML = `${health.hrv_ms}<small>ms</small>`;
   document.getElementById("recovery").innerHTML =
     score(health.recovery_score) + "<small>/100</small>";
 
-  const isLive = health.source === "apple_watch";
+  // Dim the whole stats block in the not-connected state so the synthetic
+  // numbers visibly recede instead of dominating the card.
+  const stats = document.getElementById("healthStats");
+  if (stats) stats.classList.toggle("sample-data", !isLive);
+
+  // Badge states off the resolver flags:
+  //   connected Junction, same-day cache (isLive, not stale) -> "Live · provider"
+  //   connected Junction, day-old cache (stale)              -> "Synced · provider"
+  //   legacy Apple-Watch synced (source=apple_watch)         -> "Live"
+  //   anything else (not connected / mock defaults)          -> "Not connected"
+  const stale = connected && health.stale === true;
   const badge = document.getElementById("dataSourceBadge");
+  const caption = document.getElementById("healthCaption");
+
   if (badge) {
-    badge.textContent = isLive ? "Live" : "Mock";
-    badge.className = `source-badge ${isLive ? "live" : "mock"}`;
-    badge.title = isLive
-      ? `Apple Watch synced ${health.date}`
-      : "Mock data - run the iOS Shortcut to sync Watch data";
+    if (isLive) {
+      const provider =
+        connected && health.source && health.source !== "junction"
+          ? health.source
+          : null;
+      // Reserve "Live" for genuinely fresh (same-day) data; a stale cache reads
+      // "Synced" so the badge never overstates recency.
+      const word = stale ? "Synced" : "Live";
+      badge.textContent = provider ? `${word} · ${provider}` : word;
+      badge.className = stale ? "source-badge synced" : "source-badge live";
+      badge.setAttribute("aria-label", `Wearable data ${word.toLowerCase()}`);
+    } else {
+      badge.textContent = "Not connected";
+      badge.className = "source-badge unconnected";
+      badge.setAttribute("aria-label", "No wearable connected, showing sample data");
+    }
   }
+
+  // Visible, layout-level disclosure (not a hover-only title). On touch devices
+  // and for screen readers this is the load-bearing honesty signal.
+  if (caption) {
+    if (!isLive) {
+      caption.textContent = "Sample values - not your data. Connect a wearable for your real metrics.";
+      caption.className = "health-caption sample";
+    } else {
+      const provider =
+        connected && health.source && health.source !== "junction"
+          ? health.source
+          : appleLive
+          ? "Apple Watch"
+          : "Junction";
+      const when = _formatSyncedAt(health.last_synced_at, health.date, stale);
+      caption.textContent = `${when} · ${provider}`;
+      caption.className = "health-caption live";
+    }
+  }
+
+  const btn = document.getElementById("connectHealthBtn");
+  if (btn) {
+    // Hide the CTA once connected; otherwise show it so the patient can link.
+    btn.hidden = isLive;
+  }
+}
+
+// Build a human "Updated 3h ago" / "Synced 2026-06-22" line from the connection
+// row's last_synced_at (preferred) or the metric calendar date as a fallback.
+function _formatSyncedAt(lastSyncedAt, metricDate, stale) {
+  if (lastSyncedAt) {
+    const ts = new Date(lastSyncedAt);
+    if (!isNaN(ts.getTime())) {
+      const mins = Math.floor((Date.now() - ts.getTime()) / 60000);
+      if (!stale && mins >= 0) {
+        if (mins < 1) return "Updated just now";
+        if (mins < 60) return `Updated ${mins}m ago`;
+        const hrs = Math.floor(mins / 60);
+        if (hrs < 24) return `Updated ${hrs}h ago`;
+      }
+      return `Synced ${ts.toISOString().slice(0, 10)}`;
+    }
+  }
+  if (metricDate) return stale ? `Synced ${metricDate}` : `Updated ${metricDate}`;
+  return stale ? "Synced recently" : "Updated recently";
+}
+
+// Start the Junction hosted-Link flow: POST /api/junction/link, then redirect
+// the browser to the returned single-use link_web_url. The patient connects a
+// device on Junction's page and is returned to JUNCTION_REDIRECT_URL with
+// ?state=success, which re-fires the refresh + sidebar reload below.
+async function connectHealth() {
+  const btn = document.getElementById("connectHealthBtn");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await authedFetch(`${API_BASE}/api/junction/link`, { method: "POST" });
+    if (!res.ok) {
+      showToast("Wearable connect is unavailable right now", "error");
+      return;
+    }
+    const data = await res.json();
+    if (data.link_web_url) {
+      window.location.href = data.link_web_url;
+    } else {
+      showToast("Could not start the connection", "error");
+    }
+  } catch (e) {
+    console.error("connectHealth failed:", e);
+    showToast("Could not start the connection", "error");
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+// On return from Junction's hosted page (?state=success) pull fresh data, then
+// reload the sidebar so the panel flips to the real metrics + "Live" badge.
+async function handleJunctionReturn() {
+  const params = new URLSearchParams(window.location.search);
+  if (params.get("state") !== "success") return;
+
+  // Clean the query first so a manual reload mid-sync doesn't re-trigger.
+  const clean = window.location.pathname + window.location.hash;
+  window.history.replaceState({}, document.title, clean);
+
+  // Visible "syncing" state on the panel so the patient isn't staring at the
+  // old sample numbers wondering whether the connect worked.
+  const badge = document.getElementById("dataSourceBadge");
+  const caption = document.getElementById("healthCaption");
+  if (badge) {
+    badge.textContent = "Syncing...";
+    badge.className = "source-badge syncing";
+  }
+  if (caption) {
+    caption.textContent = "Pulling your wearable data...";
+    caption.className = "health-caption live";
+  }
+
+  let refreshOk = false;
+  try {
+    const res = await authedFetch(`${API_BASE}/api/junction/refresh`, { method: "POST" });
+    const body = await res.json().catch(() => ({}));
+    refreshOk = res.ok && body.status === "connected";
+  } catch (e) {
+    console.error("Junction refresh failed:", e);
+  }
+
+  if (!refreshOk) {
+    // Connected, but data isn't ready yet (Junction can take a few minutes to
+    // ingest). Tell the patient instead of silently reverting to sample data.
+    showToast("Connected. Your data may take a few minutes to sync.", "info");
+  }
+  loadSidebar();
 }
 
 function renderCalendar(events) {

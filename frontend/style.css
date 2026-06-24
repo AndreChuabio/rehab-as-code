@@ -301,6 +301,25 @@ body {
 .score.good { color: var(--success); }
 .score.ok   { color: var(--warn); }
 .score.low  { color: var(--danger); }
+/* .sample — synthetic not-connected numbers. No success/warning color (they are
+   admittedly fake) and inherit the dimming from .stats.sample-data. */
+.score.sample { color: var(--text); }
+
+/* When no wearable is connected the whole stats block is desaturated so the
+   sample numbers visibly recede instead of reading as real, color-coded health. */
+.stats.sample-data { opacity: 0.45; }
+
+/* Visible connection-state caption under the stats. The load-bearing honesty
+   signal — never hidden behind a hover title. */
+.health-caption {
+  margin-top: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+.health-caption:empty { display: none; }
+.health-caption.sample { color: var(--muted); }
+.health-caption.live { color: var(--muted); }
 
 /* Calendar */
 .event-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
@@ -344,6 +363,39 @@ body {
   border: 2px dashed var(--mock-border);
   color: var(--danger);
   letter-spacing: 0.12em;
+}
+/* .unconnected — patient has not linked a wearable yet. The panel still shows
+   mock defaults; this benign muted pill says "Not connected". Deliberately NOT
+   red/dashed (that's reserved for the synthetic-data .mock callout) and not
+   green (that's real .live data) — neutral so it doesn't compete for attention. */
+.source-badge.unconnected {
+  background: transparent;
+  border: 1px solid var(--muted);
+  color: var(--muted);
+  letter-spacing: 0.12em;
+}
+/* .synced — real wearable data, but the cache is day-old (not same-day). Quiet
+   amber so it reads as "real but not fresh", distinct from the green .live. */
+.source-badge.synced {
+  background: rgba(228, 178, 92, 0.15);
+  color: var(--warn);
+}
+/* .syncing — transient state while POST /api/junction/refresh is in flight after
+   a connect return. Neutral muted pill. */
+.source-badge.syncing {
+  background: transparent;
+  border: 1px solid var(--muted);
+  color: var(--muted);
+}
+
+/* Connect-health CTA: full-width sidebar button under the Wearable Signals
+   stats. Reuses .start-btn.secondary geometry; just margin + sizing tweaks. */
+.connect-health-btn {
+  margin-top: 12px;
+  width: 100%;
+  justify-content: center;
+  padding: 10px 16px;
+  font-size: 13px;
 }
 
 /* ── Center Panel ──────────────────────────────────────────────────── */
