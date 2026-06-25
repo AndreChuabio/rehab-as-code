@@ -1,0 +1,7 @@
+:root{
+  --space-1:4px;--space-2:6px;--space-3:8px;--space-4:10px;--space-5:12px;--space-6:16px;--space-7:18px;--space-8:20px;--space-9:24px;--space-10:28px;
+  --radius:22px; --radius-btn:999px; --radius-sm:14px; --radius-xs:10px; --radius-pill:999px;
+  --shadow:0 12px 32px -12px rgba(70,32,61,0.18); --shadow-cta:0 8px 20px -6px rgba(94,42,77,0.30); --shadow-focus:0 0 0 3px rgba(94,42,77,0.14);
+  --ease:ease;--dur-fast:0.12s;--dur-base:0.15s;--dur-slow:0.25s;--transition-btn:all 0.12s ease;
+  --sidebar-w:280px;--queue-w:320px;--main-max:1400px;
+}

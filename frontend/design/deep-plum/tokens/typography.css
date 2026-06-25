@@ -1,0 +1,10 @@
+:root{
+  --font-serif:'Newsreader',Georgia,'Times New Roman',serif;
+  --font-sans:'Hanken Grotesque',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --font-mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  --font-display:var(--font-serif);
+  --fs-11:11px;--fs-12:12px;--fs-13:13px;--fs-14:14px;--fs-15:15px;--fs-16:16px;--fs-18:18px;--fs-20:20px;--fs-23:23px;--fs-28:28px;--fs-33:33px;
+  --fw-regular:400;--fw-medium:500;--fw-semibold:600;--fw-bold:700;--fw-heavy:800;
+  --lh-tight:1.1;--lh-snug:1.45;--lh-body:1.5; --ls-mono:0.08em;--ls-caps:0.06em;--ls-mock:0.12em;
+}
+.ds-eyebrow{font-family:var(--font-mono);font-size:var(--fs-11);font-weight:var(--fw-semibold);text-transform:uppercase;letter-spacing:var(--ls-mono);color:var(--muted);}

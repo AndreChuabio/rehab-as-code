@@ -2,39 +2,104 @@
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 :root {
-  /* Clinical Twilight palette. Cool, precise, clinician-forward.
-     Replaces the previous GitHub-dark + sage-green palette. PR-Q untangles
-     --accent (CTA) from --success (completion / done states) so the same
-     token no longer does double duty. See frontend/DESIGN_SYSTEM.md §1. */
-  --bg:             #0b1220;
-  --surface:        #141c2e;
-  --surface2:       #1d2742;
-  --surface3:       #283356;   /* hover / selected — replaces invisible surface2 hovers */
-  --border:         #2e3a5c;
-  --border-strong:  #4a5a85;
-  --text:           #e8eef7;
-  --text-strong:    #ffffff;
-  --muted:          #9aa7c2;
-  --accent:         #4fb3c4;   /* primary CTA — desaturated medical teal */
-  --accent-hover:   #6bc6d6;
-  --accent2:        #7a9eff;   /* secondary / link — calm periwinkle */
-  --success:        #5fd09a;   /* completed session, approved pill, "you did it" */
-  --success-bg:     #1a3329;
-  --warn:           #e8b54a;
-  --warn-bg:        #3a2e15;
-  --danger:         #ff6b7a;
-  --danger-bg:      #3a1820;
-  --ai-accent:      #c89b6c;   /* warm tan — AI-generated narrator block */
-  --ai-bg:          #2a2218;
-  --mock-border:    #ff6b7a;
-  --radius:         12px;
-  --shadow:         0 4px 24px rgba(0, 0, 0, 0.4);
+  /* Deep Plum palette (2026 revamp). Light & warm, AAA-minded. Warm blush
+     paper on white cards; deep aubergine --accent is CTA only; warm apricot
+     --accent2 is the encouragement/highlight accent. Same token NAMES as the
+     retired Clinical Twilight set — only the values changed, so every
+     token-bound component re-skins automatically. The old dark values live
+     under :root[data-theme="dark"] below for opt-in dark mode.
+     See frontend/DESIGN_SYSTEM.md §1 and frontend/design/deep-plum/. */
+  --bg:             #F4EEF0;
+  --surface:        #FFFFFF;
+  --surface2:       #EFE2EA;
+  --surface3:       #E6D4DF;   /* hover / selected */
+  --border:         #E8DDE2;
+  --border-strong:  #D6C4CE;
+  --text:           #241620;
+  --text-strong:    #160C13;
+  --muted:          #796A73;
+  --accent:         #5E2A4D;   /* primary CTA — deep aubergine */
+  --accent-hover:   #4A2040;
+  --accent2:        #D98A4E;   /* encouragement / highlight — warm apricot */
+  --success:        #2E7D5B;   /* completed session, approved pill */
+  --success-bg:     #E2F0E9;
+  --warn:           #B9742A;
+  --warn-bg:        #F7EAD8;
+  --danger:         #C2492F;
+  --danger-bg:      #F6E3DD;
+  --ai-accent:      #9A6B2E;   /* warm gold — AI-authored content */
+  --ai-bg:          #F4EBD8;
+  --mock-border:    #C2492F;
+
+  /* rgb triplets — lets hardcoded rgba(...) tints track the theme */
+  --rgb-accent:   94,42,77;
+  --rgb-accent2:  217,138,78;
+  --rgb-success:  46,125,91;
+  --rgb-warn:     185,116,42;
+  --rgb-danger:   194,73,47;
+  --rgb-ai:       154,107,46;
+
+  /* semantic aliases */
+  --page-bg:        var(--bg);
+  --surface-card:   var(--surface);
+  --surface-nested: var(--surface2);
+  --surface-hover:  var(--surface3);
+  --text-body:      var(--text);
+  --text-heading:   var(--text-strong);
+  --text-caption:   var(--muted);
+  --cta:            var(--accent);
+  --cta-text:       #FFFFFF;
+  --link:           var(--accent);
+  --focus-ring:     var(--accent);
+
+  /* the one deliberate gradient — the plum hero card */
+  --hero-grad:      linear-gradient(150deg,#6B3057,#46203D);
+
+  /* fonts */
+  --font-serif:     'Newsreader',Georgia,'Times New Roman',serif;
+  --font-sans:      'Hanken Grotesque',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --font-mono:      'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+  --font-display:   var(--font-serif);
+
+  /* type ladder */
+  --fs-11:11px;--fs-12:12px;--fs-13:13px;--fs-14:14px;--fs-15:15px;--fs-16:16px;--fs-18:18px;--fs-20:20px;--fs-23:23px;--fs-28:28px;--fs-33:33px;
+  --fw-regular:400;--fw-medium:500;--fw-semibold:600;--fw-bold:700;--fw-heavy:800;
+  --lh-tight:1.1;--lh-snug:1.45;--lh-body:1.5;
+  --ls-mono:0.08em;--ls-caps:0.06em;--ls-mock:0.12em;
+
+  /* radii / shadow */
+  --radius:         22px;
+  --radius-btn:     999px;
+  --radius-sm:      14px;
+  --radius-xs:      10px;
+  --radius-pill:    999px;
+  --shadow:         0 12px 32px -12px rgba(70,32,61,0.18);
+  --shadow-cta:     0 8px 20px -6px rgba(94,42,77,0.30);
+  --shadow-focus:   0 0 0 3px rgba(94,42,77,0.14);
+
+  /* spacing / motion / layout */
+  --space-1:4px;--space-2:6px;--space-3:8px;--space-4:10px;--space-5:12px;--space-6:16px;--space-7:18px;--space-8:20px;--space-9:24px;--space-10:28px;
+  --ease:ease;--dur-fast:0.12s;--dur-base:0.15s;--dur-slow:0.25s;--transition-btn:all 0.12s ease;
+  --sidebar-w:280px;--queue-w:320px;--main-max:1400px;
+}
+
+/* Opt-in dark mode = the old Clinical Twilight palette. Only colors / rgb
+   triplets / --cta-text / --hero-grad are re-declared; the font, type,
+   radius and spacing ladders inherit from :root unchanged. Flip by setting
+   data-theme="dark" on <html>. */
+:root[data-theme="dark"] {
+  --bg:#0b1220; --surface:#141c2e; --surface2:#1d2742; --surface3:#283356; --border:#2e3a5c; --border-strong:#4a5a85;
+  --text:#e8eef7; --text-strong:#ffffff; --muted:#9aa7c2; --accent:#4fb3c4; --accent-hover:#6bc6d6; --accent2:#7a9eff;
+  --success:#5fd09a; --success-bg:#1a3329; --warn:#e8b54a; --warn-bg:#3a2e15; --danger:#ff6b7a; --danger-bg:#3a1820;
+  --ai-accent:#c89b6c; --ai-bg:#2a2218; --mock-border:#ff6b7a;
+  --rgb-accent:79,179,196; --rgb-accent2:122,158,255; --rgb-success:95,208,154; --rgb-warn:232,181,74; --rgb-danger:255,107,122; --rgb-ai:200,155,108;
+  --cta-text:#0b1220; --hero-grad:linear-gradient(150deg,#1d2742,#0b1220);
 }
 
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-family: var(--font-sans);
   font-size: 15px;
   min-height: 100vh;
 }
@@ -55,15 +120,16 @@ body {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 28px;
-  background: var(--surface);
+  padding: 18px 32px;
+  background: transparent;
   border-bottom: 1px solid var(--border);
   flex: 0 0 auto;
 }
 
 .logo { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 600; }
 .logo-icon { font-size: 24px; }
-.date-display { color: var(--muted); font-size: 13px; }
+.logo-text { font-family: var(--font-serif); font-size: 22px; font-weight: 600; color: var(--text-strong); letter-spacing: -0.01em; }
+.date-display { color: var(--muted); font-size: 13px; font-family: var(--font-mono); }
 
 .main {
   display: flex;
@@ -81,9 +147,10 @@ body {
   font-size: 11px;
   font-weight: 400;
   color: var(--muted);
-  letter-spacing: 0;
+  letter-spacing: 0.02em;
   margin-top: 2px;
   text-transform: none;
+  font-family: var(--font-mono);
 }
 
 /* ── Sidebar ───────────────────────────────────────────────────────── */
@@ -93,7 +160,7 @@ body {
 .agent-panel { width: 320px; flex-shrink: 0; display: flex; flex-direction: column; gap: 16px; }
 
 .agent-blurb { font-size: 13px; color: var(--muted); margin-bottom: 12px; line-height: 1.5; }
-.agent-blurb a { color: var(--accent2); text-decoration: none; }
+.agent-blurb a { color: var(--link); text-decoration: none; }
 .agent-blurb a:hover { text-decoration: underline; }
 
 .agent-buttons { display: flex; flex-direction: column; gap: 8px; }
@@ -109,7 +176,7 @@ body {
   text-align: left;
   font-family: inherit;
 }
-.agent-btn.primary { background: var(--accent); color: var(--bg); border-color: var(--accent); }
+.agent-btn.primary { background: var(--accent); color: var(--cta-text); border-color: var(--accent); }
 .agent-btn.primary:hover:not(:disabled) { filter: brightness(1.1); }
 .agent-btn.secondary { background: var(--surface2); color: var(--text); }
 .agent-btn.secondary:hover:not(:disabled) { background: var(--surface3); border-color: var(--accent2); }
@@ -137,7 +204,7 @@ body {
   padding: 4px 10px;
   font-size: 11px;
   color: var(--muted);
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
   transition: all 0.2s ease;
   white-space: nowrap;
 }
@@ -147,10 +214,10 @@ body {
   color: var(--text);
 }
 .team-node.active {
-  background: rgba(79, 179, 196, 0.15);
+  background: rgba(var(--rgb-accent),  0.15);
   border-color: var(--accent);
   color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(79, 179, 196, 0.08);
+  box-shadow: 0 0 0 3px rgba(var(--rgb-accent),  0.08);
 }
 
 /* ── Patient-journey trigger strip ────────────────────────────────── */
@@ -200,7 +267,7 @@ body {
   flex-shrink: 0;
 }
 .trigger-btn.primary .trigger-num { background: rgba(0,0,0,0.15); }
-.trigger-name { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+.trigger-name { font-family: var(--font-mono); }
 
 /* Trace list */
 .agent-trace-card {
@@ -218,13 +285,13 @@ body {
   border-left: 2px solid var(--border);
   border-radius: 4px;
   font-size: 12px;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
   animation: fadeIn 0.25s ease-out;
 }
 .trace-event.trace-child {
   margin-left: 14px;
   border-left-color: var(--accent2);
-  background: rgba(122, 158, 255, 0.06);
+  background: rgba(var(--rgb-accent2),  0.06);
 }
 .trace-glyph { color: var(--muted); font-weight: 600; }
 .trace-ts { color: var(--muted); text-align: right; }
@@ -232,8 +299,8 @@ body {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 999px;
-  background: rgba(122, 158, 255, 0.18);
-  color: var(--accent2);
+  background: rgba(var(--rgb-accent2),  0.18);
+  color: var(--accent);
   font-weight: 600;
   text-transform: lowercase;
   letter-spacing: 0.02em;
@@ -252,9 +319,9 @@ body {
 
 /* PR diff card */
 .pr-meta { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
-.pr-link { color: var(--accent2); text-decoration: none; font-size: 13px; word-break: break-all; }
+.pr-link { color: var(--link); text-decoration: none; font-size: 13px; word-break: break-all; }
 .pr-link:hover { text-decoration: underline; }
-.pr-branch { color: var(--muted); font-size: 12px; font-family: ui-monospace, monospace; }
+.pr-branch { color: var(--muted); font-size: 12px; font-family: var(--font-mono); }
 .pr-summary { font-size: 13px; color: var(--muted); line-height: 1.5; }
 
 /* Protocol card */
@@ -274,24 +341,51 @@ body {
   border-radius: 4px;
 }
 .ex-name { font-size: 13px; color: var(--text); font-weight: 500; }
-.ex-spec { font-size: 11px; color: var(--muted); font-family: ui-monospace, monospace; }
+.ex-spec { font-size: 11px; color: var(--muted); font-family: var(--font-mono); }
 .provider-note { font-size: 11px; color: var(--muted); padding-top: 8px; border-top: 1px solid var(--border); }
 .provider-note code {
   background: var(--surface2);
   padding: 1px 6px;
   border-radius: 3px;
-  font-family: ui-monospace, monospace;
-  color: var(--accent2);
+  font-family: var(--font-mono);
+  color: var(--accent);
 }
 
 .card {
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 18px;
+  padding: 20px 22px;
+  box-shadow: var(--shadow);
 }
 
-.card h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 14px; }
+/* Signature "protocols as code" move: sidebar section labels become a mono
+   "// " eyebrow. Scoped to the actual sidebar card classes (NOT a bare
+   `.card h3`) so .settings-card h3 stays a Newsreader heading and the
+   chat/history titles are unaffected. The inline badge spans inside these
+   h3 (#dataSourceBadge, #patientPayerBadge) are preserved — ::before only
+   prefixes the label text. */
+.health-card h3,
+.protocol-card h3,
+.payer-goals-card h3,
+.today-session-card h3,
+.calendar-card h3,
+.recommendations h3 {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-mono);
+  color: var(--muted);
+  margin-bottom: 16px;
+}
+.health-card h3::before,
+.protocol-card h3::before,
+.payer-goals-card h3::before,
+.today-session-card h3::before,
+.calendar-card h3::before,
+.recommendations h3::before { content: "// "; }
 
 /* Health Stats */
 .stats { display: flex; flex-direction: column; gap: 10px; }
@@ -357,7 +451,7 @@ body {
             solid red banner). The dashed outline + cap text + brand-red
             colour signal "synthetic data" without competing for the
             "patient is in danger" attention slot. */
-.source-badge.live { background: rgba(95, 208, 154, 0.15); color: var(--success); }
+.source-badge.live { background: rgba(var(--rgb-success), 0.15); color: var(--success); }
 .source-badge.mock {
   background: transparent;
   border: 2px dashed var(--mock-border);
@@ -377,7 +471,7 @@ body {
 /* .synced — real wearable data, but the cache is day-old (not same-day). Quiet
    amber so it reads as "real but not fresh", distinct from the green .live. */
 .source-badge.synced {
-  background: rgba(228, 178, 92, 0.15);
+  background: rgba(var(--rgb-warn), 0.15);
   color: var(--warn);
 }
 /* .syncing — transient state while POST /api/junction/refresh is in flight after
@@ -435,7 +529,7 @@ body {
 
 .avatar-placeholder { display: flex; flex-direction: column; align-items: center; gap: 8px; }
 .avatar-emoji { font-size: 80px; line-height: 1; }
-.avatar-name { font-size: 22px; font-weight: 700; color: var(--accent); }
+.avatar-name { font-size: 22px; font-weight: 700; color: var(--accent); font-family: var(--font-serif); }
 .avatar-subtitle { color: var(--muted); font-size: 14px; max-width: 320px; line-height: 1.5; }
 
 /* Start button */
@@ -444,15 +538,15 @@ body {
   align-items: center;
   gap: 10px;
   background: var(--accent);
-  color: var(--bg);
+  color: var(--cta-text);
   border: none;
-  border-radius: 50px;
+  border-radius: var(--radius-btn);
   padding: 14px 32px;
   font-size: 16px;
   font-weight: 700;
   cursor: pointer;
   transition: transform .15s, opacity .15s;
-  box-shadow: 0 0 24px rgba(79, 179, 196, 0.3);
+  box-shadow: var(--shadow-cta);
 }
 .start-btn:hover  { transform: scale(1.04); }
 .start-btn:active { transform: scale(.98); }
@@ -479,7 +573,7 @@ body {
 
 /* Mic hint */
 .mic-hint {
-  background: rgba(122, 158, 255, 0.15);
+  background: rgba(var(--rgb-accent2),  0.15);
   border: 1px solid var(--accent2);
   color: var(--text);
   font-size: 13px;
@@ -705,11 +799,15 @@ body {
   #poseStage .pose-overlay-pulse[data-status="bad"] {
     animation: none;
   }
+  /* Deep Plum CTA lift: drop the scale transform when motion is reduced. */
+  .start-btn:hover,
+  .start-btn:active { transform: none; }
 }
 
 /* ── Recommendations ───────────────────────────────────────────────── */
 .recommendations { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; }
-.recommendations h3 { font-size: 13px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin-bottom: 14px; }
+/* .recommendations h3 inherits the mono "// " eyebrow treatment from the
+   sidebar-card eyebrow group above. */
 
 .rec-cards { display: flex; gap: 14px; flex-wrap: wrap; }
 
@@ -736,15 +834,16 @@ body {
 .chat-card { display: flex; flex-direction: column; gap: 12px; }
 
 .chat-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 0; }
-.chat-header h3 { margin: 0; }
+.chat-header h3 { margin: 0; font-family: var(--font-serif); font-weight: var(--fw-semibold); color: var(--text-strong); }
 .chat-tag {
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--accent);
-  background: rgba(79, 179, 196, 0.12);
+  background: rgba(var(--rgb-accent), 0.12);
   padding: 2px 8px;
   border-radius: 999px;
+  font-family: var(--font-mono);
 }
 
 .chat-log {
@@ -781,8 +880,8 @@ body {
 }
 .chat-bubble.user {
   align-self: flex-end;
-  background: var(--accent2);
-  color: var(--bg);
+  background: var(--accent);
+  color: var(--cta-text);
   border-bottom-right-radius: 4px;
   font-weight: 500;
 }
@@ -795,12 +894,12 @@ body {
 }
 .chat-bubble.system {
   align-self: stretch;
-  background: rgba(122, 158, 255, 0.08);
-  border: 1px solid rgba(122, 158, 255, 0.3);
-  color: var(--muted);
+  background: var(--ai-bg);
+  border: 1px solid rgba(var(--rgb-ai), 0.3);
+  color: var(--ai-accent);
   font-size: 12px;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
-  border-radius: 6px;
+  font-family: var(--font-mono);
+  border-radius: var(--radius-xs);
 }
 .chat-bubble.error {
   align-self: stretch;
@@ -884,10 +983,10 @@ body {
 }
 .exercise-title { font-weight: 600; font-size: 14px; color: var(--text); }
 .exercise-dose {
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--accent);
-  background: rgba(79, 179, 196, 0.12);
+  background: rgba(var(--rgb-accent),  0.12);
   padding: 2px 8px;
   border-radius: 999px;
 }
@@ -897,12 +996,12 @@ body {
   letter-spacing: 0.05em;
   padding: 2px 8px;
   border-radius: 999px;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
 }
 .video-source.sora {
-  background: rgba(122, 158, 255, 0.15);
-  color: var(--accent2);
-  border: 1px solid rgba(122, 158, 255, 0.4);
+  background: rgba(var(--rgb-accent2),  0.15);
+  color: var(--accent);
+  border: 1px solid rgba(var(--rgb-accent2),  0.4);
 }
 .video-source.youtube {
   background: rgba(148, 163, 184, 0.12);
@@ -967,15 +1066,15 @@ body {
   align-items: center;
   font-size: 11px;
   color: var(--muted);
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
   padding: 4px 8px;
-  background: rgba(95, 208, 154, 0.06);
+  background: rgba(var(--rgb-success),  0.06);
   border-left: 2px solid var(--success);
   border-radius: 4px;
   flex-shrink: 0;
 }
 .chat-tool-line .tool-glyph { color: var(--success); }
-.chat-tool-line a { color: var(--accent2); text-decoration: none; }
+.chat-tool-line a { color: var(--link); text-decoration: none; }
 .chat-tool-line a:hover { text-decoration: underline; }
 
 /* Suggestion chips */
@@ -1014,19 +1113,19 @@ body {
   color: var(--text);
   font-family: inherit;
   font-size: 14px;
-  padding: 10px 12px;
-  border-radius: 8px;
+  padding: 12px 18px;
+  border-radius: var(--radius-pill);
   outline: none;
   transition: border-color 0.12s ease;
 }
-.chat-input:focus { border-color: var(--accent2); }
+.chat-input:focus { border-color: var(--accent); box-shadow: var(--shadow-focus); }
 .chat-input:disabled { opacity: 0.6; cursor: not-allowed; }
 
 .chat-send-btn {
   background: var(--accent);
-  color: var(--bg);
+  color: var(--cta-text);
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-btn);
   padding: 0 18px;
   font-size: 14px;
   font-weight: 600;
@@ -1075,9 +1174,9 @@ body {
 .header-right { display: flex; align-items: center; gap: 16px; }
 .repo-link {
   font-size: 12px;
-  color: var(--accent2);
+  color: var(--accent);
   text-decoration: none;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
   padding: 4px 10px;
   border-radius: 999px;
   border: 1px solid var(--border);
@@ -1091,20 +1190,20 @@ body {
    stack-below-the-pill approach that overlapped click areas. */
 .auth-pill-dashlink {
   font-size: 11px;
-  color: var(--accent2);
+  color: var(--accent);
   text-decoration: none;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
   letter-spacing: 0.02em;
   padding: 3px 9px;
   border-radius: 999px;
   border: 1px solid var(--border);
-  background: rgba(120, 200, 200, 0.06);
+  background: rgba(var(--rgb-accent),  0.06);
   white-space: nowrap;
 }
 .auth-pill-dashlink[hidden] { display: none; }
 .auth-pill-dashlink:hover {
   border-color: var(--accent2);
-  background: rgba(120, 200, 200, 0.16);
+  background: rgba(var(--rgb-accent),  0.16);
 }
 
 /* Status card (replaces the bulky orchestrator panel) */
@@ -1125,7 +1224,7 @@ body {
 }
 .agent-status.working .agent-status-dot {
   background: var(--accent);
-  box-shadow: 0 0 0 3px rgba(79, 179, 196, 0.2);
+  box-shadow: 0 0 0 3px rgba(var(--rgb-accent), 0.2);
   animation: pulse 1.4s ease-in-out infinite;
 }
 .agent-status.done .agent-status-dot { background: var(--success); }
@@ -1133,7 +1232,7 @@ body {
 .agent-status-label {
   color: var(--text);
   font-weight: 500;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
 }
 
 @keyframes pulse {
@@ -1151,7 +1250,7 @@ body {
 }
 .team-mini-node {
   font-size: 10px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   color: var(--muted);
   padding: 2px 7px;
   border-radius: 999px;
@@ -1163,38 +1262,38 @@ body {
 .team-mini-node.active {
   color: var(--accent);
   border-color: var(--accent);
-  background: rgba(79, 179, 196, 0.1);
+  background: rgba(var(--rgb-accent), 0.1);
 }
 .team-mini-arrow { color: var(--muted); font-size: 11px; }
 
 /* Stage tabs (chat | video) */
 .stage-tabs {
   display: flex;
-  gap: 2px;
+  gap: 4px;
   margin-bottom: 12px;
-  padding: 4px;
+  padding: 5px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--radius-pill);
   width: fit-content;
 }
 .stage-tab {
   background: transparent;
   border: none;
   color: var(--muted);
-  font-size: 13px;
-  font-weight: 500;
-  padding: 8px 18px;
-  border-radius: 7px;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 9px 20px;
+  border-radius: var(--radius-pill);
   cursor: pointer;
   font-family: inherit;
   transition: all 0.15s ease;
 }
 .stage-tab:hover { color: var(--text); }
 .stage-tab.active {
-  background: var(--surface2);
-  color: var(--text);
-  box-shadow: inset 0 0 0 1px var(--border);
+  background: var(--accent);
+  color: var(--cta-text);
+  box-shadow: none;
 }
 
 .stage-pane[hidden] { display: none; }
@@ -1273,7 +1372,7 @@ body {
   border-radius: 999px;
   color: var(--text);
   font-size: 12px;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
   padding: 5px 11px;
   cursor: pointer;
   transition: all 0.12s ease;
@@ -1283,25 +1382,25 @@ body {
   background: var(--surface3);
 }
 .quick-action.primary {
-  background: rgba(79, 179, 196, 0.12);
+  background: rgba(var(--rgb-accent), 0.12);
   color: var(--accent);
-  border-color: rgba(79, 179, 196, 0.4);
+  border-color: rgba(var(--rgb-accent), 0.4);
   font-weight: 600;
 }
 .quick-action.primary:hover:not(:disabled) {
-  background: rgba(79, 179, 196, 0.2);
+  background: rgba(var(--rgb-accent), 0.2);
   border-color: var(--accent);
 }
 .quick-action:disabled { opacity: 0.4; cursor: not-allowed; }
 
 /* Inline agent trace bubble (renders inside chat log) */
 .chat-bubble.agent-trace {
-  background: rgba(122, 158, 255, 0.06);
-  border: 1px solid rgba(122, 158, 255, 0.2);
-  border-radius: 10px;
+  background: rgba(var(--rgb-accent2), 0.06);
+  border: 1px solid rgba(var(--rgb-accent2), 0.2);
+  border-radius: var(--radius-xs);
   padding: 10px 12px;
   font-size: 12px;
-  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-family: var(--font-mono);
   max-width: 100%;
   align-self: stretch;
 }
@@ -1309,7 +1408,7 @@ body {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
-  color: var(--accent2);
+  color: var(--text);
   margin-bottom: 6px;
   font-weight: 600;
 }
@@ -1345,8 +1444,8 @@ body {
 /* Inline PR result bubble. "PR opened successfully" reads as completion,
    so this tile uses --success (not --accent / CTA). */
 .chat-bubble.pr-result {
-  background: rgba(95, 208, 154, 0.08);
-  border: 1px solid rgba(95, 208, 154, 0.4);
+  background: rgba(var(--rgb-success),  0.08);
+  border: 1px solid rgba(var(--rgb-success),  0.4);
   border-radius: 10px;
   padding: 12px 14px;
   align-self: stretch;
@@ -1439,14 +1538,14 @@ body {
   color: var(--muted);
   text-decoration: none;
   font-size: 11px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   word-break: break-all;
 }
-.pr-result-link:hover { color: var(--accent2); text-decoration: underline; }
+.pr-result-link:hover { color: var(--link); text-decoration: underline; }
 .pr-result-branch {
   color: var(--muted);
   font-size: 11px;
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
 }
 
 /* Exercise gallery (step 3) — thumbnails on top, main player below */
@@ -1553,7 +1652,7 @@ body {
 .day-btn.active {
   background: var(--accent) !important;
   border-color: var(--accent) !important;
-  color: #000 !important;
+  color: var(--cta-text) !important;
 }
 .day-btn:hover:not(.active) { border-color: var(--accent); color: var(--accent); }
 .freq-summary { font-size: 12px; color: var(--muted); }
@@ -1584,7 +1683,7 @@ body {
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
 }
-.plan-add-btn:hover:not(:disabled) { background: var(--accent); color: #000; }
+.plan-add-btn:hover:not(:disabled) { background: var(--accent); color: var(--cta-text); }
 .plan-add-btn.added { border-color: var(--muted); color: var(--muted); cursor: default; }
 
 /* Today's session card (ephemeral, local-only adds) */
@@ -1601,9 +1700,9 @@ body {
   justify-content: space-between;
   gap: 8px;
   padding: 6px 10px;
-  background: rgba(95, 208, 154, 0.08);
-  border: 1px solid rgba(95, 208, 154, 0.25);
-  border-radius: 6px;
+  background: rgba(var(--rgb-success), 0.08);
+  border: 1px solid rgba(var(--rgb-success), 0.25);
+  border-radius: var(--radius-xs);
   font-size: 13px;
 }
 .today-session-name { color: var(--text); font-weight: 500; }
@@ -1611,14 +1710,14 @@ body {
   background: transparent;
   border: none;
   color: var(--muted);
-  font-family: ui-monospace, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   cursor: pointer;
   padding: 2px 6px;
   border-radius: 4px;
   transition: all 0.12s ease;
 }
-.today-session-remove:hover { color: var(--danger); background: rgba(255, 107, 122, 0.1); }
+.today-session-remove:hover { color: var(--danger); background: rgba(var(--rgb-danger), 0.1); }
 .today-session-hint {
   font-size: 11px;
   color: var(--muted);
@@ -1626,6 +1725,48 @@ body {
   border-top: 1px solid var(--border);
   padding-top: 8px;
   margin: 0;
+}
+
+/* ── Deep Plum hero ──────────────────────────────────────────────────
+   The ONE deliberate gradient. #todaySessionCard is the single hero
+   surface: a plum --hero-grad card with white text, shown by JS only
+   post-approval (review_status.state === "recently_approved" + no
+   completed session today). All children get plum-legible overrides;
+   nothing else in the layout is gradient-filled. */
+.today-session-card {
+  background: var(--hero-grad);
+  color: #fff;
+  border: none;
+  box-shadow: var(--shadow);
+  position: relative;
+  overflow: hidden;
+}
+.today-session-card::before {
+  content: "";
+  position: absolute;
+  right: -50px;
+  top: -60px;
+  width: 200px;
+  height: 200px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+.today-session-card > * { position: relative; }
+.today-session-card h3 { color: rgba(255, 255, 255, 0.8); }
+.today-session-card .today-session-item {
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+.today-session-card .today-session-name { color: #fff; }
+.today-session-card .today-session-remove { color: rgba(255, 255, 255, 0.7); }
+.today-session-card .today-session-remove:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.15);
+}
+.today-session-card .today-session-hint {
+  color: rgba(255, 255, 255, 0.75);
+  border-top-color: rgba(255, 255, 255, 0.2);
 }
 
 /* Mobile fallback for the new grid */
@@ -1790,7 +1931,7 @@ body {
   padding: 4px 10px;
   font-size: 12px;
   font-weight: 600;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   background: rgba(255, 255, 255, 0.05);
   color: #ccc;
   border: 1px solid rgba(255, 255, 255, 0.12);
@@ -2044,7 +2185,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 6px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-family: var(--font-mono);
   font-size: 13px;
   color: #ccc;
   display: flex;
@@ -2111,7 +2252,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .auth-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(8, 12, 20, 0.78);
+  background: rgba(var(--rgb-accent), 0.40);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   z-index: 9000;
@@ -2136,7 +2277,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .auth-card h2 {
   font-size: 18px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--text-strong);
+  font-family: var(--font-serif);
 }
 .auth-blurb {
   font-size: 13px;
@@ -2162,6 +2304,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .auth-card input[type="password"]:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: var(--shadow-focus);
 }
 .auth-card .auth-secondary {
   background: transparent;
@@ -2201,8 +2344,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   color: var(--muted);
   line-height: 1.4;
 }
-.auth-status-ok  { color: var(--success); border: 1px solid rgba(95, 208, 154, 0.3); background: var(--success-bg); }
-.auth-status-err { color: var(--danger); border: 1px solid rgba(255, 107, 122, 0.3); background: var(--danger-bg); }
+.auth-status-ok  { color: var(--success); border: 1px solid rgba(var(--rgb-success),  0.3); background: var(--success-bg); }
+.auth-status-err { color: var(--danger); border: 1px solid rgba(var(--rgb-danger),  0.3); background: var(--danger-bg); }
 .auth-skip {
   background: transparent;
   border: none;
@@ -2239,8 +2382,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   text-overflow: ellipsis;
 }
 .auth-pill-signout {
-  background: rgba(255, 107, 122, 0.12);
-  border: 1px solid rgba(255, 107, 122, 0.4);
+  background: rgba(var(--rgb-danger),  0.12);
+  border: 1px solid rgba(var(--rgb-danger),  0.4);
   color: var(--danger);
   border-radius: 999px;
   padding: 3px 10px;
@@ -2249,7 +2392,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   cursor: pointer;
   font-family: inherit;
 }
-.auth-pill-signout:hover { background: rgba(255, 107, 122, 0.22); }
+.auth-pill-signout:hover { background: rgba(var(--rgb-danger),  0.22); }
 
 /* Status dot — green for signed-in, amber for demo-mode. */
 .auth-pill-dot {
@@ -2259,8 +2402,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   flex-shrink: 0;
   display: inline-block;
 }
-.auth-pill-dot-ok   { background: var(--success); box-shadow: 0 0 6px rgba(95, 208, 154, 0.6); }
-.auth-pill-dot-demo { background: var(--warn); box-shadow: 0 0 6px rgba(232, 181, 74, 0.55); }
+.auth-pill-dot-ok   { background: var(--success); box-shadow: 0 0 6px rgba(var(--rgb-success),  0.6); }
+.auth-pill-dot-demo { background: var(--warn); box-shadow: 0 0 6px rgba(var(--rgb-warn),  0.55); }
 
 /* Generic action button — variants below pick the colour. */
 .auth-pill-action {
@@ -2272,17 +2415,17 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   font-family: inherit;
 }
 .auth-pill-action-signout {
-  background: rgba(255, 107, 122, 0.12);
-  border: 1px solid rgba(255, 107, 122, 0.4);
+  background: rgba(var(--rgb-danger),  0.12);
+  border: 1px solid rgba(var(--rgb-danger),  0.4);
   color: var(--danger);
 }
-.auth-pill-action-signout:hover { background: rgba(255, 107, 122, 0.22); }
+.auth-pill-action-signout:hover { background: rgba(var(--rgb-danger),  0.22); }
 .auth-pill-action-signin {
-  background: rgba(79, 179, 196, 0.14);
-  border: 1px solid rgba(79, 179, 196, 0.45);
+  background: rgba(var(--rgb-accent),  0.14);
+  border: 1px solid rgba(var(--rgb-accent),  0.45);
   color: var(--accent);
 }
-.auth-pill-action-signin:hover { background: rgba(79, 179, 196, 0.26); }
+.auth-pill-action-signin:hover { background: rgba(var(--rgb-accent),  0.26); }
 
 /* Floating chip shown when a clinician has opted into "View as patient"
    mode, so they can flip back without retyping the URL. Pinned bottom-left
@@ -2292,8 +2435,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   left: 18px;
   bottom: 18px;
   z-index: 8500;
-  background: rgba(122, 158, 255, 0.14);
-  border: 1px solid rgba(122, 158, 255, 0.5);
+  background: rgba(var(--rgb-accent2),  0.14);
+  border: 1px solid rgba(var(--rgb-accent2),  0.5);
   color: #b6d2f7;
   border-radius: 999px;
   padding: 7px 14px;
@@ -2303,12 +2446,12 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   font-family: inherit;
   box-shadow: var(--shadow);
 }
-.back-to-dash-chip:hover { background: rgba(122, 158, 255, 0.26); color: #fff; }
+.back-to-dash-chip:hover { background: rgba(var(--rgb-accent2),  0.26); color: #fff; }
 
 /* "Set password" mini-button on the signed-in pill. */
 .auth-pill-setpw {
-  background: rgba(79, 179, 196, 0.12);
-  border: 1px solid rgba(79, 179, 196, 0.4);
+  background: rgba(var(--rgb-accent),  0.12);
+  border: 1px solid rgba(var(--rgb-accent),  0.4);
   color: var(--accent);
   border-radius: 999px;
   padding: 3px 10px;
@@ -2317,7 +2460,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   cursor: pointer;
   font-family: inherit;
 }
-.auth-pill-setpw:hover { background: rgba(79, 179, 196, 0.22); }
+.auth-pill-setpw:hover { background: rgba(var(--rgb-accent),  0.22); }
 .auth-pill-setpw[hidden] { display: none; }
 
 /* Set-password modal */
@@ -2325,7 +2468,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   position: fixed;
   inset: 0;
   z-index: 9000;
-  background: rgba(8, 12, 20, 0.78);
+  background: rgba(var(--rgb-accent), 0.40);
   display: grid;
   place-items: center;
 }
@@ -2344,7 +2487,9 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .setpw-card h3 {
   margin: 0;
   font-size: 16px;
-  color: var(--text);
+  color: var(--text-strong);
+  font-family: var(--font-serif);
+  font-weight: var(--fw-semibold);
 }
 .setpw-blurb {
   margin: 0;
@@ -2363,6 +2508,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .setpw-card input[type="password"]:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: var(--shadow-focus);
 }
 .setpw-actions {
   display: flex;
@@ -2396,8 +2542,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   border-radius: 6px;
   background: var(--surface2);
 }
-.setpw-status-ok  { color: var(--success); border: 1px solid rgba(95, 208, 154, 0.3); background: var(--success-bg); }
-.setpw-status-err { color: var(--danger); border: 1px solid rgba(255, 107, 122, 0.3); background: var(--danger-bg); }
+.setpw-status-ok  { color: var(--success); border: 1px solid rgba(var(--rgb-success),  0.3); background: var(--success-bg); }
+.setpw-status-err { color: var(--danger); border: 1px solid rgba(var(--rgb-danger),  0.3); background: var(--danger-bg); }
 
 /* ── Workout recap modal ───────────────────────────────────────────────────
    Opens from the workout-complete card. Read-only summary of today's
@@ -2407,7 +2553,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   position: fixed;
   inset: 0;
   z-index: 9000;
-  background: rgba(8, 12, 20, 0.78);
+  background: rgba(var(--rgb-accent), 0.40);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   display: grid;
@@ -2431,7 +2577,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .recap-card h2 {
   margin: 0;
   font-size: 17px;
-  color: var(--text);
+  color: var(--text-strong);
+  font-family: var(--font-serif);
 }
 .recap-blurb {
   margin: 0;
@@ -2461,7 +2608,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   background: transparent;
 }
 .recap-row.out-of-region {
-  border-left: 2px solid var(--ai-bg);
+  border-left: 2px solid var(--ai-accent);
 }
 .recap-row-head {
   display: flex;
@@ -2546,7 +2693,9 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .history-header h3 {
   margin: 0;
   font-size: 16px;
-  color: var(--text);
+  color: var(--text-strong);
+  font-family: var(--font-serif);
+  font-weight: var(--fw-semibold);
 }
 .history-refresh {
   background: transparent;
@@ -2591,7 +2740,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 .history-row.in_progress { opacity: 0.85; }
 .history-row.out-of-region {
-  border-left: 2px solid var(--ai-bg);
+  border-left: 2px solid var(--ai-accent);
 }
 .history-row-head {
   display: flex;
@@ -2630,7 +2779,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .intake-modal {
   position: fixed;
   inset: 0;
-  background: rgba(8, 12, 20, 0.78);
+  background: rgba(var(--rgb-accent), 0.40);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   z-index: 8800;
@@ -2655,7 +2804,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .intake-card h2 {
   font-size: 18px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--text-strong);
+  font-family: var(--font-serif);
 }
 .intake-blurb {
   font-size: 13px;
@@ -2722,6 +2872,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .intake-form input[type="text"]:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: var(--shadow-focus);
 }
 .intake-form button {
   background: var(--accent);
@@ -2746,7 +2897,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .plan-gen-modal {
   position: fixed;
   inset: 0;
-  background: rgba(8, 12, 20, 0.85);
+  background: rgba(var(--rgb-accent), 0.48);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   z-index: 8900;
@@ -2771,7 +2922,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .plan-gen-card h2 {
   font-size: 18px;
   font-weight: 600;
-  color: var(--text);
+  color: var(--text-strong);
+  font-family: var(--font-serif);
 }
 .plan-gen-blurb {
   font-size: 13px;
@@ -2779,7 +2931,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   line-height: 1.5;
 }
 .plan-gen-trace {
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.6;
   color: var(--text);
@@ -2890,7 +3042,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
    tokens — never raw hex. */
 .today-session-item.out-of-region {
   opacity: 0.55;
-  border-left: 2px solid var(--ai-bg);
+  border-left: 2px solid var(--ai-accent);
   padding-left: 8px;
 }
 .today-session-region-tag {
@@ -3327,11 +3479,11 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
    approved = success, rejected = danger. */
 .review-pill.review-pill-pending .review-pill-btn {
   border-color: var(--accent2);
-  color: var(--accent2);
+  color: var(--accent);
 }
 .review-pill-pending-dot {
   background: var(--accent2);
-  box-shadow: 0 0 6px rgba(122, 158, 255, 0.55);
+  box-shadow: 0 0 6px rgba(var(--rgb-accent2),  0.55);
 }
 
 .review-pill.review-pill-flagged .review-pill-btn {
@@ -3341,7 +3493,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 .review-pill-flagged-dot {
   background: var(--warn);
-  box-shadow: 0 0 6px rgba(232, 181, 74, 0.6);
+  box-shadow: 0 0 6px rgba(var(--rgb-warn),  0.6);
 }
 
 .review-pill.review-pill-approved .review-pill-btn {
@@ -3351,7 +3503,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 .review-pill-approved-dot {
   background: var(--success);
-  box-shadow: 0 0 6px rgba(95, 208, 154, 0.6);
+  box-shadow: 0 0 6px rgba(var(--rgb-success),  0.6);
 }
 
 .review-pill.review-pill-rejected .review-pill-btn {
@@ -3361,7 +3513,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 .review-pill-rejected-dot {
   background: var(--danger);
-  box-shadow: 0 0 8px rgba(255, 107, 122, 0.6);
+  box-shadow: 0 0 8px rgba(var(--rgb-danger),  0.6);
   animation: review-pill-rejected-pulse 1.4s ease-in-out infinite;
 }
 @keyframes review-pill-rejected-pulse {
@@ -3395,8 +3547,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   align-items: flex-start;
   gap: 10px;
   padding: 10px 12px;
-  background: rgba(122, 158, 255, 0.08);
-  border: 1px solid rgba(122, 158, 255, 0.32);
+  background: rgba(var(--rgb-accent2),  0.08);
+  border: 1px solid rgba(var(--rgb-accent2),  0.32);
   border-radius: 10px;
 }
 .pr-pending-dot {
@@ -3406,7 +3558,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   margin-top: 6px;
   border-radius: 50%;
   background: var(--accent2);
-  box-shadow: 0 0 6px rgba(122, 158, 255, 0.55);
+  box-shadow: 0 0 6px rgba(var(--rgb-accent2),  0.55);
 }
 .pr-pending-copy strong {
   display: block;
@@ -3438,7 +3590,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 
 .chat-bubble.triage-alert {
   background: var(--warn-bg);
-  border: 1px solid rgba(232, 181, 74, 0.55);
+  border: 1px solid rgba(var(--rgb-warn),  0.55);
   border-radius: 12px;
   padding: 12px 14px;
   color: var(--text);
@@ -3580,7 +3732,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 .auto-checkin-notes-input:focus {
   outline: none;
-  border-color: var(--accent2);
+  border-color: var(--accent);
+  box-shadow: var(--shadow-focus);
 }
 
 .auto-checkin-actions {
@@ -3612,7 +3765,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   font-size: 13px;
 }
 .auto-checkin-status.error {
-  background: rgba(255, 107, 122, 0.08);
+  background: rgba(var(--rgb-danger),  0.08);
   border: 1px solid var(--danger);
   color: var(--danger);
 }
@@ -3659,8 +3812,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
    a "you can start" cue, not a CTA colour). The button inside stays --accent. */
 .todays-session-cta {
   align-self: stretch;
-  background: linear-gradient(135deg, rgba(95, 208, 154, 0.14), rgba(95, 208, 154, 0.04));
-  border: 1px solid rgba(95, 208, 154, 0.4);
+  background: linear-gradient(135deg, rgba(var(--rgb-success),  0.14), rgba(var(--rgb-success),  0.04));
+  border: 1px solid rgba(var(--rgb-success),  0.4);
   border-radius: 10px;
   padding: 16px 14px;
   display: flex;
@@ -3755,7 +3908,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 .picker-row:hover:not(:disabled) {
   border-color: var(--accent);
-  background: rgba(79, 179, 196, 0.06);
+  background: rgba(var(--rgb-accent),  0.06);
 }
 .picker-row:focus-visible {
   outline: 2px solid var(--accent);
@@ -3863,8 +4016,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
    completion, distinct from --accent CTAs. */
 .workout-complete-card {
   align-self: stretch;
-  background: linear-gradient(135deg, rgba(95, 208, 154, 0.18), rgba(95, 208, 154, 0.04));
-  border: 1px solid rgba(95, 208, 154, 0.5);
+  background: linear-gradient(135deg, rgba(var(--rgb-success),  0.18), rgba(var(--rgb-success),  0.04));
+  border: 1px solid rgba(var(--rgb-success),  0.5);
   border-radius: 10px;
   padding: 16px 14px;
   display: flex;
@@ -3985,7 +4138,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .tour-spotlight {
   position: fixed;
   border-radius: 8px;
-  box-shadow: 0 0 0 9999px rgba(8, 12, 20, 0.78);
+  box-shadow: 0 0 0 9999px rgba(var(--rgb-accent), 0.40);
   pointer-events: none;
   transition: top 0.25s ease, left 0.25s ease, width 0.25s ease, height 0.25s ease;
 }
@@ -4093,9 +4246,9 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   text-transform: uppercase;
   padding: 2px 9px;
   border-radius: 999px;
-  border: 1px solid rgba(122, 158, 255, 0.32);
-  background: rgba(122, 158, 255, 0.12);
-  color: var(--accent2);
+  border: 1px solid rgba(var(--rgb-accent2),  0.32);
+  background: rgba(var(--rgb-accent2),  0.12);
+  color: var(--accent);
   white-space: nowrap;
 }
 .payer-badge-cash {
@@ -4139,15 +4292,15 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   text-transform: uppercase;
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(79, 179, 196, 0.14);
+  background: rgba(var(--rgb-accent),  0.14);
   color: var(--accent);
-  border: 1px solid rgba(79, 179, 196, 0.3);
+  border: 1px solid rgba(var(--rgb-accent),  0.3);
   white-space: nowrap;
 }
 .payer-goals-card .goal-tied-fall_risk {
-  background: rgba(232, 181, 74, 0.14);
+  background: rgba(var(--rgb-warn),  0.14);
   color: var(--warn);
-  border-color: rgba(232, 181, 74, 0.3);
+  border-color: rgba(var(--rgb-warn),  0.3);
 }
 
 /* ── Patient draft super-bill (self-view) ────────────────────────────────
@@ -4157,7 +4310,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .patient-superbill-summary {
   cursor: pointer;
   font-size: 13px;
-  color: var(--accent2);
+  color: var(--accent);
   padding: 4px 0;
   list-style: none;
 }
@@ -4249,6 +4402,8 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   margin: 0;
   font-size: 15px;
   color: var(--text-strong);
+  font-family: var(--font-serif);
+  font-weight: var(--fw-semibold);
   display: flex;
   align-items: center;
   gap: 8px;
@@ -4276,6 +4431,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .settings-input:focus {
   outline: none;
   border-color: var(--accent);
+  box-shadow: var(--shadow-focus);
 }
 .settings-readonly {
   font-size: 14px;
@@ -4328,12 +4484,12 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 .settings-status.ok {
   color: var(--success);
-  border: 1px solid rgba(95, 208, 154, 0.3);
+  border: 1px solid rgba(var(--rgb-success),  0.3);
   background: var(--success-bg);
 }
 .settings-status.err {
   color: var(--danger);
-  border: 1px solid rgba(255, 107, 122, 0.3);
+  border: 1px solid rgba(var(--rgb-danger),  0.3);
   background: var(--danger-bg);
 }
 .settings-wearable-status {
@@ -4359,7 +4515,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   position: fixed;
   inset: 0;
   z-index: 9100;
-  background: rgba(8, 12, 20, 0.78);
+  background: rgba(var(--rgb-accent), 0.40);
   backdrop-filter: blur(6px);
   -webkit-backdrop-filter: blur(6px);
   display: grid;
@@ -4382,6 +4538,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   margin: 0;
   font-size: 17px;
   color: var(--danger);
+  font-family: var(--font-serif);
 }
 .delete-blurb {
   margin: 0;
