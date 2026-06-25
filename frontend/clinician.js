@@ -200,15 +200,31 @@
     }
     if (empty) empty.hidden = true;
 
-    // Sort: needs_clinician_review rows jump to the top so high-severity
-    // safety flags surface immediately. Server already returns rows in
-    // this order (status sort, then created_at DESC) but we re-sort
-    // defensively in case a future patch changes the endpoint shape.
+    // Sort: needs_clinician_review rows ALWAYS jump to the top so high-severity
+    // safety flags surface immediately — this primary key is never overridden
+    // by the clinician's queue-pref, so a chosen sort can't sink a safety flag.
+    // The Settings v2 queue-sort pref (localStorage; safety_first | newest |
+    // oldest) only orders WITHIN the flagged / non-flagged buckets via the
+    // created_at tiebreaker. Server already returns rows status-sorted then
+    // created_at DESC; we re-sort defensively.
+    const sortPref = (function () {
+      try {
+        return localStorage.getItem("rac-clinician-queue-sort") || "safety_first";
+      } catch (_) {
+        return "safety_first";
+      }
+    })();
     const sortedQueue = [...queue].sort((a, b) => {
       const aFlagged = a.status === "needs_clinician_review" ? 0 : 1;
       const bFlagged = b.status === "needs_clinician_review" ? 0 : 1;
       if (aFlagged !== bFlagged) return aFlagged - bFlagged;
-      return 0;
+      if (sortPref === "oldest") {
+        return String(a.created_at || "").localeCompare(String(b.created_at || ""));
+      }
+      if (sortPref === "newest") {
+        return String(b.created_at || "").localeCompare(String(a.created_at || ""));
+      }
+      return 0; // safety_first: preserve the server order within buckets
     });
 
     for (const item of sortedQueue) {
@@ -486,6 +502,10 @@
     }
     if (isPatients) loadPatientRoster();
     if (isSettings) loadClinicianSettings();
+    // Auto-refresh only makes sense while the queue (review pane) is visible.
+    // Re-arm it entering review (honoring the persisted pref); clear it leaving.
+    if (isReview) applyQueueAutoRefresh();
+    else stopQueueAutoRefresh();
     // Debug content load stays owned by clinician_admin.js, which reacts to
     // the same click for mode === "debug".
   }
@@ -510,6 +530,19 @@
         } catch (_) {}
         window.location.replace("/");
       });
+      // Settings v2 one-time binds.
+      $("clinicSettingsSave")?.addEventListener("click", saveClinicProfile);
+      $("goalTplSave")?.addEventListener("click", saveGoalTemplates);
+      $("clinicNotifNewDrafts")?.addEventListener("change", saveClinicNotifPrefs);
+      $("clinicNotifHighSeverity")?.addEventListener("change", saveClinicNotifPrefs);
+      $("clinicQueueSort")?.addEventListener("change", (e) => {
+        setQueuePref("sort", e.target.value);
+        renderQueue();
+      });
+      $("clinicQueueAutoRefresh")?.addEventListener("change", (e) => {
+        setQueuePref("autoRefresh", e.target.checked ? "1" : "0");
+        applyQueueAutoRefresh();
+      });
     }
     const input = $("clinicianSettingsName");
     try {
@@ -520,6 +553,212 @@
       }
     } catch (e) {
       console.warn("clinician profile load failed", e);
+    }
+    // Settings v2 cards: load each from its endpoint (best-effort; degraded
+    // staff store in dev just leaves the fields blank).
+    loadClinicProfile();
+    loadClinicNotifPrefs();
+    loadGoalTemplates();
+    seedQueuePrefControls();
+  }
+
+  // ── Settings v2: clinic profile ───────────────────────────────────────────
+
+  async function loadClinicProfile() {
+    let data = null;
+    try {
+      const res = await authedFetch(`${API_BASE}/clinician/me/clinic-profile`);
+      if (res.ok) data = await res.json();
+    } catch (e) {
+      console.warn("clinic profile load failed", e);
+    }
+    data = data || {};
+    const map = {
+      clinicSettingsName: data.clinic_name,
+      clinicSettingsPhone: data.clinic_phone,
+      clinicSettingsLicense: data.license_number,
+      clinicSettingsSignature: data.signature,
+    };
+    for (const [id, val] of Object.entries(map)) {
+      const el = $(id);
+      if (el && val != null) el.value = val;
+    }
+  }
+
+  async function saveClinicProfile() {
+    const statusEl = $("clinicSettingsStatus");
+    const btn = $("clinicSettingsSave");
+    const body = {
+      clinic_name: ($("clinicSettingsName")?.value || "").trim(),
+      clinic_phone: ($("clinicSettingsPhone")?.value || "").trim(),
+      license_number: ($("clinicSettingsLicense")?.value || "").trim(),
+      signature: ($("clinicSettingsSignature")?.value || "").trim(),
+    };
+    if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+    try {
+      const res = await authedFetch(`${API_BASE}/clinician/me/clinic-profile`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (statusEl) {
+        statusEl.hidden = false;
+        statusEl.textContent = "Saved.";
+        statusEl.className = "settings-status ok";
+      }
+      clinicianSettingsToast("Clinic profile updated", "ok");
+    } catch (e) {
+      console.error("save clinic profile failed", e);
+      if (statusEl) {
+        statusEl.hidden = false;
+        statusEl.textContent = "Couldn't save right now.";
+        statusEl.className = "settings-status err";
+      }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = "Save"; }
+    }
+  }
+
+  // ── Settings v2: review notifications (stored only) ────────────────────────
+
+  async function loadClinicNotifPrefs() {
+    let data = null;
+    try {
+      const res = await authedFetch(`${API_BASE}/clinician/me/notif-prefs`);
+      if (res.ok) data = await res.json();
+    } catch (e) {
+      console.warn("clinician notif prefs load failed", e);
+    }
+    data = data || {};
+    const nd = $("clinicNotifNewDrafts");
+    const hs = $("clinicNotifHighSeverity");
+    if (nd) nd.checked = data.new_review_drafts !== false;
+    if (hs) hs.checked = data.high_severity_flags !== false;
+  }
+
+  async function saveClinicNotifPrefs() {
+    const statusEl = $("clinicNotifStatus");
+    const body = {
+      new_review_drafts: !!$("clinicNotifNewDrafts")?.checked,
+      high_severity_flags: !!$("clinicNotifHighSeverity")?.checked,
+    };
+    try {
+      const res = await authedFetch(`${API_BASE}/clinician/me/notif-prefs`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (statusEl) {
+        statusEl.hidden = false;
+        statusEl.textContent = "Saved.";
+        statusEl.className = "settings-status ok";
+      }
+    } catch (e) {
+      console.warn("clinician notif prefs save failed", e);
+      if (statusEl) {
+        statusEl.hidden = false;
+        statusEl.textContent = "Couldn't save right now.";
+        statusEl.className = "settings-status err";
+      }
+    }
+  }
+
+  // ── Settings v2: goal & payer templates ───────────────────────────────────
+
+  async function loadGoalTemplates() {
+    let data = null;
+    try {
+      const res = await authedFetch(`${API_BASE}/clinician/me/goal-templates`);
+      if (res.ok) data = await res.json();
+    } catch (e) {
+      console.warn("goal templates load failed", e);
+    }
+    data = data || {};
+    const map = {
+      goalTplInsurance: data.insurance,
+      goalTplMedicare: data.medicare,
+      goalTplCash: data.cash,
+    };
+    for (const [id, val] of Object.entries(map)) {
+      const el = $(id);
+      if (el && val != null) el.value = val;
+    }
+  }
+
+  async function saveGoalTemplates() {
+    const statusEl = $("goalTplStatus");
+    const btn = $("goalTplSave");
+    const body = {
+      insurance: ($("goalTplInsurance")?.value || "").trim(),
+      medicare: ($("goalTplMedicare")?.value || "").trim(),
+      cash: ($("goalTplCash")?.value || "").trim(),
+    };
+    if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+    try {
+      const res = await authedFetch(`${API_BASE}/clinician/me/goal-templates`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (statusEl) {
+        statusEl.hidden = false;
+        statusEl.textContent = "Saved.";
+        statusEl.className = "settings-status ok";
+      }
+      clinicianSettingsToast("Goal templates updated", "ok");
+    } catch (e) {
+      console.error("save goal templates failed", e);
+      if (statusEl) {
+        statusEl.hidden = false;
+        statusEl.textContent = "Couldn't save right now.";
+        statusEl.className = "settings-status err";
+      }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = "Save"; }
+    }
+  }
+
+  // ── Settings v2: client-side queue prefs (localStorage; no endpoint) ──────
+
+  function getQueuePref(key, fallback) {
+    try {
+      return localStorage.getItem(`rac-clinician-queue-${key}`) || fallback;
+    } catch (_) {
+      return fallback;
+    }
+  }
+
+  function setQueuePref(key, val) {
+    try { localStorage.setItem(`rac-clinician-queue-${key}`, val); } catch (_) {}
+  }
+
+  function seedQueuePrefControls() {
+    const sortSel = $("clinicQueueSort");
+    if (sortSel) sortSel.value = getQueuePref("sort", "safety_first");
+    const auto = $("clinicQueueAutoRefresh");
+    if (auto) auto.checked = getQueuePref("autoRefresh", "0") === "1";
+    applyQueueAutoRefresh();
+  }
+
+  let _queueAutoRefreshTimer = null;
+
+  function applyQueueAutoRefresh() {
+    if (_queueAutoRefreshTimer) {
+      clearInterval(_queueAutoRefreshTimer);
+      _queueAutoRefreshTimer = null;
+    }
+    if (getQueuePref("autoRefresh", "0") === "1") {
+      _queueAutoRefreshTimer = setInterval(loadQueue, 60000);
+    }
+  }
+
+  function stopQueueAutoRefresh() {
+    if (_queueAutoRefreshTimer) {
+      clearInterval(_queueAutoRefreshTimer);
+      _queueAutoRefreshTimer = null;
     }
   }
 

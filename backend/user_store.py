@@ -1085,6 +1085,190 @@ def set_consent(token: str) -> dict[str, Any]:
     return consent
 
 
+# -- Patient settings prefs (intake-payload backed; no migration) -----------
+#
+# Settings v2 patient prefs (notifications, display, coach-maya) ride the SAME
+# canonical intake_records.payload merge seam as set_consent / set_payer_model.
+# No dedicated table, so no migration. Each getter returns a benign default
+# shape when nothing is on file (never raises); each setter coerces unknown
+# keys away so the stored blob stays a known shape. We ALWAYS ensure_user before
+# save_intake — save_intake silently no-ops if the parent users row is absent
+# (a patient may reach Settings before any interaction endpoint ran ensure_user;
+# documented at set_display_name). PHI: callers must never log the values.
+
+# Notification / reminder preferences. Delivery (email/push) is NOT built in
+# v1 — these are stored only and surfaced honestly in the UI as "coming soon".
+NOTIFICATION_PREF_KEYS = (
+    "session_reminders",
+    "checkin_reminders",
+    "plan_updated",
+    "symptom_flag_receipts",
+    "email_opt_in",
+)
+_DEFAULT_NOTIFICATION_PREFS = {
+    "session_reminders": True,
+    "checkin_reminders": True,
+    "plan_updated": True,
+    "symptom_flag_receipts": True,
+    "email_opt_in": False,
+}
+
+
+def get_notification_prefs(token: str) -> dict[str, bool]:
+    """Return the patient's notification prefs, merged over benign defaults.
+
+    Shape: a bool per NOTIFICATION_PREF_KEYS. Never raises — a missing intake
+    just means the defaults. Unknown stored keys are dropped on read.
+    """
+    prefs = dict(_DEFAULT_NOTIFICATION_PREFS)
+    if not token:
+        return prefs
+    try:
+        intake = get_intake(token) or {}
+    except Exception:  # pragma: no cover - defensive; default beats a 500
+        return prefs
+    stored = intake.get("notification_prefs")
+    if isinstance(stored, dict):
+        for key in NOTIFICATION_PREF_KEYS:
+            if key in stored:
+                prefs[key] = bool(stored[key])
+    return prefs
+
+
+def set_notification_prefs(token: str, prefs: dict[str, Any]) -> dict[str, bool]:
+    """Persist the patient's notification prefs on the intake payload.
+
+    Only the known NOTIFICATION_PREF_KEYS are stored (coerced to bool); any
+    other keys in `prefs` are ignored so the blob stays a known shape. Merges
+    over the existing payload so other intake keys survive. Returns the stored
+    (merged-over-default) shape.
+    """
+    if not token:
+        raise ValueError("token required")
+    clean = {
+        key: bool(prefs.get(key, _DEFAULT_NOTIFICATION_PREFS[key]))
+        for key in NOTIFICATION_PREF_KEYS
+    }
+    ensure_user(token)
+    intake = get_intake(token) or {}
+    save_intake(token, {**intake, "notification_prefs": clean})
+    return clean
+
+
+# Display preferences. Theme / text-size / reduced-motion are applied CLIENT
+# side from localStorage (instant, source of truth); this is the durable
+# cross-device mirror. Values are constrained to known enum members.
+_THEME_VALUES = ("light", "dark")
+_TEXT_SIZE_VALUES = ("normal", "large")
+_DEFAULT_DISPLAY_PREFS = {
+    "theme": "light",
+    "text_size": "normal",
+    "reduced_motion": False,
+}
+
+
+def get_display_prefs(token: str) -> dict[str, Any]:
+    """Return the patient's display prefs (theme/text_size/reduced_motion)."""
+    prefs = dict(_DEFAULT_DISPLAY_PREFS)
+    if not token:
+        return prefs
+    try:
+        intake = get_intake(token) or {}
+    except Exception:  # pragma: no cover - defensive
+        return prefs
+    stored = intake.get("display_prefs")
+    if isinstance(stored, dict):
+        theme = str(stored.get("theme") or "").strip().lower()
+        if theme in _THEME_VALUES:
+            prefs["theme"] = theme
+        text_size = str(stored.get("text_size") or "").strip().lower()
+        if text_size in _TEXT_SIZE_VALUES:
+            prefs["text_size"] = text_size
+        if "reduced_motion" in stored:
+            prefs["reduced_motion"] = bool(stored["reduced_motion"])
+    return prefs
+
+
+def set_display_prefs(token: str, prefs: dict[str, Any]) -> dict[str, Any]:
+    """Persist the patient's display prefs on the intake payload (mirror)."""
+    if not token:
+        raise ValueError("token required")
+    theme = str(prefs.get("theme") or "").strip().lower()
+    text_size = str(prefs.get("text_size") or "").strip().lower()
+    clean = {
+        "theme": theme if theme in _THEME_VALUES else _DEFAULT_DISPLAY_PREFS["theme"],
+        "text_size": (
+            text_size if text_size in _TEXT_SIZE_VALUES
+            else _DEFAULT_DISPLAY_PREFS["text_size"]
+        ),
+        "reduced_motion": bool(
+            prefs.get("reduced_motion", _DEFAULT_DISPLAY_PREFS["reduced_motion"])
+        ),
+    }
+    ensure_user(token)
+    intake = get_intake(token) or {}
+    save_intake(token, {**intake, "display_prefs": clean})
+    return clean
+
+
+# Coach Maya preferences. `voice` is the load-bearing one: the frontend mirrors
+# it into localStorage 'rac-maya-voice' and reads it synchronously to gate the
+# in-call rep-count echo. greeting_cadence gates the state-aware greeting.
+# language is stored only (the greeting copy is English-only in v1).
+_GREETING_CADENCE_VALUES = ("every_visit", "first_of_day", "off")
+_LANGUAGE_VALUES = ("en",)
+_DEFAULT_COACH_PREFS = {
+    "voice": True,
+    "greeting_cadence": "every_visit",
+    "language": "en",
+}
+
+
+def get_coach_prefs(token: str) -> dict[str, Any]:
+    """Return the patient's Coach Maya prefs (voice/greeting_cadence/language)."""
+    prefs = dict(_DEFAULT_COACH_PREFS)
+    if not token:
+        return prefs
+    try:
+        intake = get_intake(token) or {}
+    except Exception:  # pragma: no cover - defensive
+        return prefs
+    stored = intake.get("coach_prefs")
+    if isinstance(stored, dict):
+        if "voice" in stored:
+            prefs["voice"] = bool(stored["voice"])
+        cadence = str(stored.get("greeting_cadence") or "").strip().lower()
+        if cadence in _GREETING_CADENCE_VALUES:
+            prefs["greeting_cadence"] = cadence
+        language = str(stored.get("language") or "").strip().lower()
+        if language in _LANGUAGE_VALUES:
+            prefs["language"] = language
+    return prefs
+
+
+def set_coach_prefs(token: str, prefs: dict[str, Any]) -> dict[str, Any]:
+    """Persist the patient's Coach Maya prefs on the intake payload."""
+    if not token:
+        raise ValueError("token required")
+    cadence = str(prefs.get("greeting_cadence") or "").strip().lower()
+    language = str(prefs.get("language") or "").strip().lower()
+    clean = {
+        "voice": bool(prefs.get("voice", _DEFAULT_COACH_PREFS["voice"])),
+        "greeting_cadence": (
+            cadence if cadence in _GREETING_CADENCE_VALUES
+            else _DEFAULT_COACH_PREFS["greeting_cadence"]
+        ),
+        "language": (
+            language if language in _LANGUAGE_VALUES
+            else _DEFAULT_COACH_PREFS["language"]
+        ),
+    }
+    ensure_user(token)
+    intake = get_intake(token) or {}
+    save_intake(token, {**intake, "coach_prefs": clean})
+    return clean
+
+
 # -- Destructive account deletion (self-scoped; cascade-backed) -------------
 #
 # delete_account removes the patient's `users` row, which CASCADEs to every
@@ -1211,6 +1395,247 @@ def set_clinician_display_name(user_id: str, name: str) -> str:
     if not updated:
         raise ValueError("clinician record not found")
     return cleaned
+
+
+# -- Clinic profile + clinician prefs (staff_users-backed; postgres-only) ----
+#
+# Settings v2 clinic-profile fields (clinic_name / clinic_phone /
+# license_number / signature) and the JSONB clinician prefs (notif_prefs,
+# goal_templates) live on the staff_users base table (columns added in
+# 20260624180000_staff_clinic_profile.sql). Postgres-only and self-scoped to
+# the authenticated clinician's user_id, mirroring get/set_clinician_display_name:
+# every helper degrades to None/empty on a missing DATABASE_URL / DB error so
+# the settings endpoints never 5xx in the sqlite test env (where staff_users
+# does not exist). PHI: never log signature / license / phone / template text.
+
+_CLINIC_PROFILE_FIELDS = ("clinic_name", "clinic_phone", "license_number", "signature")
+
+
+def get_clinic_profile(user_id: str) -> dict[str, str | None]:
+    """Return the clinician's clinic-profile fields from staff_users.
+
+    Postgres-only. Returns every field as None when the DB is unavailable / the
+    row is missing so the settings endpoint degrades cleanly (no 5xx).
+    """
+    empty = {field: None for field in _CLINIC_PROFILE_FIELDS}
+    if not user_id:
+        return empty
+    try:
+        from db import DbConfigError, get_conn
+    except ImportError:
+        return empty
+    try:
+        with get_conn(autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT clinic_name, clinic_phone, license_number, signature "
+                "FROM staff_users WHERE user_id = %s LIMIT 1",
+                (user_id,),
+            )
+            row = cur.fetchone()
+    except DbConfigError:
+        return empty
+    except Exception as exc:
+        logger.warning(
+            "clinic_profile lookup failed: %s: %s", type(exc).__name__, exc,
+        )
+        return empty
+    if not row:
+        return empty
+    out: dict[str, str | None] = {}
+    for field in _CLINIC_PROFILE_FIELDS:
+        val = row.get(field)
+        out[field] = str(val).strip() or None if val else None
+    return out
+
+
+def set_clinic_profile(user_id: str, fields: dict[str, Any]) -> dict[str, str | None]:
+    """Set the clinician's clinic-profile fields on staff_users (self-scoped).
+
+    Only the known _CLINIC_PROFILE_FIELDS are written; each is trimmed and an
+    empty string is stored as NULL so a cleared field reverts to the env / unset
+    behavior. Raises ValueError on a missing DB / row (-> API 400). Targets the
+    staff_users base table, never the clinicians VIEW, scoped to user_id only.
+    """
+    if not user_id:
+        raise ValueError("user_id required")
+    cleaned: dict[str, str | None] = {}
+    for field in _CLINIC_PROFILE_FIELDS:
+        if field in fields:
+            val = str(fields.get(field) or "").strip()
+            cleaned[field] = val or None
+    if not cleaned:
+        # Nothing to write; return the current stored shape.
+        return get_clinic_profile(user_id)
+    try:
+        from db import DbConfigError, get_conn
+    except ImportError as exc:
+        raise ValueError("staff store unavailable") from exc
+    set_clause = ", ".join(f"{field} = %s" for field in cleaned)
+    params = list(cleaned.values()) + [user_id]
+    try:
+        with get_conn(autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE staff_users SET {set_clause} WHERE user_id = %s",
+                params,
+            )
+            updated = cur.rowcount
+    except DbConfigError as exc:
+        raise ValueError("staff store unavailable") from exc
+    if not updated:
+        raise ValueError("clinician record not found")
+    return get_clinic_profile(user_id)
+
+
+def _get_clinician_jsonb(user_id: str, column: str) -> dict[str, Any]:
+    """Read a JSONB column off staff_users for one clinician, or {} on degrade."""
+    if not user_id:
+        return {}
+    try:
+        from db import DbConfigError, get_conn
+    except ImportError:
+        return {}
+    try:
+        with get_conn(autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute(
+                f"SELECT {column} FROM staff_users WHERE user_id = %s LIMIT 1",
+                (user_id,),
+            )
+            row = cur.fetchone()
+    except DbConfigError:
+        return {}
+    except Exception as exc:
+        logger.warning(
+            "clinician %s lookup failed: %s: %s", column, type(exc).__name__, exc,
+        )
+        return {}
+    if not row:
+        return {}
+    val = row.get(column)
+    if isinstance(val, str):
+        try:
+            val = json.loads(val)
+        except (ValueError, TypeError):
+            return {}
+    return val if isinstance(val, dict) else {}
+
+
+def _set_clinician_jsonb(user_id: str, column: str, blob: dict[str, Any]) -> dict[str, Any]:
+    """Write a JSONB column on staff_users for one clinician (self-scoped)."""
+    if not user_id:
+        raise ValueError("user_id required")
+    try:
+        from db import DbConfigError, get_conn
+    except ImportError as exc:
+        raise ValueError("staff store unavailable") from exc
+    try:
+        with get_conn(autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute(
+                f"UPDATE staff_users SET {column} = %s::jsonb WHERE user_id = %s",
+                (json.dumps(blob), user_id),
+            )
+            updated = cur.rowcount
+    except DbConfigError as exc:
+        raise ValueError("staff store unavailable") from exc
+    if not updated:
+        raise ValueError("clinician record not found")
+    return blob
+
+
+# Clinician review-alert preferences (stored only; no delivery in v1).
+CLINICIAN_NOTIF_PREF_KEYS = ("new_review_drafts", "high_severity_flags")
+_DEFAULT_CLINICIAN_NOTIF_PREFS = {
+    "new_review_drafts": True,
+    "high_severity_flags": True,
+}
+
+
+def get_clinician_notif_prefs(user_id: str) -> dict[str, bool]:
+    """Return the clinician's review-alert prefs, merged over defaults."""
+    prefs = dict(_DEFAULT_CLINICIAN_NOTIF_PREFS)
+    stored = _get_clinician_jsonb(user_id, "notif_prefs")
+    for key in CLINICIAN_NOTIF_PREF_KEYS:
+        if key in stored:
+            prefs[key] = bool(stored[key])
+    return prefs
+
+
+def set_clinician_notif_prefs(user_id: str, prefs: dict[str, Any]) -> dict[str, bool]:
+    """Persist the clinician's review-alert prefs (JSONB on staff_users)."""
+    clean = {
+        key: bool(prefs.get(key, _DEFAULT_CLINICIAN_NOTIF_PREFS[key]))
+        for key in CLINICIAN_NOTIF_PREF_KEYS
+    }
+    _set_clinician_jsonb(user_id, "notif_prefs", clean)
+    return clean
+
+
+# Per-payer default goal-language templates. Generic clinician free text used
+# as cheap planner style guidance — NEVER patient-specific (becomes
+# Anthropic-bound). Keyed by payer model.
+GOAL_TEMPLATE_KEYS = PAYER_MODELS  # ("insurance", "medicare", "cash")
+
+
+def get_clinician_goal_templates(user_id: str) -> dict[str, str]:
+    """Return the clinician's per-payer goal templates, or empty strings."""
+    templates = {key: "" for key in GOAL_TEMPLATE_KEYS}
+    stored = _get_clinician_jsonb(user_id, "goal_templates")
+    for key in GOAL_TEMPLATE_KEYS:
+        if key in stored and isinstance(stored[key], str):
+            templates[key] = stored[key]
+    return templates
+
+
+def set_clinician_goal_templates(user_id: str, templates: dict[str, Any]) -> dict[str, str]:
+    """Persist the clinician's per-payer goal templates (JSONB on staff_users)."""
+    clean = {
+        key: str(templates.get(key) or "").strip()
+        for key in GOAL_TEMPLATE_KEYS
+    }
+    _set_clinician_jsonb(user_id, "goal_templates", clean)
+    return clean
+
+
+# -- Flare-escalation phone resolution (clinic profile -> env -> None) -------
+#
+# coach_chat surfaces a "call your clinic" escalation when a symptom is flagged
+# clinician-attention. v1 is single-clinic (Andre / Nikki), so we resolve the
+# first non-null staff_users.clinic_phone, then fall back to the CLINIC_PHONE
+# env (today's behavior, so no regression when no DB / no row), then None. The
+# patient-side coach_chat has no per-patient clinician link, hence single-clinic
+# resolution — per-patient routing is flagged phased. Never log the value.
+
+
+def resolve_clinic_phone() -> str | None:
+    """Resolve the flare-escalation phone: clinic profile -> CLINIC_PHONE -> None.
+
+    Postgres-only for the clinic-profile leg; degrades to the env value when the
+    DB is unavailable (the pre-Settings-v2 behavior, so no regression). Returns
+    None when neither a clinic phone nor the env var is set.
+    """
+    env_phone = (os.getenv("CLINIC_PHONE", "") or "").strip() or None
+    try:
+        from db import DbConfigError, get_conn
+    except ImportError:
+        return env_phone
+    try:
+        with get_conn(autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT clinic_phone FROM staff_users "
+                "WHERE clinic_phone IS NOT NULL AND clinic_phone <> '' LIMIT 1",
+            )
+            row = cur.fetchone()
+    except DbConfigError:
+        return env_phone
+    except Exception as exc:
+        logger.warning(
+            "resolve_clinic_phone lookup failed: %s: %s", type(exc).__name__, exc,
+        )
+        return env_phone
+    if row:
+        phone = str(row.get("clinic_phone") or "").strip()
+        if phone:
+            return phone
+    return env_phone
 
 
 def save_protocol_state(token: str, state: dict) -> None:

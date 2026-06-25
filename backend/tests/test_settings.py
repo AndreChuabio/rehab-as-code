@@ -461,3 +461,295 @@ def test_set_clinician_display_name_updates_staff_users(monkeypatch):
 def test_set_clinician_display_name_rejects_blank():
     with pytest.raises(ValueError):
         user_store.set_clinician_display_name("clin-1", "  ")
+
+
+# ---------------------------------------------------------------------------
+# Settings v2 — patient prefs (intake-payload backed; sqlite path)
+# ---------------------------------------------------------------------------
+
+
+def test_notification_prefs_roundtrip_and_non_clobber():
+    token = str(uuid.uuid4())
+    user_store.ensure_user(token)
+    user_store.save_intake(token, {"injury_type": "knee"})
+    try:
+        # Default benign shape when unset.
+        defaults = user_store.get_notification_prefs(token)
+        assert defaults["session_reminders"] is True
+        assert defaults["email_opt_in"] is False
+        # Persisted shape after set.
+        stored = user_store.set_notification_prefs(
+            token, {"session_reminders": False, "email_opt_in": True},
+        )
+        assert stored["session_reminders"] is False
+        assert stored["email_opt_in"] is True
+        assert user_store.get_notification_prefs(token)["email_opt_in"] is True
+        # Did not clobber other intake keys.
+        assert user_store.get_intake(token)["injury_type"] == "knee"
+    finally:
+        user_store.delete_account(token)
+
+
+def test_display_prefs_roundtrip_and_enum_clamp():
+    token = str(uuid.uuid4())
+    user_store.ensure_user(token)
+    try:
+        defaults = user_store.get_display_prefs(token)
+        assert defaults["theme"] == "light"
+        assert defaults["text_size"] == "normal"
+        assert defaults["reduced_motion"] is False
+        stored = user_store.set_display_prefs(
+            token, {"theme": "dark", "text_size": "large", "reduced_motion": True},
+        )
+        assert stored["theme"] == "dark"
+        assert stored["text_size"] == "large"
+        assert stored["reduced_motion"] is True
+        # Unknown enum values clamp back to the default on set.
+        clamped = user_store.set_display_prefs(token, {"theme": "neon", "text_size": "huge"})
+        assert clamped["theme"] == "light"
+        assert clamped["text_size"] == "normal"
+    finally:
+        user_store.delete_account(token)
+
+
+def test_coach_prefs_roundtrip():
+    token = str(uuid.uuid4())
+    user_store.ensure_user(token)
+    try:
+        defaults = user_store.get_coach_prefs(token)
+        assert defaults["voice"] is True
+        assert defaults["greeting_cadence"] == "every_visit"
+        assert defaults["language"] == "en"
+        stored = user_store.set_coach_prefs(
+            token, {"voice": False, "greeting_cadence": "off", "language": "en"},
+        )
+        assert stored["voice"] is False
+        assert stored["greeting_cadence"] == "off"
+        assert user_store.get_coach_prefs(token)["voice"] is False
+        # Unknown cadence clamps to default.
+        clamped = user_store.set_coach_prefs(token, {"greeting_cadence": "hourly"})
+        assert clamped["greeting_cadence"] == "every_visit"
+    finally:
+        user_store.delete_account(token)
+
+
+def test_patient_pref_setters_persist_without_prior_users_row():
+    """ensure_user must precede save_intake or the write silently no-ops."""
+    token = str(uuid.uuid4())  # no prior interaction / no users row
+    try:
+        user_store.set_notification_prefs(token, {"email_opt_in": True})
+        assert user_store.get_notification_prefs(token)["email_opt_in"] is True
+    finally:
+        user_store.delete_account(token)
+
+
+# ---------------------------------------------------------------------------
+# Settings v2 — patient pref endpoints (authed, self-scoped)
+# ---------------------------------------------------------------------------
+
+
+def test_patient_pref_endpoints_roundtrip(authed_client, fake_user_id):
+    user_store.ensure_user(fake_user_id)
+    try:
+        # notifications
+        res = authed_client.post(
+            "/patient/me/notifications", json={"session_reminders": False},
+        )
+        assert res.status_code == 200
+        assert res.json()["session_reminders"] is False
+        assert authed_client.get("/patient/me/notifications").json()["session_reminders"] is False
+        # display
+        res = authed_client.post("/patient/me/display", json={"theme": "dark"})
+        assert res.status_code == 200
+        assert res.json()["theme"] == "dark"
+        assert authed_client.get("/patient/me/display").json()["theme"] == "dark"
+        # coach-prefs
+        res = authed_client.post("/patient/me/coach-prefs", json={"voice": False})
+        assert res.status_code == 200
+        assert res.json()["voice"] is False
+        assert authed_client.get("/patient/me/coach-prefs").json()["voice"] is False
+        # An empty body is 400-safe (no required pref values).
+        assert authed_client.post("/patient/me/notifications", json={}).status_code == 200
+    finally:
+        user_store.delete_account(fake_user_id)
+
+
+def test_care_team_endpoint_self_scoped_and_degrades(authed_client, fake_user_id, monkeypatch):
+    """Care-team never 5xx: clinic_name None + reviewer None in the degraded
+    sqlite env, clinic_phone resolves via the CLINIC_PHONE env fallback."""
+    monkeypatch.setenv("CLINIC_PHONE", "555-CARE")
+    user_store.ensure_user(fake_user_id)
+    try:
+        res = authed_client.get("/patient/me/care-team")
+        assert res.status_code == 200
+        data = res.json()
+        assert data["clinic_phone"] == "555-CARE"
+        assert data["clinic_name"] is None
+        assert data["reviewing_clinician_name"] is None
+    finally:
+        user_store.delete_account(fake_user_id)
+
+
+# ---------------------------------------------------------------------------
+# Settings v2 — clinician staff_users helpers (scripted cursor + degrade)
+# ---------------------------------------------------------------------------
+
+
+def _scripted_conn(monkeypatch, *, fetchone_val=None, rowcount=1):
+    """Patch db.get_conn with a scripted cursor capturing SQL + params."""
+    captured: dict[str, Any] = {}
+
+    class _Cur:
+        def __init__(self):
+            self.rowcount = rowcount
+
+        def execute(self, sql, params=()):
+            captured["sql"] = sql
+            captured["params"] = params
+
+        def fetchone(self):
+            return fetchone_val
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+    class _Conn:
+        def cursor(self):
+            return _Cur()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return None
+
+    import db
+
+    monkeypatch.setattr(db, "get_conn", lambda **k: _Conn())
+    return captured
+
+
+def test_clinic_profile_set_get_roundtrip(monkeypatch):
+    captured = _scripted_conn(
+        monkeypatch,
+        fetchone_val={
+            "clinic_name": "Plum PT",
+            "clinic_phone": "555-1212",
+            "license_number": "PT-99",
+            "signature": "Nikki, PT, DPT",
+        },
+    )
+    stored = user_store.set_clinic_profile(
+        "clin-1",
+        {"clinic_name": "Plum PT", "clinic_phone": "555-1212",
+         "license_number": "PT-99", "signature": "Nikki, PT, DPT"},
+    )
+    # set_clinic_profile re-reads via get_clinic_profile, so the final captured
+    # SQL is the SELECT (proving the read-back ran); the returned values come
+    # from the scripted row.
+    assert stored["clinic_name"] == "Plum PT"
+    assert stored["signature"] == "Nikki, PT, DPT"
+    assert "staff_users" in captured["sql"]
+    # get reads the same scripted row.
+    got = user_store.get_clinic_profile("clin-1")
+    assert got["license_number"] == "PT-99"
+
+
+def test_clinic_profile_degrades_without_db(monkeypatch):
+    import db
+
+    class _Boom(db.DbConfigError):
+        pass
+
+    def _raise(**k):
+        raise db.DbConfigError("no DATABASE_URL")
+
+    monkeypatch.setattr(db, "get_conn", _raise)
+    # get degrades to all-None, never raises.
+    got = user_store.get_clinic_profile("clin-1")
+    assert got == {
+        "clinic_name": None, "clinic_phone": None,
+        "license_number": None, "signature": None,
+    }
+    # set raises ValueError (-> API 400).
+    with pytest.raises(ValueError):
+        user_store.set_clinic_profile("clin-1", {"clinic_name": "X"})
+
+
+def test_clinician_notif_prefs_roundtrip(monkeypatch):
+    captured = _scripted_conn(
+        monkeypatch, fetchone_val={"notif_prefs": {"new_review_drafts": False}},
+    )
+    stored = user_store.set_clinician_notif_prefs(
+        "clin-1", {"new_review_drafts": False, "high_severity_flags": True},
+    )
+    assert stored["new_review_drafts"] is False
+    assert stored["high_severity_flags"] is True
+    assert "notif_prefs" in captured["sql"]
+    got = user_store.get_clinician_notif_prefs("clin-1")
+    assert got["new_review_drafts"] is False
+    # defaults fill the missing key.
+    assert got["high_severity_flags"] is True
+
+
+def test_clinician_goal_templates_roundtrip(monkeypatch):
+    captured = _scripted_conn(
+        monkeypatch, fetchone_val={"goal_templates": {"insurance": "ADL-focused"}},
+    )
+    stored = user_store.set_clinician_goal_templates(
+        "clin-1", {"insurance": "ADL-focused", "cash": "load mgmt"},
+    )
+    assert stored["insurance"] == "ADL-focused"
+    assert stored["cash"] == "load mgmt"
+    assert stored["medicare"] == ""
+    assert "goal_templates" in captured["sql"]
+    got = user_store.get_clinician_goal_templates("clin-1")
+    assert got["insurance"] == "ADL-focused"
+    assert got["medicare"] == ""
+
+
+def test_clinician_jsonb_degrades_without_db(monkeypatch):
+    import db
+
+    def _raise(**k):
+        raise db.DbConfigError("no DATABASE_URL")
+
+    monkeypatch.setattr(db, "get_conn", _raise)
+    assert user_store.get_clinician_notif_prefs("clin-1")["new_review_drafts"] is True
+    assert user_store.get_clinician_goal_templates("clin-1")["insurance"] == ""
+
+
+# ---------------------------------------------------------------------------
+# Settings v2 — resolve_clinic_phone precedence
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_clinic_phone_env_fallback_when_no_db(monkeypatch):
+    import db
+
+    def _raise(**k):
+        raise db.DbConfigError("no DATABASE_URL")
+
+    monkeypatch.setattr(db, "get_conn", _raise)
+    monkeypatch.setenv("CLINIC_PHONE", "555-ENV")
+    assert user_store.resolve_clinic_phone() == "555-ENV"
+
+
+def test_resolve_clinic_phone_none_when_unset(monkeypatch):
+    import db
+
+    def _raise(**k):
+        raise db.DbConfigError("no DATABASE_URL")
+
+    monkeypatch.setattr(db, "get_conn", _raise)
+    monkeypatch.delenv("CLINIC_PHONE", raising=False)
+    assert user_store.resolve_clinic_phone() is None
+
+
+def test_resolve_clinic_phone_clinic_takes_precedence(monkeypatch):
+    _scripted_conn(monkeypatch, fetchone_val={"clinic_phone": "555-CLINIC"})
+    monkeypatch.setenv("CLINIC_PHONE", "555-ENV")
+    assert user_store.resolve_clinic_phone() == "555-CLINIC"

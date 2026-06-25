@@ -117,13 +117,59 @@ def _date_range(rows: list[dict[str, Any]]) -> dict[str, str | None]:
     return {"start": dates[0], "end": dates[-1]}
 
 
-def generate_draft(token: str, *, window_days: int = 56) -> dict[str, Any]:
+def _attestation_block(
+    clinic_name: str | None,
+    signature: str | None,
+    license_number: str | None,
+) -> dict[str, Any] | None:
+    """Build the clinic / attestation block from the reviewing clinician's
+    profile, or None when no identifying field is set.
+
+    The draft stays status `draft_unsigned` regardless: this block surfaces the
+    clinic header + the signature/credentials line that a clinician confirms,
+    it does NOT finalize the artifact. `signed` is always False — a draft is
+    never auto-signed; a licensed clinician attests out-of-band.
+    """
+    clinic = (clinic_name or "").strip() or None
+    sig = (signature or "").strip() or None
+    lic = (license_number or "").strip() or None
+    if not (clinic or sig or lic):
+        return None
+    return {
+        "clinic_name": clinic,
+        "signature": sig,
+        "license_number": lic,
+        # A draft is never auto-signed; the clinician attests separately.
+        "signed": False,
+        "note": (
+            "Clinic + signature shown for the clinician to confirm. The draft "
+            "remains unsigned until a licensed clinician attests."
+        ),
+    }
+
+
+def generate_draft(
+    token: str,
+    *,
+    window_days: int = 56,
+    clinic_name: str | None = None,
+    signature: str | None = None,
+    license_number: str | None = None,
+) -> dict[str, Any]:
     """Build a DRAFT super-bill for one patient from completed sessions.
 
     Returns an unsigned draft even when there are no completed sessions (empty
     line_items + a disclaimer) so the caller can render the screen uniformly.
     Never raises on a missing session store — degrades to an empty draft with a
     note, the same posture as the rest of the patient-state endpoints.
+
+    Optional clinic_name / signature / license_number (Settings v2) come from
+    the reviewing clinician's clinic profile and surface an `attestation` block
+    on the draft (clinic header + signature/credentials line). When none is
+    passed (e.g. the patient self-view, which has no clinician identity) the
+    block is omitted and the draft is left unsigned, which is correct — a
+    patient cannot sign. The draft_unsigned + needs_verification contract is
+    unchanged either way.
     """
     import user_store
 
@@ -189,6 +235,8 @@ def generate_draft(token: str, *, window_days: int = 56) -> dict[str, Any]:
             )
         line_items.append(line)
 
+    attestation = _attestation_block(clinic_name, signature, license_number)
+
     return {
         "status": "draft_unsigned",
         "payer_model": payer_model,
@@ -196,6 +244,9 @@ def generate_draft(token: str, *, window_days: int = 56) -> dict[str, Any]:
         "body_region": body_region,
         "protocol_goals": protocol_goals,
         "requires_clinician_attestation": True,
+        # Reviewing clinician's clinic header + signature line, or None when the
+        # caller has no clinician identity (patient self-view). Never auto-signs.
+        "attestation": attestation,
         "source": "completed_sessions_only",
         "window_days": window_days,
         "generated_at": datetime.now(timezone.utc).isoformat(),

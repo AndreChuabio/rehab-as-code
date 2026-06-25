@@ -229,6 +229,7 @@ def _build_user_prompt(
     concerns: list[dict[str, Any]] | None,
     body_region: str | None = None,
     payer_model: str = _DEFAULT_PAYER_MODEL,
+    goal_template: str | None = None,
 ) -> str:
     parts: list[str] = [
         f"Target phase: {phase}",
@@ -238,6 +239,17 @@ def _build_user_prompt(
         f"Payer model (HARD constraint - drives goal language, do not mix "
         f"modes): {payer_model}",
     ]
+    # Settings v2 (cheap slice): the clinician's per-payer default goal-language
+    # template, injected as STYLE guidance only. Generic clinician free text (no
+    # patient-specific content). The planner still writes its own goals; this
+    # anchors register/phrasing to the clinic's preferred wording.
+    tmpl = (goal_template or "").strip()
+    if tmpl:
+        parts.append(
+            "Clinician goal-language style template for this payer mode (match "
+            "the register and phrasing; adapt to this patient, do not copy "
+            "verbatim):\n" + tmpl
+        )
     if intake:
         parts.append("Patient intake:\n" + json.dumps(intake, indent=2, default=str))
     parts.append(
@@ -404,6 +416,7 @@ def compose(
     week: int,
     concerns: list[dict[str, Any]] | None = None,
     token: str | None = None,
+    goal_template: str | None = None,
 ) -> dict[str, Any]:
     """Compose a draft protocol payload.
 
@@ -425,6 +438,11 @@ def compose(
         to address each concern.
     token : str | None
         For logging only.
+    goal_template : str | None
+        Settings v2 (cheap slice): the clinician's per-payer default
+        goal-language template, injected as STYLE guidance only. Generic
+        clinician free text — never patient-specific. Deep clinician-ownership
+        resolution through plan_generation_agent is PHASED (not done here).
 
     Returns
     -------
@@ -468,6 +486,7 @@ def compose(
         candidates, signal, intake, phase, week, concerns,
         body_region=resolved_region,
         payer_model=payer_model,
+        goal_template=goal_template,
     )
 
     started = time.monotonic()

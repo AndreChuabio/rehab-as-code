@@ -263,3 +263,284 @@ def set_clinician_profile(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     logger.info("clinician display_name set user=%s", user_id)
     return {"display_name": stored}
+
+
+# ── Patient: notification / reminder preferences ──────────────────────────────
+#
+# Settings v2. Delivery (email/push) is NOT built — these are stored only and
+# surfaced honestly in the UI as "coming soon". Backed by the canonical intake
+# payload (no migration), same merge seam as consent. PHI: never log values.
+
+
+class NotificationPrefs(BaseModel):
+    """Patient notification / reminder toggles (all optional; default applied)."""
+    session_reminders: bool | None = None
+    checkin_reminders: bool | None = None
+    plan_updated: bool | None = None
+    symptom_flag_receipts: bool | None = None
+    email_opt_in: bool | None = None
+
+
+@router.get("/patient/me/notifications")
+def get_patient_notifications(
+    user_id: str = Depends(current_user_id),
+) -> dict[str, bool]:
+    """Return the patient's notification prefs (benign defaults when unset)."""
+    return user_store.get_notification_prefs(user_id)
+
+
+@router.post("/patient/me/notifications")
+def set_patient_notifications(
+    body: NotificationPrefs,
+    user_id: str = Depends(current_user_id),
+) -> dict[str, bool]:
+    """Persist the patient's notification prefs on the canonical intake payload.
+
+    Self-scoped to current_user_id. Unset fields fall back to the stored /
+    default value (set_notification_prefs coerces the known keys only). Never
+    logs the pref VALUES — only the action + token.
+    """
+    current = user_store.get_notification_prefs(user_id)
+    merged = {**current, **body.model_dump(exclude_none=True)}
+    try:
+        stored = user_store.set_notification_prefs(user_id, merged)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logger.info("notification_prefs set token=%s", user_id)
+    return stored
+
+
+# ── Patient: display preferences (theme / text-size / reduced-motion) ─────────
+#
+# Applied CLIENT-side from localStorage (instant, source of truth); this is the
+# durable cross-device mirror.
+
+
+class DisplayPrefs(BaseModel):
+    """Patient display prefs (all optional; constrained to known values)."""
+    theme: str | None = None
+    text_size: str | None = None
+    reduced_motion: bool | None = None
+
+
+@router.get("/patient/me/display")
+def get_patient_display(
+    user_id: str = Depends(current_user_id),
+) -> dict[str, Any]:
+    """Return the patient's display prefs (theme/text_size/reduced_motion)."""
+    return user_store.get_display_prefs(user_id)
+
+
+@router.post("/patient/me/display")
+def set_patient_display(
+    body: DisplayPrefs,
+    user_id: str = Depends(current_user_id),
+) -> dict[str, Any]:
+    """Persist the patient's display prefs (durable mirror; self-scoped)."""
+    current = user_store.get_display_prefs(user_id)
+    merged = {**current, **body.model_dump(exclude_none=True)}
+    try:
+        stored = user_store.set_display_prefs(user_id, merged)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logger.info("display_prefs set token=%s", user_id)
+    return stored
+
+
+# ── Patient: Coach Maya preferences ───────────────────────────────────────────
+#
+# `voice` gates the in-call rep-count echo (frontend mirrors it into
+# localStorage 'rac-maya-voice' for a synchronous per-rep read). greeting_cadence
+# gates the state-aware greeting. language is stored only (English-only copy).
+
+
+class CoachPrefs(BaseModel):
+    """Patient Coach Maya prefs (all optional; constrained to known values)."""
+    voice: bool | None = None
+    greeting_cadence: str | None = None
+    language: str | None = None
+
+
+@router.get("/patient/me/coach-prefs")
+def get_patient_coach_prefs(
+    user_id: str = Depends(current_user_id),
+) -> dict[str, Any]:
+    """Return the patient's Coach Maya prefs (voice/greeting_cadence/language)."""
+    return user_store.get_coach_prefs(user_id)
+
+
+@router.post("/patient/me/coach-prefs")
+def set_patient_coach_prefs(
+    body: CoachPrefs,
+    user_id: str = Depends(current_user_id),
+) -> dict[str, Any]:
+    """Persist the patient's Coach Maya prefs (self-scoped)."""
+    current = user_store.get_coach_prefs(user_id)
+    merged = {**current, **body.model_dump(exclude_none=True)}
+    try:
+        stored = user_store.set_coach_prefs(user_id, merged)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logger.info("coach_prefs set token=%s", user_id)
+    return stored
+
+
+# ── Patient: care team & support (read-only) ──────────────────────────────────
+#
+# Read-only display: the clinic contact + the clinician who reviews the plan +
+# the static flare/urgent safety block (rendered frontend-side). The phone
+# resolves via the clinic-profile precedence helper. PHI: log nothing here.
+
+
+@router.get("/patient/me/care-team")
+def get_patient_care_team(
+    user_id: str = Depends(current_user_id),
+) -> dict[str, Any]:
+    """Return the patient's care-team display data (read-only, self-scoped).
+
+    Assembles: clinic_phone (resolve_clinic_phone precedence), clinic_name
+    (single-clinic best-effort), and the reviewing clinician's display name (the
+    reviewed_by on the active / latest-reviewed protocol -> clinician name).
+    Every leg is best-effort and degrades to None — never 5xx. No values logged.
+    """
+    clinic_phone = None
+    try:
+        clinic_phone = user_store.resolve_clinic_phone()
+    except Exception:  # noqa: BLE001 - degrade, never 500 the care-team view
+        clinic_phone = None
+
+    reviewing_clinician_name = None
+    clinic_name = None
+    try:
+        import protocol_repo
+
+        active = protocol_repo.get_active(user_id)
+        reviewed_by = (active or {}).get("reviewed_by")
+        if reviewed_by:
+            reviewing_clinician_name = user_store.get_clinician_display_name(
+                reviewed_by,
+            )
+            profile = user_store.get_clinic_profile(reviewed_by)
+            clinic_name = profile.get("clinic_name")
+    except Exception as exc:  # noqa: BLE001 - best-effort context
+        logger.info("care-team context unavailable token=%s: %s", user_id, exc)
+
+    return {
+        "clinic_name": clinic_name,
+        "clinic_phone": clinic_phone,
+        "reviewing_clinician_name": reviewing_clinician_name,
+    }
+
+
+# ── Clinician: clinic profile ─────────────────────────────────────────────────
+#
+# Settings v2. Postgres-only (new staff_users columns); degrades cleanly when
+# DATABASE_URL is absent. clinic_phone feeds the flare escalation; signature +
+# clinic_name appear on the generated super-bill. PHI: never log the values.
+
+
+class ClinicProfileUpdate(BaseModel):
+    """Clinic-profile fields (all optional; only provided fields are written)."""
+    clinic_name: str | None = None
+    clinic_phone: str | None = None
+    license_number: str | None = None
+    signature: str | None = None
+
+
+@router.get("/clinician/me/clinic-profile")
+def get_clinician_clinic_profile(
+    user_id: str = Depends(require_clinician_id),
+) -> dict[str, str | None]:
+    """Return the clinician's clinic-profile fields (None each when unset / no DB)."""
+    return user_store.get_clinic_profile(user_id)
+
+
+@router.post("/clinician/me/clinic-profile")
+def set_clinician_clinic_profile(
+    body: ClinicProfileUpdate,
+    user_id: str = Depends(require_clinician_id),
+) -> dict[str, str | None]:
+    """Persist the clinician's clinic-profile fields on staff_users (self-scoped).
+
+    Only the provided fields are written (an empty string clears one to NULL).
+    400s when the staff store is unavailable. Never logs the field VALUES.
+    """
+    provided = body.model_dump(exclude_none=True)
+    try:
+        stored = user_store.set_clinic_profile(user_id, provided)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logger.info("clinic_profile set user=%s", user_id)
+    return stored
+
+
+# ── Clinician: review notifications (stored only; no delivery in v1) ───────────
+
+
+class NotifPrefsUpdate(BaseModel):
+    """Clinician review-alert toggles (all optional; default applied)."""
+    new_review_drafts: bool | None = None
+    high_severity_flags: bool | None = None
+
+
+@router.get("/clinician/me/notif-prefs")
+def get_clinician_notif_prefs(
+    user_id: str = Depends(require_clinician_id),
+) -> dict[str, bool]:
+    """Return the clinician's review-alert prefs (benign defaults when unset)."""
+    return user_store.get_clinician_notif_prefs(user_id)
+
+
+@router.post("/clinician/me/notif-prefs")
+def set_clinician_notif_prefs(
+    body: NotifPrefsUpdate,
+    user_id: str = Depends(require_clinician_id),
+) -> dict[str, bool]:
+    """Persist the clinician's review-alert prefs (JSONB on staff_users)."""
+    current = user_store.get_clinician_notif_prefs(user_id)
+    merged = {**current, **body.model_dump(exclude_none=True)}
+    try:
+        stored = user_store.set_clinician_notif_prefs(user_id, merged)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logger.info("clinician notif_prefs set user=%s", user_id)
+    return stored
+
+
+# ── Clinician: per-payer goal templates ───────────────────────────────────────
+#
+# Surfaced + stored now; the cheap planner wire injects the per-payer text as
+# style guidance. Deep pipeline integration is PHASED. PHI surface: the text is
+# Anthropic-bound, so the UI steers clinicians to GENERIC language — never
+# patient-specific. We do not log the template TEXT.
+
+
+class GoalTemplatesUpdate(BaseModel):
+    """Per-payer goal-language templates (all optional; only provided written)."""
+    insurance: str | None = None
+    medicare: str | None = None
+    cash: str | None = None
+
+
+@router.get("/clinician/me/goal-templates")
+def get_clinician_goal_templates(
+    user_id: str = Depends(require_clinician_id),
+) -> dict[str, str]:
+    """Return the clinician's per-payer goal templates (empty strings when unset)."""
+    return user_store.get_clinician_goal_templates(user_id)
+
+
+@router.post("/clinician/me/goal-templates")
+def set_clinician_goal_templates(
+    body: GoalTemplatesUpdate,
+    user_id: str = Depends(require_clinician_id),
+) -> dict[str, str]:
+    """Persist the clinician's per-payer goal templates (JSONB on staff_users)."""
+    current = user_store.get_clinician_goal_templates(user_id)
+    merged = {**current, **body.model_dump(exclude_none=True)}
+    try:
+        stored = user_store.set_clinician_goal_templates(user_id, merged)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    logger.info("clinician goal_templates set user=%s", user_id)
+    return stored

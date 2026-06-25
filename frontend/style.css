@@ -96,6 +96,19 @@
   --cta-text:#0b1220; --hero-grad:linear-gradient(150deg,#1d2742,#0b1220);
 }
 
+/* Settings v2 display prefs (patient-controlled, applied to <html> from
+   localStorage before paint). Token names are unchanged so every component
+   re-skins; these only nudge base font-size and kill motion. */
+:root[data-text-size="large"] { font-size: 18px; }
+:root[data-text-size="large"] body { font-size: 17px; }
+:root[data-reduced-motion="1"] *,
+:root[data-reduced-motion="1"] *::before,
+:root[data-reduced-motion="1"] *::after {
+  animation: none !important;
+  transition: none !important;
+  scroll-behavior: auto !important;
+}
+
 body {
   background: var(--bg);
   color: var(--text);
@@ -4508,6 +4521,92 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .settings-privacy-row:first-of-type { border-top: none; }
 .settings-privacy-row > div { min-width: 0; }
 .settings-danger-row .settings-field-label { color: var(--danger); }
+
+/* ── Settings v2 controls (token-bound; re-skin in both themes) ─────── */
+.settings-select {
+  flex: 1 1 auto;
+  width: 100%;
+  cursor: pointer;
+}
+.settings-textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 64px;
+  line-height: 1.5;
+}
+.settings-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--text);
+  cursor: pointer;
+  padding: 4px 0;
+}
+.settings-checkbox input[type="checkbox"] { accent-color: var(--accent); }
+/* iOS-style toggle, fully token-driven so it tracks light/dark. */
+.settings-toggle {
+  position: relative;
+  flex: 0 0 auto;
+  display: inline-flex;
+  cursor: pointer;
+}
+.settings-toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.settings-toggle-track {
+  width: 42px;
+  height: 24px;
+  border-radius: 999px;
+  background: var(--surface3);
+  border: 1px solid var(--border-strong);
+  transition: background var(--dur-base) var(--ease);
+  position: relative;
+}
+.settings-toggle-track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: 0 1px 3px rgba(var(--rgb-accent), 0.30);
+  transition: transform var(--dur-base) var(--ease);
+}
+.settings-toggle input:checked + .settings-toggle-track {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.settings-toggle input:checked + .settings-toggle-track::after {
+  transform: translateX(18px);
+}
+.settings-toggle input:focus-visible + .settings-toggle-track {
+  box-shadow: var(--shadow-focus);
+}
+.settings-careteam-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 14px;
+  color: var(--text);
+}
+.settings-careteam-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-careteam-row .label { color: var(--muted); }
+.settings-careteam-safety {
+  margin-top: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--warn-bg);
+  border: 1px solid rgba(var(--rgb-warn), 0.30);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.settings-careteam-safety strong { color: var(--warn); }
 
 /* Delete-account confirmation modal. Reuses the recap-modal overlay shape;
    the confirm button uses --danger only after the patient types DELETE. */

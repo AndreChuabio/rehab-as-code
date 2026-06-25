@@ -364,6 +364,110 @@
         </p>
       </div>
 
+      <!-- CLINIC PROFILE -->
+      <div class="card settings-card">
+        <h3>Clinic profile</h3>
+        <p class="settings-hint">
+          The clinic phone is the number patients are told to call in a flare.
+          The signature and clinic name appear on the generated super-bill.
+        </p>
+
+        <label class="settings-field-label" for="clinicSettingsName">Clinic name</label>
+        <input type="text" id="clinicSettingsName" class="settings-input"
+               placeholder="Clinic name" autocomplete="organization" />
+
+        <label class="settings-field-label" for="clinicSettingsPhone">Clinic phone</label>
+        <input type="tel" id="clinicSettingsPhone" class="settings-input"
+               placeholder="e.g. 555-123-4567" autocomplete="tel" />
+
+        <label class="settings-field-label" for="clinicSettingsLicense">License number</label>
+        <input type="text" id="clinicSettingsLicense" class="settings-input"
+               placeholder="License #" />
+
+        <label class="settings-field-label" for="clinicSettingsSignature">Signature and credentials</label>
+        <input type="text" id="clinicSettingsSignature" class="settings-input"
+               placeholder="e.g. Jane Doe, PT, DPT" />
+
+        <div class="settings-actions">
+          <button type="button" class="settings-btn" id="clinicSettingsSave">Save</button>
+        </div>
+        <div class="settings-status" id="clinicSettingsStatus" hidden></div>
+      </div>
+
+      <!-- REVIEW NOTIFICATIONS -->
+      <div class="card settings-card">
+        <h3>Review notifications</h3>
+        <p class="settings-hint">
+          Saved to your preferences. Email alerts are coming soon.
+        </p>
+        <label class="settings-checkbox">
+          <input type="checkbox" id="clinicNotifNewDrafts" />
+          <span>New drafts awaiting my review</span>
+        </label>
+        <label class="settings-checkbox">
+          <input type="checkbox" id="clinicNotifHighSeverity" />
+          <span>High-severity symptom flags</span>
+        </label>
+        <div class="settings-status" id="clinicNotifStatus" hidden></div>
+      </div>
+
+      <!-- THEME AND QUEUE PREFERENCES -->
+      <div class="card settings-card">
+        <h3>Queue preferences</h3>
+        <label class="settings-field-label" for="clinicQueueSort">Default sort</label>
+        <select id="clinicQueueSort" class="settings-input settings-select">
+          <option value="safety_first">Safety flags first, then newest</option>
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+        </select>
+        <p class="settings-hint">
+          Safety-flagged drafts always stay pinned above routine rows.
+        </p>
+
+        <div class="settings-privacy-row">
+          <div>
+            <div class="settings-field-label">Auto-refresh queue</div>
+            <p class="settings-hint">Reload the pending queue every minute.</p>
+          </div>
+          <label class="settings-toggle">
+            <input type="checkbox" id="clinicQueueAutoRefresh" aria-label="Auto-refresh queue" />
+            <span class="settings-toggle-track" aria-hidden="true"></span>
+          </label>
+        </div>
+
+        <p class="settings-hint">
+          A light and dark theme toggle for the clinician dashboard is a planned
+          follow-up, tied to the clinician re-skin.
+        </p>
+      </div>
+
+      <!-- GOAL AND PAYER TEMPLATES -->
+      <div class="card settings-card">
+        <h3>Goal and payer templates</h3>
+        <p class="settings-hint">
+          Default goal-language the planner drafts from, one per payer mode.
+          Keep these generic and free of patient details — they guide every
+          patient's drafted goals.
+        </p>
+
+        <label class="settings-field-label" for="goalTplInsurance">Insurance</label>
+        <textarea id="goalTplInsurance" class="settings-input settings-textarea"
+                  rows="3" placeholder="Medical-necessity framing for commercial insurance"></textarea>
+
+        <label class="settings-field-label" for="goalTplMedicare">Medicare</label>
+        <textarea id="goalTplMedicare" class="settings-input settings-textarea"
+                  rows="3" placeholder="Medicare medical-necessity / plan-of-care framing"></textarea>
+
+        <label class="settings-field-label" for="goalTplCash">Cash</label>
+        <textarea id="goalTplCash" class="settings-input settings-textarea"
+                  rows="3" placeholder="Load-management / performance framing for cash-pay"></textarea>
+
+        <div class="settings-actions">
+          <button type="button" class="settings-btn" id="goalTplSave">Save</button>
+        </div>
+        <div class="settings-status" id="goalTplStatus" hidden></div>
+      </div>
+
       <div class="clinician-toast" id="clinicianSettingsToast" hidden></div>
     </section>
   </main>

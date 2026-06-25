@@ -717,7 +717,12 @@ async def chat_stream(
             triage_result
             and triage_result.get("severity") == "clinician-attention"
         ):
-            phone = (os.getenv("CLINIC_PHONE", "") or "").strip() or None
+            # Escalation phone precedence (Settings v2): the clinic-profile
+            # phone (staff_users.clinic_phone, single-clinic v1) takes
+            # precedence over the CLINIC_PHONE env, falling back to None for the
+            # "call your clinic" copy. Degrades to today's env value when no DB.
+            import user_store as _us
+            phone = _us.resolve_clinic_phone()
             symptom_keyword = _first_symptom_keyword(latest_user_msg)
             yield {
                 "type": "triage_alert",

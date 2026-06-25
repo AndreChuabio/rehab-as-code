@@ -365,6 +365,106 @@
               </p>
             </section>
 
+            <!-- THEME AND DISPLAY -->
+            <section class="card settings-card settings-display-card">
+              <h3>Theme and display</h3>
+              <div class="settings-privacy-row">
+                <div>
+                  <div class="settings-field-label">Dark mode</div>
+                  <p class="settings-hint">Switch between light and dark. Saved on this device.</p>
+                </div>
+                <label class="settings-toggle">
+                  <input type="checkbox" id="settingsThemeToggle" aria-label="Dark mode" />
+                  <span class="settings-toggle-track" aria-hidden="true"></span>
+                </label>
+              </div>
+
+              <label class="settings-field-label" for="settingsTextSize">Text size</label>
+              <select id="settingsTextSize" class="settings-input settings-select">
+                <option value="normal">Normal</option>
+                <option value="large">Large</option>
+              </select>
+
+              <div class="settings-privacy-row">
+                <div>
+                  <div class="settings-field-label">Reduce motion</div>
+                  <p class="settings-hint">Minimize animations and transitions.</p>
+                </div>
+                <label class="settings-toggle">
+                  <input type="checkbox" id="settingsReducedMotion" aria-label="Reduce motion" />
+                  <span class="settings-toggle-track" aria-hidden="true"></span>
+                </label>
+              </div>
+            </section>
+
+            <!-- NOTIFICATIONS AND REMINDERS -->
+            <section class="card settings-card settings-notif-card">
+              <h3>Notifications and reminders</h3>
+              <p class="settings-hint">
+                Reminders are saved to your preferences. Email and push delivery
+                are coming soon.
+              </p>
+              <label class="settings-checkbox">
+                <input type="checkbox" id="settingsNotifSession" />
+                <span>Session reminders</span>
+              </label>
+              <label class="settings-checkbox">
+                <input type="checkbox" id="settingsNotifCheckin" />
+                <span>Daily check-in reminders</span>
+              </label>
+              <label class="settings-checkbox">
+                <input type="checkbox" id="settingsNotifPlanUpdated" />
+                <span>When my plan is updated</span>
+              </label>
+              <label class="settings-checkbox">
+                <input type="checkbox" id="settingsNotifSymptom" />
+                <span>Symptom-flag receipts</span>
+              </label>
+              <label class="settings-checkbox">
+                <input type="checkbox" id="settingsNotifEmail" />
+                <span>Email me these (when delivery is available)</span>
+              </label>
+            </section>
+
+            <!-- COACH MAYA PREFERENCES -->
+            <section class="card settings-card settings-coach-card">
+              <h3>Coach Maya preferences</h3>
+              <div class="settings-privacy-row">
+                <div>
+                  <div class="settings-field-label">Voice on calls</div>
+                  <p class="settings-hint">
+                    When on, Maya counts your reps and gives form cues out loud
+                    during a video session.
+                  </p>
+                </div>
+                <label class="settings-toggle">
+                  <input type="checkbox" id="settingsCoachVoice" aria-label="Voice on calls" />
+                  <span class="settings-toggle-track" aria-hidden="true"></span>
+                </label>
+              </div>
+
+              <label class="settings-field-label" for="settingsCoachCadence">Greeting</label>
+              <select id="settingsCoachCadence" class="settings-input settings-select">
+                <option value="every_visit">Greet me every visit</option>
+                <option value="first_of_day">Only the first visit of the day</option>
+                <option value="off">No greeting</option>
+              </select>
+
+              <label class="settings-field-label" for="settingsCoachLanguage">Language</label>
+              <select id="settingsCoachLanguage" class="settings-input settings-select">
+                <option value="en">English</option>
+              </select>
+              <p class="settings-hint">More languages are coming soon.</p>
+            </section>
+
+            <!-- CARE TEAM AND SUPPORT -->
+            <section class="card settings-card settings-careteam-card">
+              <h3>Care team and support</h3>
+              <div class="settings-careteam-body" id="settingsCareTeamBody">
+                <span class="settings-readonly">Loading…</span>
+              </div>
+            </section>
+
             <!-- DATA AND PRIVACY -->
             <section class="card settings-card settings-privacy-card">
               <h3>Data and privacy</h3>

@@ -105,3 +105,47 @@ def test_degrades_when_session_store_unavailable(monkeypatch):
     assert draft["status"] == "draft_unsigned"
     assert draft["line_items"] == []
     assert any("unavailable" in d.lower() for d in draft["disclaimers"])
+
+
+# ---------------------------------------------------------------------------
+# Settings v2 — clinician attestation block (clinic name / signature / license)
+# ---------------------------------------------------------------------------
+
+
+def test_attestation_block_present_when_clinician_fields_passed(monkeypatch):
+    _patch_stores(monkeypatch, sessions=[_session("mini_squat")])
+    import superbill
+    draft = superbill.generate_draft(
+        "tok",
+        clinic_name="Plum PT",
+        signature="Nikki, PT, DPT",
+        license_number="PT-99",
+    )
+    att = draft["attestation"]
+    assert att is not None
+    assert att["clinic_name"] == "Plum PT"
+    assert att["signature"] == "Nikki, PT, DPT"
+    assert att["license_number"] == "PT-99"
+    # A draft is NEVER auto-signed even with a signature on file.
+    assert att["signed"] is False
+    assert draft["status"] == "draft_unsigned"
+    assert draft["requires_clinician_attestation"] is True
+
+
+def test_attestation_block_absent_when_no_clinician_identity(monkeypatch):
+    """Patient self-view path: no clinician fields -> unsigned, no block, and the
+    draft_unsigned + needs_verification contract still holds."""
+    _patch_stores(monkeypatch, sessions=[_session("mini_squat")])
+    import superbill
+    draft = superbill.generate_draft("tok")
+    assert draft["attestation"] is None
+    assert draft["status"] == "draft_unsigned"
+    assert draft["requires_clinician_attestation"] is True
+    assert draft["totals"]["needs_verification"] is True
+
+
+def test_attestation_block_omitted_when_fields_blank(monkeypatch):
+    _patch_stores(monkeypatch, sessions=[_session("mini_squat")])
+    import superbill
+    draft = superbill.generate_draft("tok", clinic_name="  ", signature="")
+    assert draft["attestation"] is None

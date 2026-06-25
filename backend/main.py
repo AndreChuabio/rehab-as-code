@@ -1139,7 +1139,7 @@ def set_clinician_patient_payer_model(
 @app.get("/clinician/patient/{token}/superbill")
 def get_clinician_patient_superbill(
     token: str,
-    user_id: str = Depends(require_clinician_id),  # noqa: ARG001
+    user_id: str = Depends(require_clinician_id),
 ):
     """DRAFT super-bill for one patient, built from completed sessions only.
 
@@ -1147,10 +1147,21 @@ def get_clinician_patient_superbill(
     `draft_unsigned` with every line flagged requires_clinician_attestation +
     needs_verification — it is a review surface, not a bill. See superbill.py
     for the hard contract.
+
+    Settings v2: resolves the reviewing clinician's clinic profile (clinic
+    name / signature / license) from user_id and surfaces it as the draft
+    attestation block. Best-effort — a missing profile / DB just omits the
+    block (unsigned), never 5xx. Never logs the profile values (PHI).
     """
     import superbill
 
-    return superbill.generate_draft(token)
+    profile = user_store.get_clinic_profile(user_id)
+    return superbill.generate_draft(
+        token,
+        clinic_name=profile.get("clinic_name"),
+        signature=profile.get("signature"),
+        license_number=profile.get("license_number"),
+    )
 
 
 @app.get("/patient/me/superbill")
@@ -2209,6 +2220,14 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
         payer_model = user_store.DEFAULT_PAYER_MODEL
     goals = active_payload.get("goals") or []
 
+    # Settings v2 prefs surfaced on the patient state so the Settings panes
+    # prefill from patientState with no extra round-trip. Best-effort — a
+    # missing intake / store error degrades to the benign defaults (the getters
+    # never raise). PHI: the pref VALUES are not logged here.
+    notification_prefs = user_store.get_notification_prefs(user_id)
+    display_prefs = user_store.get_display_prefs(user_id)
+    coach_prefs = user_store.get_coach_prefs(user_id)
+
     return {
         "state": state,
         "patient_name": user.get("patient_name"),
@@ -2220,6 +2239,9 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
         "current_week": current_week,
         "payer_model": payer_model,
         "goals": goals,
+        "notification_prefs": notification_prefs,
+        "display_prefs": display_prefs,
+        "coach_prefs": coach_prefs,
         # Retained for backward compat; no longer load-bearing (PR-bus dead).
         "last_pr_url": ps.get("last_pr_url"),
         "session_count": len(user.get("session_history", [])),

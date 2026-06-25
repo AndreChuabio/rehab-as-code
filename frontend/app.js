@@ -114,6 +114,9 @@ function routeFromHash() {
 window.addEventListener("hashchange", routeFromHash);
 
 document.addEventListener("DOMContentLoaded", () => {
+  // Apply theme / text-size / reduced-motion from localStorage BEFORE the
+  // first paint-driving loads so the page doesn't flash light then flip dark.
+  applyDisplayPrefs();
   document.getElementById("dateDisplay").textContent = new Date().toLocaleDateString(
     "en-US", { weekday: "long", month: "long", day: "numeric" }
   );
@@ -1227,12 +1230,227 @@ function switchStage(mode) {
 
 let _settingsWired = false;
 
+// ── Settings v2: display + Coach Maya prefs (localStorage-backed) ───────────
+//
+// localStorage is the source of truth (instant, no round-trip); the server is a
+// durable cross-device mirror updated best-effort on change. Keys are namespaced
+// 'rac-*'. applyDisplayPrefs runs pre-paint in DOMContentLoaded.
+
+const THEME_KEY = "rac-theme";
+const TEXT_SIZE_KEY = "rac-text-size";
+const REDUCED_MOTION_KEY = "rac-reduced-motion";
+const MAYA_VOICE_KEY = "rac-maya-voice";
+const GREETING_CADENCE_KEY = "rac-greeting-cadence";
+
+function applyDisplayPrefs() {
+  try {
+    const root = document.documentElement;
+    const theme = localStorage.getItem(THEME_KEY);
+    if (theme === "dark") root.dataset.theme = "dark";
+    else delete root.dataset.theme; // default light
+    const textSize = localStorage.getItem(TEXT_SIZE_KEY);
+    if (textSize === "large") root.dataset.textSize = "large";
+    else delete root.dataset.textSize;
+    const reduced = localStorage.getItem(REDUCED_MOTION_KEY);
+    if (reduced === "1") root.dataset.reducedMotion = "1";
+    else delete root.dataset.reducedMotion;
+  } catch (_) {
+    // Private mode / no storage — leave the default light theme.
+  }
+}
+
+// Voice gate for the in-call rep-count echo. MUST be read synchronously in the
+// per-rep hot loop (echoMayaCount), so it is localStorage-only — never a fetch.
+// Defaults ON (no key set) to preserve the current in-call behavior.
+function mayaVoiceEnabled() {
+  try {
+    return localStorage.getItem(MAYA_VOICE_KEY) !== "0";
+  } catch (_) {
+    return true;
+  }
+}
+
+function setMayaVoiceEnabled(on) {
+  try {
+    localStorage.setItem(MAYA_VOICE_KEY, on ? "1" : "0");
+  } catch (_) {}
+}
+
+function greetingCadence() {
+  try {
+    return localStorage.getItem(GREETING_CADENCE_KEY) || "every_visit";
+  } catch (_) {
+    return "every_visit";
+  }
+}
+
 function loadSettings() {
   wireSettingsOnce();
   renderSettingsAccount();
   renderSettingsPayer();
   loadSettingsWearable();
   loadSettingsConsent();
+  renderSettingsDisplay();
+  loadSettingsNotifications();
+  renderSettingsCoachMaya();
+  loadCareTeam();
+}
+
+// ── Theme & display ─────────────────────────────────────────────────────────
+
+function renderSettingsDisplay() {
+  const themeToggle = document.getElementById("settingsThemeToggle");
+  const textSizeSel = document.getElementById("settingsTextSize");
+  const reducedToggle = document.getElementById("settingsReducedMotion");
+  // Seed the controls from the applied state (localStorage source of truth).
+  if (themeToggle) themeToggle.checked = document.documentElement.dataset.theme === "dark";
+  if (textSizeSel) textSizeSel.value = document.documentElement.dataset.textSize === "large" ? "large" : "normal";
+  if (reducedToggle) reducedToggle.checked = document.documentElement.dataset.reducedMotion === "1";
+}
+
+// Best-effort durable mirror of a display pref to the server. localStorage has
+// already been written + applied; the UI never blocks on this.
+function mirrorDisplayPref(patch) {
+  try {
+    authedFetch(`${API_BASE}/patient/me/display`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    }).catch(() => {});
+  } catch (_) {}
+}
+
+// ── Notifications & reminders ───────────────────────────────────────────────
+
+const _NOTIF_FIELDS = [
+  ["settingsNotifSession", "session_reminders"],
+  ["settingsNotifCheckin", "checkin_reminders"],
+  ["settingsNotifPlanUpdated", "plan_updated"],
+  ["settingsNotifSymptom", "symptom_flag_receipts"],
+  ["settingsNotifEmail", "email_opt_in"],
+];
+
+async function loadSettingsNotifications() {
+  // Prefer prefs already on patientState (intake-status); else fetch.
+  let prefs = patientState?.notification_prefs || null;
+  if (!prefs) {
+    try {
+      const res = await authedFetch(`${API_BASE}/patient/me/notifications`);
+      if (res.ok) prefs = await res.json();
+    } catch (e) {
+      console.warn("settings notifications load failed", e);
+    }
+  }
+  if (!prefs) return;
+  for (const [id, key] of _NOTIF_FIELDS) {
+    const el = document.getElementById(id);
+    if (el) el.checked = !!prefs[key];
+  }
+}
+
+async function saveSettingsNotifications() {
+  const patch = {};
+  for (const [id, key] of _NOTIF_FIELDS) {
+    const el = document.getElementById(id);
+    if (el) patch[key] = !!el.checked;
+  }
+  try {
+    const res = await authedFetch(`${API_BASE}/patient/me/notifications`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    if (res.ok && patientState) patientState.notification_prefs = await res.json();
+  } catch (e) {
+    console.warn("settings notifications save failed", e);
+  }
+}
+
+// ── Coach Maya preferences ──────────────────────────────────────────────────
+
+function renderSettingsCoachMaya() {
+  const prefs = patientState?.coach_prefs || null;
+  const voiceToggle = document.getElementById("settingsCoachVoice");
+  const cadenceSel = document.getElementById("settingsCoachCadence");
+  const langSel = document.getElementById("settingsCoachLanguage");
+  // Seed the localStorage mirrors from the server prefs (server is durable;
+  // localStorage is what the hot-loop + greeting read).
+  if (prefs) {
+    setMayaVoiceEnabled(prefs.voice !== false);
+    try {
+      if (prefs.greeting_cadence) localStorage.setItem(GREETING_CADENCE_KEY, prefs.greeting_cadence);
+    } catch (_) {}
+  }
+  if (voiceToggle) voiceToggle.checked = mayaVoiceEnabled();
+  if (cadenceSel) cadenceSel.value = greetingCadence();
+  if (langSel) langSel.value = (prefs && prefs.language) || "en";
+}
+
+async function saveSettingsCoachMaya() {
+  const voiceToggle = document.getElementById("settingsCoachVoice");
+  const cadenceSel = document.getElementById("settingsCoachCadence");
+  const langSel = document.getElementById("settingsCoachLanguage");
+  const voice = voiceToggle ? !!voiceToggle.checked : true;
+  const cadence = cadenceSel ? cadenceSel.value : "every_visit";
+  const language = langSel ? langSel.value : "en";
+  // localStorage first (the load-bearing read for the echo gate + greeting).
+  setMayaVoiceEnabled(voice);
+  try { localStorage.setItem(GREETING_CADENCE_KEY, cadence); } catch (_) {}
+  try {
+    const res = await authedFetch(`${API_BASE}/patient/me/coach-prefs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ voice, greeting_cadence: cadence, language }),
+    });
+    if (res.ok && patientState) patientState.coach_prefs = await res.json();
+  } catch (e) {
+    console.warn("settings coach prefs save failed", e);
+  }
+}
+
+// ── Care team & support (read-only) ─────────────────────────────────────────
+
+async function loadCareTeam() {
+  const body = document.getElementById("settingsCareTeamBody");
+  if (!body) return;
+  let data = null;
+  try {
+    const res = await authedFetch(`${API_BASE}/patient/me/care-team`);
+    if (res.ok) data = await res.json();
+  } catch (e) {
+    console.warn("care-team load failed", e);
+  }
+  data = data || {};
+  const clinicName = data.clinic_name;
+  const phone = data.clinic_phone;
+  const reviewer = data.reviewing_clinician_name;
+
+  const rows = [];
+  rows.push(
+    `<div class="settings-careteam-row"><span class="label">Clinic</span>` +
+    `<span>${clinicName ? escapeHtml(clinicName) : "Your clinic"}</span></div>`,
+  );
+  const phoneCell = phone
+    ? `<a href="tel:${escapeHtml(phone)}">${escapeHtml(phone)}</a>`
+    : "Call your clinic";
+  rows.push(
+    `<div class="settings-careteam-row"><span class="label">Phone</span>` +
+    `<span>${phoneCell}</span></div>`,
+  );
+  rows.push(
+    `<div class="settings-careteam-row"><span class="label">Reviewed by</span>` +
+    `<span>${reviewer ? escapeHtml(reviewer) : "Your care team will review your plan"}</span></div>`,
+  );
+  // Static flare / urgent safety block — reuses the renderTriageAlert
+  // escalation wording with the same tel-link / "call your clinic" fallback.
+  const callCopy = phone
+    ? `call your clinic at <a href="tel:${escapeHtml(phone)}">${escapeHtml(phone)}</a>`
+    : "call your clinic";
+  rows.push(
+    `<div class="settings-careteam-safety"><strong>In a flare</strong> — if you have ` +
+    `severe pain, swelling, or numbness now, ${callCopy} or go to urgent care.</div>`,
+  );
+  body.innerHTML = rows.join("");
 }
 
 function renderSettingsAccount() {
@@ -1522,6 +1740,36 @@ function wireSettingsOnce() {
     const btn = document.getElementById("deleteConfirm");
     if (btn) btn.disabled = (e.target.value || "").trim() !== DELETE_CONFIRM_TOKEN;
   });
+
+  // ── Settings v2: theme & display ──────────────────────────────────────────
+  document.getElementById("settingsThemeToggle")?.addEventListener("change", (e) => {
+    const dark = !!e.target.checked;
+    try { localStorage.setItem(THEME_KEY, dark ? "dark" : "light"); } catch (_) {}
+    applyDisplayPrefs();
+    mirrorDisplayPref({ theme: dark ? "dark" : "light" });
+  });
+  document.getElementById("settingsTextSize")?.addEventListener("change", (e) => {
+    const val = e.target.value === "large" ? "large" : "normal";
+    try { localStorage.setItem(TEXT_SIZE_KEY, val); } catch (_) {}
+    applyDisplayPrefs();
+    mirrorDisplayPref({ text_size: val });
+  });
+  document.getElementById("settingsReducedMotion")?.addEventListener("change", (e) => {
+    const on = !!e.target.checked;
+    try { localStorage.setItem(REDUCED_MOTION_KEY, on ? "1" : "0"); } catch (_) {}
+    applyDisplayPrefs();
+    mirrorDisplayPref({ reduced_motion: on });
+  });
+
+  // ── Settings v2: notifications (save on every change) ─────────────────────
+  for (const [id] of _NOTIF_FIELDS) {
+    document.getElementById(id)?.addEventListener("change", saveSettingsNotifications);
+  }
+
+  // ── Settings v2: Coach Maya prefs (save on every change) ──────────────────
+  document.getElementById("settingsCoachVoice")?.addEventListener("change", saveSettingsCoachMaya);
+  document.getElementById("settingsCoachCadence")?.addEventListener("change", saveSettingsCoachMaya);
+  document.getElementById("settingsCoachLanguage")?.addEventListener("change", saveSettingsCoachMaya);
 }
 
 // ---------------------------------------------------------------------------
@@ -1973,6 +2221,11 @@ function _sendTavusInteraction(payload) {
 // is sent as a second echo shortly after the number so the number is heard
 // first; pass it only when the rep's form was off.
 function echoMayaCount(word, cue) {
+  // Settings v2 voice gate: when the patient turns Maya's voice OFF, suppress
+  // BOTH the spoken rep count and the in-call form cue (both flow through here;
+  // the on-screen correction bubble still renders). Synchronous localStorage
+  // read — never a fetch — because this runs in the per-rep hot loop.
+  if (!mayaVoiceEnabled()) return;
   if (!tavusCall || !tavusConvId || !word) return;
   const now = (typeof performance !== "undefined" ? performance.now() : Date.now());
   // Fast back-to-back reps: interrupt the prior (likely still-playing) count
@@ -5094,6 +5347,21 @@ function renderStateAwareGreeting() {
   if (!patientState || !patientState.state) {
     console.warn("state-aware greeting skipped: no patientState");
     return;
+  }
+
+  // Settings v2 greeting-cadence pref. "off" suppresses the greeting entirely;
+  // "first_of_day" shows it only once per calendar day. localStorage is the
+  // synchronous source of truth (mirrored from coach_prefs on Settings load).
+  const cadence = greetingCadence();
+  if (cadence === "off") return;
+  if (cadence === "first_of_day") {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      if (localStorage.getItem("rac-greeting-shown-day") === today) return;
+      localStorage.setItem("rac-greeting-shown-day", today);
+    } catch (_) {
+      // No storage — fall through and greet (no worse than every_visit).
+    }
   }
 
   // Compute days-away. Prefer backend last_active (authoritative); fall

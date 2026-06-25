@@ -147,6 +147,38 @@ def test_compose_with_concerns_passes_them_into_prompt(monkeypatch):
     assert "pain_ceiling" in user_msg
 
 
+def test_compose_injects_goal_template_as_style_guidance(monkeypatch):
+    """Settings v2 cheap wire: a clinician's per-payer goal template is
+    appended to the planner prompt as style guidance; absence omits it."""
+    fake = _stub_anthropic(monkeypatch, response_blocks=[_draft_block(SAMPLE_DRAFT)])
+    from agents.planner import compose
+
+    compose(
+        candidates=[],
+        signal={"decision": "hold", "reasons": [], "confidence": 0.5},
+        intake={"name": "P"},
+        phase="subacute",
+        week=4,
+        token="t",
+        goal_template="Restore prior level of function for ADLs.",
+    )
+    user_msg = fake.last_kwargs["messages"][0]["content"]
+    assert "goal-language style template" in user_msg
+    assert "Restore prior level of function for ADLs." in user_msg
+
+    # Without a template, the style-guidance line is absent.
+    fake2 = _stub_anthropic(monkeypatch, response_blocks=[_draft_block(SAMPLE_DRAFT)])
+    compose(
+        candidates=[],
+        signal={"decision": "hold", "reasons": [], "confidence": 0.5},
+        intake={"name": "P"},
+        phase="subacute",
+        week=4,
+        token="t",
+    )
+    assert "goal-language style template" not in fake2.last_kwargs["messages"][0]["content"]
+
+
 def test_compose_normalizes_missing_references(monkeypatch):
     """If the model omits `references` on an exercise, the planner
     synthesizes the auto-generated one so save_pending validation
