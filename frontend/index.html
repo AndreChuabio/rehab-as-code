@@ -104,6 +104,10 @@
                   role="tab" aria-selected="false" onclick="switchStage('history')">
             History
           </button>
+          <button class="stage-tab" data-mode="settings" id="tabSettings"
+                  role="tab" aria-selected="false" onclick="switchStage('settings')">
+            Settings
+          </button>
         </div>
 
         <!-- VIDEO MODE -->
@@ -298,6 +302,103 @@
             </div>
           </div>
         </div>
+
+        <!-- SETTINGS MODE — Profile / Settings. Four areas: Account, Wearable,
+             Payer (read-only; clinician-owned), Data and Privacy. The pane
+             scrolls internally so it never grows the height:100vh app shell. -->
+        <div class="stage-pane stage-settings" id="stageSettings" role="tabpanel"
+             aria-labelledby="tabSettings" hidden>
+          <div class="settings-scroll">
+
+            <!-- ACCOUNT -->
+            <section class="card settings-card settings-account-card">
+              <h3>Account</h3>
+              <label class="settings-field-label" for="settingsName">Display name</label>
+              <div class="settings-row">
+                <input type="text" id="settingsName" class="settings-input"
+                       placeholder="Your name" autocomplete="name" />
+                <button type="button" class="settings-btn" id="settingsNameSave">Save</button>
+              </div>
+              <div class="settings-status" id="settingsNameStatus" hidden></div>
+
+              <label class="settings-field-label">Email</label>
+              <div class="settings-readonly" id="settingsEmail">—</div>
+              <p class="settings-hint">Email is managed by your sign-in and can't be changed here.</p>
+
+              <div class="settings-actions">
+                <button type="button" class="settings-btn secondary" id="settingsChangePw">
+                  Change password
+                </button>
+                <button type="button" class="settings-btn secondary" id="settingsSignOut">
+                  Sign out
+                </button>
+              </div>
+            </section>
+
+            <!-- WEARABLE CONNECTIONS -->
+            <section class="card settings-card settings-wearable-card">
+              <h3>Wearable connection</h3>
+              <div class="settings-wearable-status" id="settingsWearableStatus">
+                <span class="settings-readonly">Loading…</span>
+              </div>
+              <div class="settings-actions">
+                <button type="button" class="settings-btn secondary" id="settingsWearableConnect" hidden>
+                  Connect a wearable
+                </button>
+                <button type="button" class="settings-btn secondary" id="settingsWearableDisconnect" hidden>
+                  Disconnect
+                </button>
+              </div>
+            </section>
+
+            <!-- PAYER MODE (read-only; clinician-owned) -->
+            <section class="card settings-card settings-payer-card">
+              <h3>Payer mode
+                <span class="payer-badge" id="settingsPayerBadge" hidden></span>
+              </h3>
+              <p class="settings-hint">
+                Your clinician sets your payer mode. It shapes how your plan
+                goals are written and whether a draft super-bill is available.
+              </p>
+            </section>
+
+            <!-- DATA AND PRIVACY -->
+            <section class="card settings-card settings-privacy-card">
+              <h3>Data and privacy</h3>
+
+              <div class="settings-privacy-row">
+                <div>
+                  <div class="settings-field-label">Export my data</div>
+                  <p class="settings-hint">Download a JSON copy of everything on your record.</p>
+                </div>
+                <button type="button" class="settings-btn secondary" id="settingsExport">Export</button>
+              </div>
+
+              <div class="settings-privacy-row">
+                <div>
+                  <div class="settings-field-label">Consent status</div>
+                  <p class="settings-hint" id="settingsConsentStatus">Loading…</p>
+                </div>
+                <button type="button" class="settings-btn secondary" id="settingsConsentRecord" hidden>
+                  Record consent
+                </button>
+              </div>
+
+              <div class="settings-privacy-row settings-danger-row">
+                <div>
+                  <div class="settings-field-label">Delete account</div>
+                  <p class="settings-hint">
+                    Permanently erases your health data. This cannot be undone.
+                  </p>
+                </div>
+                <button type="button" class="settings-btn danger" id="settingsDelete">
+                  Delete account
+                </button>
+              </div>
+            </section>
+
+          </div>
+        </div>
       </section>
 
     </main>
@@ -469,6 +570,33 @@
         <button type="button" class="setpw-save" id="setPwSave">Save</button>
       </div>
       <div class="setpw-status" id="setPwStatus" hidden></div>
+    </div>
+  </div>
+
+  <!-- Delete-account confirmation modal. Destructive: the confirm button stays
+       disabled until the patient types DELETE, then fires DELETE /patient/me
+       with {confirm: "DELETE"}. Copy states the cascade reality honestly. -->
+  <div class="delete-modal" id="deleteModal" hidden role="dialog"
+       aria-modal="true" aria-labelledby="deleteModalTitle">
+    <div class="delete-card">
+      <h2 id="deleteModalTitle">Delete your account</h2>
+      <p class="delete-blurb">
+        This permanently erases your health data: intake, protocols, sessions,
+        check-ins, and any wearable connection. Your sign-in login may persist
+        and must be removed separately. This cannot be undone.
+      </p>
+      <label class="settings-field-label" for="deleteConfirmInput">
+        Type DELETE to confirm
+      </label>
+      <input type="text" id="deleteConfirmInput" class="settings-input"
+             placeholder="DELETE" autocomplete="off" autocapitalize="characters" />
+      <div class="delete-actions">
+        <button type="button" class="settings-btn secondary" id="deleteCancel">Cancel</button>
+        <button type="button" class="settings-btn danger" id="deleteConfirm" disabled>
+          Delete permanently
+        </button>
+      </div>
+      <div class="settings-status" id="deleteStatus" hidden></div>
     </div>
   </div>
 

@@ -20,6 +20,7 @@
     <nav class="admin-mode-switch" id="adminModeSwitch" hidden role="tablist" aria-label="Dashboard mode">
       <button type="button" class="admin-mode-btn active" data-mode="review" role="tab" aria-selected="true">Review queue</button>
       <button type="button" class="admin-mode-btn" data-mode="patients" id="modePatientsBtn" role="tab" aria-selected="false">Patients</button>
+      <button type="button" class="admin-mode-btn" data-mode="settings" id="modeSettingsBtn" role="tab" aria-selected="false">Settings</button>
       <button type="button" class="admin-mode-btn" data-mode="debug" id="modeDebugBtn" role="tab" aria-selected="false">Pipeline debug</button>
     </nav>
 
@@ -325,6 +326,45 @@
           <div id="historySessions" class="clinician-sessions-body"></div>
         </details>
       </article>
+    </section>
+  </main>
+
+  <!-- Settings: clinician account (display name + email read-only + sign out)
+       and a pointer to where payer mode is managed (per-patient, Patients tab).
+       Visible to all clinicians via the segmented control. -->
+  <main class="clinician-main settings-main" id="settingsMain" hidden>
+    <section class="settings-main-inner">
+      <div class="card settings-card">
+        <h3>Account</h3>
+        <label class="settings-field-label" for="clinicianSettingsName">Display name</label>
+        <div class="settings-row">
+          <input type="text" id="clinicianSettingsName" class="settings-input"
+                 placeholder="Your name" autocomplete="name" />
+          <button type="button" class="settings-btn" id="clinicianSettingsNameSave">Save</button>
+        </div>
+        <div class="settings-status" id="clinicianSettingsNameStatus" hidden></div>
+
+        <label class="settings-field-label">Email</label>
+        <div class="settings-readonly" id="clinicianSettingsEmail">—</div>
+        <p class="settings-hint">Email is managed by your sign-in and can't be changed here.</p>
+
+        <div class="settings-actions">
+          <button type="button" class="settings-btn secondary" id="clinicianSettingsSignOut">
+            Sign out
+          </button>
+        </div>
+      </div>
+
+      <div class="card settings-card">
+        <h3>Payer mode</h3>
+        <p class="settings-hint">
+          Payer mode is set per patient from the Patients tab. Open a patient's
+          record to set Insurance, Medicare, or Cash. It shapes their plan-goal
+          language and whether a draft super-bill is available.
+        </p>
+      </div>
+
+      <div class="clinician-toast" id="clinicianSettingsToast" hidden></div>
     </section>
   </main>
 

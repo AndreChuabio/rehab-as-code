@@ -166,6 +166,44 @@ class JunctionClient:
                 return str(nested)
         return None
 
+    def delete_user(self, vital_user_id: str) -> bool:
+        """DELETE /v2/user/{vital_user_id} -> {success: bool}.
+
+        Deregisters ALL of the user's provider connections immediately and
+        permanently erases their data after Junction's 7-day grace window.
+        Idempotent enough for our use: a 404 (already deleted) is treated as
+        success since the end state is the same. Used by the wearable
+        disconnect flow; the caller clears our local row regardless so a
+        Junction-side failure never strands the patient.
+
+        vital_user_id is a Junction-side pointer — never logged at INFO.
+        """
+        if not vital_user_id:
+            raise JunctionError("vital_user_id is required")
+
+        headers = {**self.headers, "Accept": "application/json"}
+        url = f"{self.base_url}/v2/user/{vital_user_id}"
+        with httpx.Client(timeout=_httpx_timeout(self.config.timeout_seconds)) as client:
+            try:
+                resp = client.delete(url, headers=headers)
+            except httpx.HTTPError as exc:
+                raise JunctionError(f"Junction delete-user request failed: {exc}") from exc
+
+            if resp.status_code == 404:
+                return True
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPError as exc:
+                raise JunctionError(f"Junction delete-user failed: {exc}") from exc
+            try:
+                body = resp.json()
+            except ValueError:
+                # A 2xx with a non-JSON body still means the delete landed.
+                return True
+        if isinstance(body, dict) and "success" in body:
+            return bool(body.get("success"))
+        return True
+
     def create_link_token(self, user_id: str, redirect_url: str | None = None) -> dict[str, Any]:
         """POST /v2/link/token -> {link_token, link_web_url}.
 

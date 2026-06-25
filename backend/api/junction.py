@@ -155,6 +155,55 @@ def status(user_id: str = Depends(current_user_id)) -> dict[str, Any]:
     }
 
 
+@router.delete("/connection")
+def disconnect(user_id: str = Depends(current_user_id)) -> dict[str, Any]:
+    """Disconnect the patient's wearable: clear our row + best-effort Junction delete.
+
+    Steps:
+      1. Read the caller's own row (vital_user_id) — scoped by current_user_id.
+      2. If Junction is configured and we have a vital_user_id, best-effort
+         delete the Junction user (auto-deregisters all providers). A
+         Junction-side failure is logged at WARNING and MUST NOT block clearing
+         our row — a wearable outage can never strand the connection.
+      3. Delete our junction_connections row (removes cached_metrics PHI).
+
+    Returns the same benign not_connected shape GET /status returns for a
+    no-row patient, so the Settings UI re-renders consistently. Self-scoped:
+    user_id from the JWT, vital_user_id from the caller's own row, delete
+    WHERE token = user_id. Never logs vital_user_id / metrics at INFO.
+    """
+    not_connected = {
+        "status": "not_connected",
+        "providers": [],
+        "last_synced_at": None,
+        "isLive": False,
+    }
+
+    try:
+        row = junction_repo.get_by_token(user_id)
+    except junction_repo.JunctionRepoError:
+        # No store (e.g. local sqlite / CI). Nothing to disconnect; report the
+        # benign shape rather than 5xx.
+        return not_connected
+
+    vital_user_id = (row or {}).get("vital_user_id")
+    config = build_config()
+    if config and vital_user_id:
+        try:
+            JunctionClient(config).delete_user(vital_user_id)
+        except JunctionError:
+            logger.warning("junction: delete_user failed; clearing local row anyway")
+
+    try:
+        junction_repo.disconnect(user_id)
+    except junction_repo.JunctionRepoError:
+        # Couldn't reach the store to clear the row; surface a 503 so the UI can
+        # tell the patient it didn't take, rather than falsely showing success.
+        raise HTTPException(503, detail="Connection store unavailable")
+
+    return not_connected
+
+
 class DemoConnectRequest(BaseModel):
     provider: str = "oura"
 

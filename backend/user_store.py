@@ -1006,6 +1006,213 @@ def set_payer_model(token: str, model: str) -> str:
     return normalized
 
 
+# -- Display name (patient-owned account setting) ---------------------------
+#
+# The patient sets their own display name in Profile / Settings. We write the
+# canonical first link of the resolution chain (intake_records.payload.name)
+# via the same merge pattern as set_payer_model, so save_intake mirrors it onto
+# users.patient_name on both pg + sqlite. NEVER touch protocol.payload.patient
+# (that field drifts and once leaked "Christian" into the chat greeting).
+
+
+def set_display_name(token: str, name: str) -> str:
+    """Set the patient's display name on the canonical intake payload.
+
+    Merges `name` into the existing intake record so the rest of the payload
+    (injury_type, payer_model, etc.) is preserved. Raises ValueError on an
+    empty / whitespace-only name so the API surfaces a 400 rather than storing
+    a blank the resolver would skip. Returns the stored (stripped) name.
+    """
+    if not token:
+        raise ValueError("token required")
+    cleaned = str(name or "").strip()
+    if not cleaned:
+        raise ValueError("name must not be empty")
+    # save_intake silently no-ops when the parent users row is absent. A patient
+    # may reach Settings before any patient-interaction endpoint ran ensure_user,
+    # so register the (idempotent) users row first or the write is lost while the
+    # endpoint still returns 200. ensure_user uses ON CONFLICT DO UPDATE (pg) /
+    # INSERT OR IGNORE (sqlite), so an existing row is untouched.
+    ensure_user(token)
+    intake = get_intake(token) or {}
+    save_intake(token, {**intake, "name": cleaned})
+    return cleaned
+
+
+# -- Consent status (intake-payload backed; no migration) -------------------
+#
+# v1 records consent on the canonical intake payload (same merge mechanism as
+# payer_model). No dedicated table, so no migration. get_consent returns a
+# benign "not_recorded" shape when nothing is on file rather than fabricating a
+# consented state.
+
+
+def get_consent(token: str) -> dict[str, Any]:
+    """Return the patient's consent status, or a not_recorded default.
+
+    Shape: {status: 'recorded' | 'not_recorded', recorded_at: str | None}.
+    Never raises — a missing intake just means consent is not recorded.
+    """
+    if not token:
+        return {"status": "not_recorded", "recorded_at": None}
+    try:
+        intake = get_intake(token) or {}
+    except Exception:  # pragma: no cover - defensive; default beats a 500
+        return {"status": "not_recorded", "recorded_at": None}
+    consent = intake.get("consent")
+    if isinstance(consent, dict) and consent.get("status") == "recorded":
+        return {
+            "status": "recorded",
+            "recorded_at": consent.get("recorded_at"),
+        }
+    return {"status": "not_recorded", "recorded_at": None}
+
+
+def set_consent(token: str) -> dict[str, Any]:
+    """Record the patient's consent on the canonical intake payload.
+
+    Stores {status: 'recorded', recorded_at: <iso>} under intake.consent,
+    merging into the existing payload. Returns the stored consent dict.
+    """
+    if not token:
+        raise ValueError("token required")
+    consent = {"status": "recorded", "recorded_at": _now()}
+    # As with set_display_name: ensure the parent users row exists so save_intake
+    # actually persists rather than silently no-opping into a false 200.
+    ensure_user(token)
+    intake = get_intake(token) or {}
+    save_intake(token, {**intake, "consent": consent})
+    return consent
+
+
+# -- Destructive account deletion (self-scoped; cascade-backed) -------------
+#
+# delete_account removes the patient's `users` row, which CASCADEs to every
+# child table (health_records, intake_records, protocol_state, checkins on both
+# backends; protocols, sessions, tavus_sessions, junction_connections on pg via
+# REFERENCES users(token) ON DELETE CASCADE). The sqlite path MUST route through
+# _sql_conn so PRAGMA foreign_keys=ON fires the cascade. The token is supplied
+# only by the caller's authenticated identity (current_user_id) — never a body /
+# path value — so a patient can never widen the blast radius to another row.
+#
+# NOT erased (documented residual): the Supabase auth.users login row (separate
+# schema; the pooled service-role DSN lacks DELETE perms) and pipeline_runs rows
+# (NOT token-scoped; protocol_id is ON DELETE SET NULL so they survive). v1
+# erases all public.* PHI and flags both for v2.
+
+
+def _flat_delete_account(token: str) -> None:
+    p = _flat_path(token)
+    user = _flat_load_user(token)
+    if user and user.get("slack_user_id"):
+        index = _flat_load_slack_index()
+        index.pop(user["slack_user_id"], None)
+        _flat_save_slack_index(index)
+    if p.exists():
+        p.unlink()
+
+
+def _sql_delete_account(token: str) -> None:
+    # _sql_conn enables PRAGMA foreign_keys, so the single users delete
+    # cascades to health_records / intake_records / protocol_state / checkins.
+    with _sql_conn() as c:
+        c.execute("DELETE FROM users WHERE token = ?", (token,))
+
+
+def _pg_delete_account(token: str) -> None:
+    # The FK cascade (REFERENCES users(token) ON DELETE CASCADE) removes every
+    # child row atomically; no per-table delete needed.
+    with _pg_conn() as c, c.cursor() as cur:
+        cur.execute("DELETE FROM users WHERE token = %s", (token,))
+
+
+def delete_account(token: str) -> None:
+    """Permanently delete the patient's `users` row + all cascaded child data.
+
+    Self-scoped: the caller passes their own current_user_id token only. The
+    single-row delete relies on the verified ON DELETE CASCADE FKs — no
+    hand-rolled per-table delete (sessions.protocol_id / protocols.parent_id are
+    NO ACTION self/cross FKs that the token-cascade fires intra-statement).
+    """
+    if not token:
+        raise ValueError("token required")
+    return _pick(
+        _flat_delete_account, _sql_delete_account, _pg_delete_account, token,
+    )
+
+
+# -- Clinician display name (staff_users-backed; postgres-only) -------------
+#
+# Distinct from get_display_name (patient-only resolution chain). The clinician
+# name lives on the staff_users base table (display_name column added in
+# migration 20260507180000_staff_roles.sql) and is self-scoped to the
+# authenticated clinician's user_id. We target staff_users directly, NOT the
+# `clinicians` VIEW.
+
+
+def get_clinician_display_name(user_id: str) -> str | None:
+    """Return the clinician's display_name from staff_users, or None.
+
+    Postgres-only (staff_users is a Supabase table). Returns None on a missing
+    DATABASE_URL / DB error so the settings endpoint degrades cleanly.
+    """
+    if not user_id:
+        return None
+    try:
+        from db import DbConfigError, get_conn
+    except ImportError:
+        return None
+    try:
+        with get_conn(autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT display_name FROM staff_users WHERE user_id = %s LIMIT 1",
+                (user_id,),
+            )
+            row = cur.fetchone()
+    except DbConfigError:
+        return None
+    except Exception as exc:
+        logger.warning(
+            "clinician display_name lookup failed: %s: %s",
+            type(exc).__name__, exc,
+        )
+        return None
+    if not row:
+        return None
+    name = row.get("display_name")
+    return str(name).strip() or None if name else None
+
+
+def set_clinician_display_name(user_id: str, name: str) -> str:
+    """Set the clinician's display_name on staff_users (self-scoped).
+
+    Raises ValueError on an empty name (-> API 400) or when the DB is
+    unavailable / the row is missing. Targets the staff_users base table, not
+    the clinicians VIEW, scoped to the authenticated user_id only.
+    """
+    if not user_id:
+        raise ValueError("user_id required")
+    cleaned = str(name or "").strip()
+    if not cleaned:
+        raise ValueError("name must not be empty")
+    try:
+        from db import DbConfigError, get_conn
+    except ImportError as exc:
+        raise ValueError("staff store unavailable") from exc
+    try:
+        with get_conn(autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute(
+                "UPDATE staff_users SET display_name = %s WHERE user_id = %s",
+                (cleaned, user_id),
+            )
+            updated = cur.rowcount
+    except DbConfigError as exc:
+        raise ValueError("staff store unavailable") from exc
+    if not updated:
+        raise ValueError("clinician record not found")
+    return cleaned
+
+
 def save_protocol_state(token: str, state: dict) -> None:
     return _pick(
         _flat_save_protocol_state, _sql_save_protocol_state, _pg_save_protocol_state,

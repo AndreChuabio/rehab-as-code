@@ -1845,3 +1845,21 @@ details.structured-diff-group > summary.structured-diff-group-label {
   .payer-control { width: 100%; }
   .superbill-just { max-width: none; }
 }
+
+/* ───────────────────────────────────────────────────────────────────────────
+   Clinician Settings pane. Single-column (no queue/detail split), so override
+   the 2-col grid the other .clinician-main panes use. Display-overrides-[hidden]
+   handled by the shared .clinician-main[hidden] rule above.
+   --------------------------------------------------------------------------- */
+.settings-main {
+  display: block;
+  overflow-y: auto;
+  padding: 24px;
+}
+.settings-main-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  max-width: 560px;
+  margin: 0 auto;
+}

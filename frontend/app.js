@@ -1161,20 +1161,24 @@ function onPlanApproved() {
 // ---------------------------------------------------------------------------
 
 function switchStage(mode) {
-  const chatPane    = document.getElementById("stageChat");
-  const videoPane   = document.getElementById("stageVideo");
-  const historyPane = document.getElementById("stageHistory");
-  const chatTab     = document.getElementById("tabChat");
-  const videoTab    = document.getElementById("tabVideo");
-  const historyTab  = document.getElementById("tabHistory");
+  const chatPane     = document.getElementById("stageChat");
+  const videoPane    = document.getElementById("stageVideo");
+  const historyPane  = document.getElementById("stageHistory");
+  const settingsPane = document.getElementById("stageSettings");
+  const chatTab      = document.getElementById("tabChat");
+  const videoTab     = document.getElementById("tabVideo");
+  const historyTab   = document.getElementById("tabHistory");
+  const settingsTab  = document.getElementById("tabSettings");
 
   const isChat = mode === "chat";
   const isVideo = mode === "video";
   const isHistory = mode === "history";
+  const isSettings = mode === "settings";
 
   if (chatPane) chatPane.hidden = !isChat;
   if (videoPane) videoPane.hidden = !isVideo;
   if (historyPane) historyPane.hidden = !isHistory;
+  if (settingsPane) settingsPane.hidden = !isSettings;
 
   if (chatTab) {
     chatTab.classList.toggle("active", isChat);
@@ -1187,6 +1191,10 @@ function switchStage(mode) {
   if (historyTab) {
     historyTab.classList.toggle("active", isHistory);
     historyTab.setAttribute("aria-selected", String(isHistory));
+  }
+  if (settingsTab) {
+    settingsTab.classList.toggle("active", isSettings);
+    settingsTab.setAttribute("aria-selected", String(isSettings));
   }
 
   if (isChat) {
@@ -1202,7 +1210,318 @@ function switchStage(mode) {
     // Entering history: fetch the 30-day log. Caches in-flight via the
     // _historyLoading guard inside loadPatientHistory.
     loadPatientHistory();
+  } else if (isSettings) {
+    // Entering settings: render account + wearable + payer + privacy state.
+    loadSettings();
   }
+}
+
+// ---------------------------------------------------------------------------
+// Profile / Settings (patient). Four areas: Account, Wearable, Payer
+// (read-only), Data and Privacy. All async actions use authedFetch + showToast.
+// Reuses existing flows: Set-password + Sign-out trigger the header pill
+// buttons (whose handlers live in the auth setup closure); connect reuses the
+// Junction hosted-Link flow. Net-new: display-name save, wearable disconnect,
+// export download, typed-confirm delete, consent record.
+// ---------------------------------------------------------------------------
+
+let _settingsWired = false;
+
+function loadSettings() {
+  wireSettingsOnce();
+  renderSettingsAccount();
+  renderSettingsPayer();
+  loadSettingsWearable();
+  loadSettingsConsent();
+}
+
+function renderSettingsAccount() {
+  const nameInput = document.getElementById("settingsName");
+  const emailEl = document.getElementById("settingsEmail");
+  if (nameInput) {
+    // Prefill from the resolved display name (intake-status), falling back to
+    // the auth email local-part so the field is never blank for a fresh user.
+    const resolved = patientState?.display_name || patientState?.patient_name || "";
+    if (!nameInput.value || nameInput.dataset.dirty !== "1") {
+      nameInput.value = resolved;
+    }
+  }
+  if (emailEl) {
+    const user = window.RehabAuth?.getUser?.();
+    emailEl.textContent = user?.email || "Not signed in";
+  }
+}
+
+function renderSettingsPayer() {
+  const badge = document.getElementById("settingsPayerBadge");
+  if (!badge) return;
+  const mode = patientState?.payer_model;
+  if (mode) {
+    badge.textContent = patientPayerLabel(mode);
+    badge.className = "payer-badge payer-badge-" + mode;
+    badge.hidden = false;
+  } else {
+    badge.hidden = true;
+  }
+}
+
+async function loadSettingsWearable() {
+  const statusEl = document.getElementById("settingsWearableStatus");
+  const connectBtn = document.getElementById("settingsWearableConnect");
+  const disconnectBtn = document.getElementById("settingsWearableDisconnect");
+  if (statusEl) statusEl.innerHTML = `<span class="settings-readonly">Loading…</span>`;
+  let data = null;
+  try {
+    const res = await authedFetch(`${API_BASE}/api/junction/status`);
+    if (res.ok) data = await res.json();
+  } catch (e) {
+    console.warn("settings wearable status failed", e);
+  }
+  const connected = data && data.status === "connected";
+  if (statusEl) {
+    if (connected) {
+      const providers = Array.isArray(data.providers) && data.providers.length
+        ? data.providers.map((p) => escapeHtml(String(p))).join(", ")
+        : "wearable";
+      const when = data.last_synced_at
+        ? _formatSyncedAt(data.last_synced_at, null, false)
+        : "Synced recently";
+      statusEl.innerHTML =
+        `<span class="settings-readonly">Connected · ${providers}</span>` +
+        `<span class="settings-hint">${escapeHtml(when)}</span>`;
+    } else {
+      statusEl.innerHTML = `<span class="settings-readonly">Not connected</span>`;
+    }
+  }
+  if (connectBtn) connectBtn.hidden = connected;
+  if (disconnectBtn) disconnectBtn.hidden = !connected;
+}
+
+async function disconnectWearable() {
+  const ok = window.confirm(
+    "Disconnect your wearable? You can reconnect anytime; this removes the cached metrics.",
+  );
+  if (!ok) return;
+  const btn = document.getElementById("settingsWearableDisconnect");
+  if (btn) { btn.disabled = true; btn.textContent = "Disconnecting…"; }
+  try {
+    const res = await authedFetch(`${API_BASE}/api/junction/connection`, {
+      method: "DELETE",
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    showToast("Wearable disconnected", "info");
+  } catch (e) {
+    console.error("wearable disconnect failed", e);
+    showToast("Couldn't disconnect right now", "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Disconnect"; }
+    loadSettingsWearable();
+    loadSidebar();
+  }
+}
+
+async function loadSettingsConsent() {
+  const statusEl = document.getElementById("settingsConsentStatus");
+  const recordBtn = document.getElementById("settingsConsentRecord");
+  let data = null;
+  try {
+    const res = await authedFetch(`${API_BASE}/patient/me/consent`);
+    if (res.ok) data = await res.json();
+  } catch (e) {
+    console.warn("settings consent load failed", e);
+  }
+  const recorded = data && data.status === "recorded";
+  if (statusEl) {
+    if (recorded) {
+      const when = data.recorded_at
+        ? ` on ${escapeHtml(String(data.recorded_at).slice(0, 10))}`
+        : "";
+      statusEl.textContent = `Consent recorded${when}.`;
+    } else {
+      statusEl.textContent = "Consent not recorded.";
+    }
+  }
+  if (recordBtn) recordBtn.hidden = recorded;
+}
+
+async function recordConsent() {
+  const btn = document.getElementById("settingsConsentRecord");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await authedFetch(`${API_BASE}/patient/me/consent`, {
+      method: "POST",
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    showToast("Consent recorded", "info");
+  } catch (e) {
+    console.error("record consent failed", e);
+    showToast("Couldn't record consent right now", "error");
+  } finally {
+    if (btn) btn.disabled = false;
+    loadSettingsConsent();
+  }
+}
+
+async function saveSettingsName() {
+  const input = document.getElementById("settingsName");
+  const statusEl = document.getElementById("settingsNameStatus");
+  const btn = document.getElementById("settingsNameSave");
+  const name = (input?.value || "").trim();
+  if (!name) {
+    if (statusEl) {
+      statusEl.hidden = false;
+      statusEl.textContent = "Name can't be empty.";
+      statusEl.className = "settings-status err";
+    }
+    return;
+  }
+  if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+  try {
+    const res = await authedFetch(`${API_BASE}/patient/me/profile`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (input) input.dataset.dirty = "0";
+    if (statusEl) {
+      statusEl.hidden = false;
+      statusEl.textContent = "Saved.";
+      statusEl.className = "settings-status ok";
+    }
+    // Keep the rest of the app in sync with the new name.
+    if (patientState) patientState.display_name = data.name;
+    showToast("Name updated", "info");
+  } catch (e) {
+    console.error("save name failed", e);
+    if (statusEl) {
+      statusEl.hidden = false;
+      statusEl.textContent = "Couldn't save right now.";
+      statusEl.className = "settings-status err";
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Save"; }
+  }
+}
+
+async function exportMyData() {
+  const btn = document.getElementById("settingsExport");
+  if (btn) { btn.disabled = true; btn.textContent = "Exporting…"; }
+  try {
+    const res = await authedFetch(`${API_BASE}/patient/me/export`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    // Build a Blob from the JSON text and trigger a download. Never render the
+    // PHI into the DOM or log it.
+    const text = await res.text();
+    const blob = new Blob([text], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "rehab-data-export.json";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    showToast("Export downloaded", "info");
+  } catch (e) {
+    console.error("export failed", e);
+    showToast("Couldn't export right now", "error");
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Export"; }
+  }
+}
+
+const DELETE_CONFIRM_TOKEN = "DELETE";
+
+function openDeleteModal() {
+  const modal = document.getElementById("deleteModal");
+  const input = document.getElementById("deleteConfirmInput");
+  const confirmBtn = document.getElementById("deleteConfirm");
+  const statusEl = document.getElementById("deleteStatus");
+  if (!modal) return;
+  if (input) input.value = "";
+  if (confirmBtn) confirmBtn.disabled = true;
+  if (statusEl) { statusEl.hidden = true; statusEl.textContent = ""; }
+  modal.hidden = false;
+  setTimeout(() => input?.focus(), 50);
+}
+
+function closeDeleteModal() {
+  const modal = document.getElementById("deleteModal");
+  if (modal) modal.hidden = true;
+}
+
+async function confirmDeleteAccount() {
+  const input = document.getElementById("deleteConfirmInput");
+  const confirmBtn = document.getElementById("deleteConfirm");
+  const statusEl = document.getElementById("deleteStatus");
+  const typed = (input?.value || "").trim();
+  if (typed !== DELETE_CONFIRM_TOKEN) {
+    if (statusEl) {
+      statusEl.hidden = false;
+      statusEl.textContent = `Type ${DELETE_CONFIRM_TOKEN} to confirm.`;
+      statusEl.className = "settings-status err";
+    }
+    return;
+  }
+  if (confirmBtn) { confirmBtn.disabled = true; confirmBtn.textContent = "Deleting…"; }
+  try {
+    const res = await authedFetch(`${API_BASE}/patient/me`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm: DELETE_CONFIRM_TOKEN }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    // Data erased server-side. Sign out + return to a clean landing page.
+    try { await window.RehabAuth.signOut(); } catch (_) {}
+    try {
+      localStorage.removeItem(AUTH_SKIP_KEY);
+      localStorage.removeItem("supabaseJwt");
+      sessionStorage.removeItem("asPatient");
+    } catch (_) {}
+    window.location.replace("/");
+  } catch (e) {
+    console.error("delete account failed", e);
+    if (statusEl) {
+      statusEl.hidden = false;
+      statusEl.textContent = "Couldn't delete right now. Please try again.";
+      statusEl.className = "settings-status err";
+    }
+    if (confirmBtn) { confirmBtn.disabled = false; confirmBtn.textContent = "Delete permanently"; }
+  }
+}
+
+function wireSettingsOnce() {
+  if (_settingsWired) return;
+  _settingsWired = true;
+
+  document.getElementById("settingsNameSave")?.addEventListener("click", saveSettingsName);
+  document.getElementById("settingsName")?.addEventListener("input", (e) => {
+    e.target.dataset.dirty = "1";
+  });
+  // Change password / Sign out reuse the existing header pill handlers.
+  document.getElementById("settingsChangePw")?.addEventListener("click", () => {
+    document.getElementById("authPillSetPw")?.click();
+  });
+  document.getElementById("settingsSignOut")?.addEventListener("click", () => {
+    document.getElementById("authPillAction")?.click();
+  });
+  // Wearable connect reuses the Junction hosted-Link flow.
+  document.getElementById("settingsWearableConnect")?.addEventListener("click", connectHealth);
+  document.getElementById("settingsWearableDisconnect")?.addEventListener("click", disconnectWearable);
+  // Data and privacy.
+  document.getElementById("settingsExport")?.addEventListener("click", exportMyData);
+  document.getElementById("settingsConsentRecord")?.addEventListener("click", recordConsent);
+  document.getElementById("settingsDelete")?.addEventListener("click", openDeleteModal);
+
+  // Delete-confirm modal.
+  document.getElementById("deleteCancel")?.addEventListener("click", closeDeleteModal);
+  document.getElementById("deleteConfirm")?.addEventListener("click", confirmDeleteAccount);
+  document.getElementById("deleteConfirmInput")?.addEventListener("input", (e) => {
+    const btn = document.getElementById("deleteConfirm");
+    if (btn) btn.disabled = (e.target.value || "").trim() !== DELETE_CONFIRM_TOKEN;
+  });
 }
 
 // ---------------------------------------------------------------------------

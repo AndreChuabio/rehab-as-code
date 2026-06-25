@@ -143,3 +143,24 @@ def set_error(token: str) -> None:
             (token,),
         )
         c.commit()
+
+
+def disconnect(token: str) -> None:
+    """Delete the patient's junction_connections row (wearable disconnect).
+
+    Physically removes the row — including cached_metrics (derived wearable
+    PHI) — rather than flipping a status, both for PHI minimization and because
+    the status CHECK has no 'not_connected' value. A 0-row delete is a safe
+    no-op (the patient was never connected). Self-scoped by token; reconnect
+    later re-creates the row cleanly via upsert_pending (ON CONFLICT).
+
+    Never logs vital_user_id / cached_metrics.
+    """
+    if not token:
+        raise JunctionRepoError("token is required")
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            "DELETE FROM junction_connections WHERE token = %s",
+            (token,),
+        )
+        c.commit()

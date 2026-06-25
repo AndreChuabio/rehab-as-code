@@ -126,6 +126,12 @@ app.include_router(tavus_proxy_router)
 from api.junction import router as junction_router  # noqa: E402
 app.include_router(junction_router)
 
+# Profile / Settings router. Patient account/consent/export/delete +
+# clinician profile, all self-scoped via Depends(current_user_id) /
+# require_clinician_id; mounted under /patient/me/* and /clinician/me/*.
+from api.settings import router as settings_router  # noqa: E402
+app.include_router(settings_router)
+
 CONTEXT_FILE = Path(__file__).parent.parent / "context.json"
 FRONTEND_DIR = Path(__file__).parent.parent / "frontend"
 

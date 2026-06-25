@@ -454,12 +454,13 @@
   let _roster = [];
 
   function setDashboardMode(mode) {
-    // reviewMain is the first .clinician-main that is neither admin nor patients.
+    // reviewMain is the first .clinician-main that is none of the named panes.
     const reviewMain = document.querySelector(
-      "main.clinician-main:not(.admin-main):not(.patients-main)",
+      "main.clinician-main:not(.admin-main):not(.patients-main):not(.settings-main)",
     );
     const adminMain = $("adminMain");
     const patientsMain = $("patientsMain");
+    const settingsMain = $("settingsMain");
     const strip = $("adminModeStrip");
     const title = $("clinicianHeaderTitle");
     document.querySelectorAll(".admin-mode-btn").forEach((b) => {
@@ -469,19 +470,105 @@
     });
     const isReview = mode === "review";
     const isPatients = mode === "patients";
+    const isSettings = mode === "settings";
     const isDebug = mode === "debug";
     if (reviewMain) reviewMain.hidden = !isReview;
     if (patientsMain) patientsMain.hidden = !isPatients;
+    if (settingsMain) settingsMain.hidden = !isSettings;
     if (adminMain) adminMain.hidden = !isDebug;
     if (strip) strip.hidden = !isDebug;
     if (title) {
       title.textContent = isDebug
         ? "Pipeline debug"
-        : isPatients ? "Patients" : "Pending review";
+        : isPatients ? "Patients"
+        : isSettings ? "Settings"
+        : "Pending review";
     }
     if (isPatients) loadPatientRoster();
+    if (isSettings) loadClinicianSettings();
     // Debug content load stays owned by clinician_admin.js, which reacts to
     // the same click for mode === "debug".
+  }
+
+  let _clinicianSettingsLoaded = false;
+
+  async function loadClinicianSettings() {
+    const emailEl = $("clinicianSettingsEmail");
+    if (emailEl) {
+      const user = window.RehabAuth.getUser?.();
+      emailEl.textContent = user?.email || "—";
+    }
+    if (!_clinicianSettingsLoaded) {
+      _clinicianSettingsLoaded = true;
+      $("clinicianSettingsNameSave")?.addEventListener("click", saveClinicianName);
+      $("clinicianSettingsSignOut")?.addEventListener("click", async () => {
+        try { await window.RehabAuth.signOut(); } catch (_) {}
+        try {
+          localStorage.removeItem("authSkipped");
+          localStorage.removeItem("supabaseJwt");
+          sessionStorage.removeItem("asPatient");
+        } catch (_) {}
+        window.location.replace("/");
+      });
+    }
+    const input = $("clinicianSettingsName");
+    try {
+      const res = await authedFetch(`${API_BASE}/clinician/me/profile`);
+      if (res.ok) {
+        const data = await res.json();
+        if (input && data.display_name) input.value = data.display_name;
+      }
+    } catch (e) {
+      console.warn("clinician profile load failed", e);
+    }
+  }
+
+  async function saveClinicianName() {
+    const input = $("clinicianSettingsName");
+    const statusEl = $("clinicianSettingsNameStatus");
+    const btn = $("clinicianSettingsNameSave");
+    const name = (input?.value || "").trim();
+    if (!name) {
+      if (statusEl) {
+        statusEl.hidden = false;
+        statusEl.textContent = "Name can't be empty.";
+        statusEl.className = "settings-status err";
+      }
+      return;
+    }
+    if (btn) { btn.disabled = true; btn.textContent = "Saving…"; }
+    try {
+      const res = await authedFetch(`${API_BASE}/clinician/me/profile`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (statusEl) {
+        statusEl.hidden = false;
+        statusEl.textContent = "Saved.";
+        statusEl.className = "settings-status ok";
+      }
+      clinicianSettingsToast("Name updated", "ok");
+    } catch (e) {
+      console.error("save clinician name failed", e);
+      if (statusEl) {
+        statusEl.hidden = false;
+        statusEl.textContent = "Couldn't save right now.";
+        statusEl.className = "settings-status err";
+      }
+    } finally {
+      if (btn) { btn.disabled = false; btn.textContent = "Save"; }
+    }
+  }
+
+  function clinicianSettingsToast(msg, kind) {
+    const el = $("clinicianSettingsToast");
+    if (!el) return;
+    el.textContent = msg;
+    el.className = "clinician-toast " + (kind === "error" ? "error" : "ok");
+    el.hidden = false;
+    setTimeout(() => { el.hidden = true; }, 3000);
   }
 
   async function loadPatientRoster() {
