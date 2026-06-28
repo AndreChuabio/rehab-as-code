@@ -2376,6 +2376,12 @@ def patient_intake_status(user_id: str = Depends(current_user_id)):
         "last_pr_url": ps.get("last_pr_url"),
         "session_count": len(user.get("session_history", [])),
         "review_status": review_status,
+        # Surface whether the active protocol was applied live by Coach Maya
+        # (change_tier "auto", no clinician gate). The patient dashboard shows
+        # an "Updated by Coach Maya" note; an auto-applied active row reports
+        # review_status="none" (active, never reviewed), so this boolean is the
+        # only signal the patient app has. Boolean only — no PHI.
+        "auto_applied": bool((active_protocol or {}).get("auto_applied")),
     }
 
 
