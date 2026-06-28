@@ -123,16 +123,27 @@ def _normalize_row(row: dict) -> dict:
         row["parent_id"] = str(row["parent_id"])
     if "safety_concerns" in row and row["safety_concerns"] is not None:
         row["safety_concerns"] = _normalize_payload(row["safety_concerns"])
+    # auto_applied is BOOLEAN in Postgres (already bool) and INTEGER in
+    # sqlite3 (0/1). Coerce to bool so callers get a consistent type.
+    if "auto_applied" in row:
+        row["auto_applied"] = bool(row["auto_applied"])
+    # reverted_by is UUID in Postgres; str() is a no-op on plain strings.
+    if row.get("reverted_by") is not None:
+        row["reverted_by"] = str(row["reverted_by"])
     return row
 
 
 def get(protocol_id: str) -> dict | None:
-    """Return one row by id, or None. Payload is parsed to dict."""
+    """Return one row by id, or None. Payload is parsed to dict.
+
+    Uses SELECT * so the caller always sees whichever columns exist in the
+    running schema; _normalize_row coerces new columns (auto_applied, etc.)
+    when present and silently skips them on older schema versions. This
+    keeps the helper backward-compatible across migration windows.
+    """
     with _conn() as c, c.cursor() as cur:
         cur.execute(
-            "SELECT id, token, parent_id, payload, status, created_by_agent, "
-            "created_at, reviewed_by, reviewed_at, review_notes, safety_concerns "
-            "FROM protocols WHERE id = %s",
+            "SELECT * FROM protocols WHERE id = %s",
             (protocol_id,),
         )
         row = cur.fetchone()
@@ -142,12 +153,17 @@ def get(protocol_id: str) -> dict | None:
 
 
 def get_active(token: str) -> dict | None:
-    """Return the patient's currently-active protocol row, or None."""
+    """Return the patient's currently-active protocol row, or None.
+
+    Uses SELECT * for the same schema-evolution reason as get(): new columns
+    (auto_applied, reverted_at, reverted_by) are present when the
+    20260628120000 migration has been applied; absent rows are silently
+    skipped by _normalize_row so callers on older schemas are unaffected.
+    """
     with _conn() as c, c.cursor() as cur:
         cur.execute(
-            "SELECT id, token, parent_id, payload, status, created_by_agent, "
-            "created_at, reviewed_by, reviewed_at, review_notes, safety_concerns "
-            "FROM protocols WHERE token = %s AND status = 'active' LIMIT 1",
+            "SELECT * FROM protocols "
+            "WHERE token = %s AND status = 'active' LIMIT 1",
             (token,),
         )
         row = cur.fetchone()
@@ -514,6 +530,97 @@ def _column_names(table: str) -> list[str]:
                 r[0] if isinstance(r, (list, tuple)) else r["column_name"]
                 for r in cur.fetchall()
             ]
+
+
+def save_active_auto(
+    token: str,
+    payload: dict,
+    created_by_agent: str,
+    *,
+    safety_concerns: list[dict] | None = None,
+) -> str:
+    """Promote a low-risk draft straight to active (no clinician gate).
+
+    Atomic: supersede the current active row, then insert the new row as
+    active with auto_applied=true and parent_id = the superseded row (the
+    revert target). The unique partial index on (token) WHERE status='active'
+    keeps active singular.
+    """
+    from psycopg.types.json import Json
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            "SELECT id FROM protocols WHERE token = %s AND status = 'active' LIMIT 1",
+            (token,),
+        )
+        active = cur.fetchone()
+        parent_id = active["id"] if active else None
+        if parent_id is not None:
+            cur.execute(
+                "UPDATE protocols SET status = 'superseded' WHERE id = %s",
+                (parent_id,),
+            )
+        cur.execute(
+            "INSERT INTO protocols "
+            "(token, parent_id, payload, status, created_by_agent, "
+            " safety_concerns, auto_applied) "
+            "VALUES (%s, %s, %s, 'active', %s, %s, true) RETURNING id",
+            (token, parent_id, Json(payload), created_by_agent,
+             Json(safety_concerns) if safety_concerns else None),
+        )
+        row = cur.fetchone()
+        c.commit()
+        return str(row["id"])
+
+
+def list_auto_applied_open(limit: int = 50) -> list[dict]:
+    """Auto-applied rows not yet reverted, newest first (clinician feed)."""
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            "SELECT id, token, parent_id, payload, status, created_by_agent, "
+            "safety_concerns, created_at "
+            "FROM protocols "
+            "WHERE auto_applied = true AND reverted_at IS NULL "
+            "ORDER BY created_at DESC LIMIT %s",
+            (limit,),
+        )
+        return [_normalize_row(dict(r)) for r in cur.fetchall()]
+
+
+def revert(protocol_id: str, reverted_by: str) -> dict:
+    """Re-activate the parent of an open auto-applied row; stamp revert."""
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            "SELECT token, parent_id, auto_applied, reverted_at "
+            "FROM protocols WHERE id = %s FOR UPDATE",
+            (protocol_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise ProtocolRepoError(f"protocol {protocol_id} not found")
+        if not row["auto_applied"] or row["reverted_at"] is not None:
+            raise ProtocolRepoError(
+                f"protocol {protocol_id} is not an open auto-applied row")
+        if not row["parent_id"]:
+            raise ProtocolRepoError(
+                f"protocol {protocol_id} has no parent to revert to")
+        token = row["token"]
+        cur.execute(
+            "UPDATE protocols SET status = 'superseded' "
+            "WHERE token = %s AND status = 'active'", (token,),
+        )
+        cur.execute(
+            "UPDATE protocols SET status = 'active' WHERE id = %s",
+            (row["parent_id"],),
+        )
+        cur.execute(
+            "UPDATE protocols SET reverted_at = NOW(), reverted_by = %s "
+            "WHERE id = %s RETURNING id, token, reverted_at",
+            (reverted_by, protocol_id),
+        )
+        out = cur.fetchone()
+        c.commit()
+    out["id"] = str(out["id"])
+    return out
 
 
 def reject(
