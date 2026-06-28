@@ -142,6 +142,7 @@ def _compose_with_id_validation(
     week: int,
     concerns: list[dict[str, Any]] | None,
     token: str | None,
+    goal_template: str | None = None,
 ) -> dict[str, Any]:
     """Call planner_compose; if any returned exercise IDs are unknown,
     retry once with explicit feedback. Hard-fail on a second invalid set.
@@ -155,6 +156,11 @@ def _compose_with_id_validation(
     Pre-existing safety-review concerns are preserved across the retry so
     the planner sees BOTH the original concern set and the new invalid-id
     feedback.
+
+    `goal_template` is the clinic's per-payer goal-language STYLE template
+    (resolved once in handle()). It is threaded verbatim to both compose
+    calls so the retry keeps the same wording guidance. STYLE only — it does
+    NOT relax the id validation, safety review, or region anchoring.
     """
     draft = planner_compose(
         candidates=candidates,
@@ -164,6 +170,7 @@ def _compose_with_id_validation(
         week=week,
         concerns=concerns,
         token=token,
+        goal_template=goal_template,
     )
     invalid = _planner_invalid_ids(draft)
     if not invalid:
@@ -182,6 +189,7 @@ def _compose_with_id_validation(
         week=week,
         concerns=retry_concerns,
         token=token,
+        goal_template=goal_template,
     )
     invalid_after = _planner_invalid_ids(draft)
     if invalid_after:
@@ -449,11 +457,31 @@ class PlanGenerationAgent(PatientAgent):
         except EvaluatorError as exc:
             raise PlanGenerationError(str(exc)) from exc
 
+        # Resolve the clinic's per-payer goal-language STYLE template once
+        # (clinic-wide-by-payer; per-owning-clinician routing is phased pending
+        # a patient<->clinician association in the schema). Degrades to "" on
+        # the sqlite test backend / no DB, which the planner treats as no
+        # template (today's behavior). STYLE only — does not bypass safety,
+        # region anchoring, or library citation. Never log the value (PHI
+        # surface: it is injected un-redacted into the Anthropic prompt).
+        try:
+            goal_template = user_store.resolve_goal_template(token)
+        except Exception as exc:  # pragma: no cover - defensive; "" beats a 500
+            logger.warning(
+                "plan_generation: goal-template resolve failed token=%s: %s",
+                token, type(exc).__name__,
+            )
+            goal_template = ""
+        logger.info(
+            "plan_generation goal_template token=%s present=%s",
+            token, bool((goal_template or "").strip()),
+        )
+
         try:
             draft, safety_verdict = await asyncio.to_thread(
                 self._compose_with_safety_loop,
                 candidates, decision, intake, trend_summary,
-                phase, week, token,
+                phase, week, token, goal_template,
             )
         except (PlannerError, SafetyReviewError) as exc:
             raise PlanGenerationError(str(exc)) from exc
@@ -564,6 +592,7 @@ class PlanGenerationAgent(PatientAgent):
         phase: str,
         week: int,
         token: str,
+        goal_template: str | None = None,
     ) -> tuple[dict[str, Any], dict[str, Any]]:
         """Compose -> safety review. Retry up to _MAX_PLANNER_RETRIES on med.
 
@@ -573,6 +602,12 @@ class PlanGenerationAgent(PatientAgent):
 
         Returns the (draft, verdict) pair. The verdict's overall_severity
         plus the orchestrator's branching decides what status to save under.
+
+        `goal_template` is the clinic's per-payer goal-language STYLE template,
+        resolved once in handle() and threaded into every planner.compose call
+        (including safety-retry attempts). It seeds goal wording only; the
+        safety_reviewer pass below and the planner's deterministic payer-mode /
+        region guards remain fully binding regardless of template content.
         """
         concerns: list[dict[str, Any]] | None = None
         draft: dict[str, Any] | None = None
@@ -586,6 +621,7 @@ class PlanGenerationAgent(PatientAgent):
                 week=week,
                 concerns=concerns,
                 token=token,
+                goal_template=goal_template,
             )
             verdict = safety_review(
                 draft=draft,

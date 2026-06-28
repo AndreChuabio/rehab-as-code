@@ -4544,6 +4544,14 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   padding: 4px 0;
 }
 .settings-checkbox input[type="checkbox"] { accent-color: var(--accent); }
+/* Per-type rows are subordinated when the email master switch is off:
+   the live send is gated by email_opt_in, so a checkable box would be a
+   false promise. We dim + disable the row but keep its stored value. */
+.settings-checkbox.is-subordinate {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.settings-checkbox.is-subordinate input[type="checkbox"] { cursor: not-allowed; }
 /* iOS-style toggle, fully token-driven so it tracks light/dark. */
 .settings-toggle {
   position: relative;

@@ -401,17 +401,17 @@
             <section class="card settings-card settings-notif-card">
               <h3>Notifications and reminders</h3>
               <p class="settings-hint">
-                Reminders are saved to your preferences. Email and push delivery
-                are coming soon.
+                Email is off until you turn it on below. Turn it off any time to
+                stop all emails. Push notifications are coming soon.
               </p>
               <label class="settings-checkbox">
-                <input type="checkbox" id="settingsNotifSession" />
-                <span>Session reminders</span>
+                <input type="checkbox" id="settingsNotifEmail" />
+                <span>Email me notifications</span>
               </label>
-              <label class="settings-checkbox">
-                <input type="checkbox" id="settingsNotifCheckin" />
-                <span>Daily check-in reminders</span>
-              </label>
+              <p class="settings-hint" id="settingsNotifTypesHint">
+                When email is on, choose what we send you. Nothing is sent for a
+                type that is turned off.
+              </p>
               <label class="settings-checkbox">
                 <input type="checkbox" id="settingsNotifPlanUpdated" />
                 <span>When my plan is updated</span>
@@ -421,9 +421,18 @@
                 <span>Symptom-flag receipts</span>
               </label>
               <label class="settings-checkbox">
-                <input type="checkbox" id="settingsNotifEmail" />
-                <span>Email me these (when delivery is available)</span>
+                <input type="checkbox" id="settingsNotifSession" />
+                <span>Session reminders</span>
               </label>
+              <label class="settings-checkbox">
+                <input type="checkbox" id="settingsNotifCheckin" />
+                <span>Daily check-in reminders</span>
+              </label>
+              <p class="settings-hint">
+                Plan updates and symptom receipts are sent right away. Session
+                and daily check-in reminders are saved and will start once
+                scheduled delivery is enabled.
+              </p>
             </section>
 
             <!-- COACH MAYA PREFERENCES -->

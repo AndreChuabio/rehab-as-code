@@ -98,6 +98,22 @@ def _clinician_attention_writer_factory(user_id: str):
             "clinician_attention row written user=%s pending_id=%s",
             user_id, pending_id,
         )
+
+        # Pref-gated symptom receipt, fired AFTER the write. Inline + error-
+        # swallowed (NOT an unanchored asyncio.create_task — Fluid Compute can
+        # cancel a detached task when the SSE request returns). The receipt
+        # carries NO verbatim message_text (that is PHI we don't re-egress).
+        # notifications.send_symptom_receipt honors email_opt_in +
+        # symptom_flag_receipts internally and swallows its own errors.
+        try:
+            import notifications
+
+            await loop.run_in_executor(
+                None, notifications.send_symptom_receipt, user_id,
+            )
+        except Exception:  # noqa: BLE001 - never break the chat / SSE stream
+            logger.warning("symptom_receipt email hook failed (non-fatal)")
+
         return pending_id
 
     return _writer

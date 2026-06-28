@@ -16,7 +16,40 @@
 (function () {
   const API_BASE = "";
 
+  // Shared light/dark theme key with the patient app (frontend/app.js uses
+  // the same "rac-theme" constant) so the choice is unified across both
+  // surfaces. The no-flash apply lives in a standalone <head> script in
+  // clinician.html — it cannot see this IIFE scope; here we re-apply on load
+  // and own the header toggle.
+  const THEME_KEY = "rac-theme";
+
   function $(id) { return document.getElementById(id); }
+
+  function applyTheme() {
+    const root = document.documentElement;
+    let theme = null;
+    try { theme = localStorage.getItem(THEME_KEY); } catch (_) {}
+    if (theme === "dark") root.dataset.theme = "dark";
+    else delete root.dataset.theme; // default light
+  }
+
+  function updateThemeToggleLabel() {
+    const btn = $("clinicianThemeToggle");
+    if (!btn) return;
+    const dark = document.documentElement.dataset.theme === "dark";
+    // Label names the action (the theme you switch TO), matching the
+    // header's other action buttons.
+    btn.textContent = dark ? "Light" : "Dark";
+    btn.setAttribute("aria-pressed", dark ? "true" : "false");
+  }
+
+  function toggleTheme() {
+    const dark = document.documentElement.dataset.theme === "dark";
+    try { localStorage.setItem(THEME_KEY, dark ? "light" : "dark"); } catch (_) {}
+    applyTheme();
+    updateThemeToggleLabel();
+  }
+
   function authedFetch(path, options = {}) {
     const jwt = window.RehabAuth?.getJwt?.();
     const hdrs = new Headers(options.headers || {});
@@ -97,6 +130,11 @@
 
     bindHandlers();
 
+    // Re-apply the persisted theme (the <head> no-flash script already set
+    // it pre-paint) and label the header toggle to match.
+    applyTheme();
+    updateThemeToggleLabel();
+
     // Reveal the segmented control for ALL clinicians so they get the
     // Patients/History tab (admins additionally get Pipeline debug, which
     // clinician_admin.js owns). This single handler owns the review<->patients
@@ -129,6 +167,7 @@
 
   function bindHandlers() {
     $("queueRefresh")?.addEventListener("click", loadQueue);
+    $("clinicianThemeToggle")?.addEventListener("click", toggleTheme);
     $("clinicianSignout")?.addEventListener("click", async () => {
       try { await window.RehabAuth.signOut(); } catch (_) {}
       try {
