@@ -34,6 +34,7 @@ flowchart TB
         PatientRoute[/patient/interact - orchestrator]
         PoseRoute[/pose/session]
         ClinRoute[/protocols/pending /approve /reject]
+        AutoRoute[/protocols/auto-applied /protocols/{id}/revert]
         AdminRoute[/admin/* - api/admin.py]
         SessionsRoute[/sessions/today /recent]
         StartRoute[/start-session - mint Tavus conversation]
@@ -55,7 +56,7 @@ flowchart TB
         Intake[(intake_records)]
         Health[(health_records)]
         Sessions[(sessions checkins)]
-        Protocols[(protocols active pending_review)]
+        Protocols[(protocols active pending_review auto_applied reverted_at)]
         Tavus[(tavus_sessions +session_ref)]
         Junctions[(junction_connections)]
         Runs[(pipeline_runs)]
@@ -83,6 +84,9 @@ flowchart TB
 
     ChatRoute -.maya tools.-> SymptomCl[symptom_classifier - Haiku]:::llm
     ChatRoute -.draft.-> Drafter[chat_protocol_drafter - Sonnet]:::llm
+    Drafter -.classify.-> ChangeTier[change_tier.classify - deterministic no LLM]
+    ChangeTier -.auto: save_active_auto.-> Protocols
+    ChangeTier -.gate: save_pending.-> Protocols
 
     PatientRoute --> Orch
     Orch --> Researcher
@@ -94,6 +98,8 @@ flowchart TB
 
     ClinRoute --> Diff[diff_narrator - Haiku]:::llm
     ClinRoute --> Protocols
+    AutoRoute --> Protocols
+    ClinJS --> AutoRoute
 
     PoseRoute --> Sessions
     SessionsRoute --> Sessions
@@ -165,18 +171,55 @@ stateDiagram-v2
     [*] --> draft: agent saves
     draft --> pending_review: safety low/med
     draft --> needs_clinician_review: safety high or out-of-scope region
+    draft --> active_auto: change_tier auto (in-plan swap/load-down, in-scope, no high sev)
     pending_review --> active: clinician approves
     needs_clinician_review --> active: clinician approves
     pending_review --> rejected: clinician rejects with notes
     needs_clinician_review --> rejected: clinician rejects with notes
     active --> superseded: next protocol approved
+    active_auto --> superseded: clinician reverts (reverted_at stamped, parent reactivated)
+    active_auto --> superseded: next protocol approved
     rejected --> [*]
     superseded --> [*]
 ```
 
-Unique partial index `protocols_one_active_per_token` keeps `active`
-singular per patient. The state transitions happen in
-`backend/protocol_repo.py:approve|reject`.
+`active_auto` is the same `status='active'` row in Postgres with
+`auto_applied=true`. Unique partial index `protocols_one_active_per_token`
+keeps `active` singular per patient. The state transitions happen in
+`backend/protocol_repo.py:approve|reject|save_active_auto|revert`.
+
+Clinicians see un-reverted auto-applied rows via `GET /protocols/auto-applied`
+(the "coach-applied" review feed). Revert via `POST /protocols/{id}/revert`;
+the auto-applied row is stamped `reverted_at` and moved to `superseded`, its
+parent is restored to `active`.
+
+## Coach Maya auto-apply tier
+
+`backend/change_tier.py:classify(prior, draft, safety_concerns)` is a
+**deterministic, no-LLM** classifier that decides whether a Coach Maya
+protocol draft can be applied live (`"auto"`) or must wait for a clinician
+gate (`"gate"`). The fail-safe default on any exception is `"gate"`.
+
+Auto-apply is granted only when ALL of the following hold:
+
+- A prior active protocol exists (first plan of care is always clinician-owned).
+- `body_region` is in `IN_SCOPE_REGIONS` (`{"knee", "ankle"}`).
+- No safety concern has severity `"high"` or above.
+- The exercise diff is a pure regression/swap (at most one new exercise paired
+  with a removal) and no shared exercise increases load (load-down or no change
+  only).
+
+When the classifier returns `"auto"`, `protocol_repo.save_active_auto` writes
+the row with `status='active'` and `auto_applied=true` in a single
+transaction, stamping the old active row as `superseded`. When it returns
+`"gate"`, the normal `save_pending` / `needs_clinician_review` path runs.
+
+**Revert**: `protocol_repo.revert(protocol_id, reverted_by)` checks that the
+target row is still the currently-active auto-applied row (`status='active'
+AND auto_applied AND reverted_at IS NULL`), stamps it `reverted_at + status
+superseded`, and restores its `parent_id` row to `active`. The guard is
+load-bearing: without the `status='active'` check, reverting a superseded row
+would activate a stale parent.
 
 ## Body-region anchoring
 
