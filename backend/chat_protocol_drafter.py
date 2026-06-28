@@ -697,6 +697,12 @@ def apply_swap(
     prior = prior_protocol or {}
     region = (prior.get("body_region") or "").strip().lower()
     exs = [dict(e) for e in prior.get("exercises", [])]
+    # Did from_id actually match a live exercise? If Maya hallucinates an id
+    # that is not in the current plan, the comprehension below is a no-op and
+    # the payload is byte-identical to prior. change_tier.classify would then
+    # see a zero diff and return "auto", writing an unchanged protocol as a
+    # new active row with a phantom "coach_swap" audit entry. Force the gate.
+    replaced = any(e.get("exercise_id") == from_id for e in exs)
     payload = dict(prior)
     payload["exercises"] = [
         {**e, "exercise_id": to_id, "name": to_id}
@@ -707,9 +713,20 @@ def apply_swap(
     # Drop the internal live-set sentinel so it never lands on a persisted row.
     payload.pop("_recent_set", None)
 
-    safety = _run_safety(payload, region)
+    # Gate decision first, BEFORE the safety pass. _run_safety -> _validate_region
+    # raises CrossRegionExerciseError on a real in-library exercise that belongs
+    # to a different body region; calling it ahead of the library/region guard
+    # would surface a tool error to Maya instead of routing the swap to clinician
+    # review. An out-of-library / out-of-region target, or a from_id that is not
+    # actually in the plan, is forced to gate without grading (nothing applies
+    # live, so there is nothing to grade).
     target_ok = _in_library_and_region(to_id, region)
-    tier = "gate" if not target_ok else change_tier.classify(prior, payload, safety)
+    if not target_ok or not replaced:
+        safety: list[dict[str, Any]] = []
+        tier = "gate"
+    else:
+        safety = _run_safety(payload, region)
+        tier = change_tier.classify(prior, payload, safety)
 
     summary = f"Swapped {from_id} -> {to_id} ({reason})."
 

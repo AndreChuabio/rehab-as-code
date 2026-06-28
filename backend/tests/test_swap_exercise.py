@@ -46,6 +46,55 @@ def test_out_of_region_swap_gates(monkeypatch):
     assert out["protocol_id"] == "pend-id"
 
 
+def test_hallucinated_from_id_does_not_auto_apply(monkeypatch):
+    """If from_id is not in the current plan the payload is unchanged. Even with
+    safety + library/region guards both passing, the swap must NOT auto-apply -
+    a zero-diff payload would otherwise classify as 'auto' and write a phantom
+    coach_swap active row, corrupting the audit trail."""
+    monkeypatch.setattr(d, "_run_safety", lambda payload, region: [])
+    monkeypatch.setattr(d, "_in_library_and_region", lambda eid, region: True)
+    save_active_calls = {"n": 0}
+    monkeypatch.setattr(
+        d.protocol_repo,
+        "save_active_auto",
+        lambda *a, **k: (save_active_calls.update(n=save_active_calls["n"] + 1)
+                         or "active-id"),
+    )
+    monkeypatch.setattr(d.protocol_repo, "save_pending", lambda *a, **k: "pend-id")
+    out = d.apply_swap(
+        "tok", "knee_not_in_plan", "knee_step_down", "hallucinated", PRIOR
+    )
+    assert out["auto_applied"] is False
+    assert save_active_calls["n"] == 0
+
+
+def test_in_library_wrong_region_swap_gates_without_exception(monkeypatch):
+    """A real, in-library exercise from a DIFFERENT body region (ankle for a
+    knee patient) must route to the clinician gate, not raise
+    CrossRegionExerciseError. _run_safety is deliberately NOT patched here so we
+    exercise the real _validate_region path the false-green test missed."""
+    captured = {}
+    monkeypatch.setattr(
+        d.protocol_repo,
+        "save_pending",
+        lambda *a, **k: (captured.update(status=k.get("status")) or "pend-id"),
+    )
+    save_active_calls = {"n": 0}
+    monkeypatch.setattr(
+        d.protocol_repo,
+        "save_active_auto",
+        lambda *a, **k: (save_active_calls.update(n=save_active_calls["n"] + 1)
+                         or "active-id"),
+    )
+    out = d.apply_swap(
+        "tok", "knee_sl_squat", "ankle_alphabet", "prefers ankle work", PRIOR
+    )
+    assert out["auto_applied"] is False
+    assert out["protocol_id"] == "pend-id"
+    assert captured["status"] == "pending_review"
+    assert save_active_calls["n"] == 0
+
+
 def test_high_severity_swap_routes_to_needs_clinician_review(monkeypatch):
     monkeypatch.setattr(
         d, "_run_safety", lambda payload, region: [{"severity": "high"}]
