@@ -1029,6 +1029,53 @@ def list_pending_protocols(
     return {"pending": out}
 
 
+@app.get("/protocols/auto-applied")
+def list_auto_applied_protocols(
+    user_id: str = Depends(require_clinician_id),  # noqa: ARG001
+):
+    """Clinician revert feed: low-risk drafts Coach Maya auto-applied straight
+    to active (no approval gate) that are still the active protocol and have
+    not been reverted, newest first. Same clinician guard as /protocols/pending
+    - crosses patients, so require_clinician_id (never current_user_id).
+
+    Defined before GET /protocols/{protocol_id} so the literal path is matched
+    instead of being captured as a protocol_id path param.
+    """
+    import protocol_repo
+
+    return {"auto_applied": protocol_repo.list_auto_applied_open()}
+
+
+@app.post("/protocols/{protocol_id}/revert")
+def revert_protocol(
+    protocol_id: str,
+    user_id: str = Depends(require_clinician_id),
+):
+    """Revert an open auto-applied protocol, re-activating its parent row.
+
+    Clinician-only (mirrors /protocols/pending). 409 when the target is missing
+    or is no longer an open auto-applied row (already reverted, or superseded by
+    a newer auto-apply / clinician approval) - protocol_repo.revert raises
+    ProtocolRepoError in those cases. reverted_to is the protocol that is active
+    again after the swap (the parent), resolved via get_active.
+    """
+    import protocol_repo
+
+    try:
+        result = protocol_repo.revert(protocol_id, reverted_by=user_id)
+    except protocol_repo.ProtocolRepoError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        logger.exception("revert_protocol failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    active = protocol_repo.get_active(result.get("token"))
+    return {
+        "ok": True,
+        "reverted_to": active.get("id") if active else None,
+    }
+
+
 def _name_initials(name: str | None) -> str | None:
     """First+last initial from a display name. None when unresolved."""
     if not name:
