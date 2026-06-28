@@ -273,6 +273,32 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "swap_exercise",
+            "description": (
+                "Swap one exercise in the patient's CURRENT plan for another the "
+                "patient prefers, when both are appropriate for their injury. Use "
+                "when the patient says they would rather do a different movement "
+                "than one already in their plan. Pass the library id of the "
+                "exercise being replaced (from_exercise_id), the library id of the "
+                "replacement (to_exercise_id), and the patient's reason. An "
+                "in-plan, same-region, non-progression swap applies live; anything "
+                "riskier is queued for clinician review automatically. Never invent "
+                "an exercise id - both must be in the library."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "from_exercise_id": {"type": "string"},
+                    "to_exercise_id": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["from_exercise_id", "to_exercise_id", "reason"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "fire_intake_trigger",
             "description": (
                 "Force a full re-intake. ONLY call when the patient explicitly says they want "
@@ -626,6 +652,29 @@ async def _dispatch_tool(
         except Exception as exc:
             logger.exception("fire_symptom_trigger executor failed")
             err = {"ok": False, "error": str(exc), "flow": "symptom_adjustment"}
+            return (err, [{"type": "tool_result", "name": name, "result": err}])
+        return (
+            {"ok": True, **result},
+            [{"type": "tool_result", "name": name, "result": result}],
+        )
+
+    if name == "swap_exercise":
+        # Deterministic 1-for-1 exercise swap routed through the same trigger
+        # executor the fire_* tools use, with flow="swap". The executor calls
+        # chat_protocol_drafter.apply_swap, which classifies the change tier
+        # and either applies live or queues for clinician review.
+        try:
+            result = await trigger_executor(
+                "swap",
+                {
+                    "from_exercise_id": arguments.get("from_exercise_id", ""),
+                    "to_exercise_id": arguments.get("to_exercise_id", ""),
+                    "reason": arguments.get("reason", ""),
+                },
+            )
+        except Exception as exc:
+            logger.exception("swap_exercise executor failed")
+            err = {"ok": False, "error": str(exc), "flow": "swap"}
             return (err, [{"type": "tool_result", "name": name, "result": err}])
         return (
             {"ok": True, **result},

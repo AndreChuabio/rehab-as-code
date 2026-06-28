@@ -646,3 +646,106 @@ def draft_and_save_pending(
         "phase": phase,
         "week": week,
     }
+
+
+def _in_library_and_region(exercise_id: str, region: str) -> bool:
+    """True if exercise_id exists in the library and matches the region.
+
+    Gate condition for swap_exercise: a target the patient names must be a
+    real, in-scope library exercise for their own body region. An unknown id
+    or a region mismatch forces the swap to clinician review (never applied
+    live). Defaults to False on any lookup error - fail-safe to the gate.
+    """
+    if exercise_id not in set(exercise_kb.list_ids()):
+        return False
+    try:
+        return exercise_kb.body_region_for(exercise_id) == region
+    except Exception:
+        return False
+
+
+def apply_swap(
+    token: str,
+    from_id: str,
+    to_id: str,
+    reason: str,
+    prior_protocol: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Swap one exercise for another within the active protocol.
+
+    Deterministic payload edit (no LLM): replace the exercise whose
+    `exercise_id` matches `from_id` with `to_id`, keeping every other field
+    untouched. Runs the same deterministic safety pass (`_run_safety`) and
+    tier classifier (`change_tier.classify`) the drafter uses:
+
+      - "auto" -> protocol_repo.save_active_auto (live, revertible by clinician)
+      - "gate" -> protocol_repo.save_pending (clinician review queue)
+
+    A swap whose target is out of the library or out of the patient's body
+    region is forced to gate regardless of the diff shape - we never apply a
+    cross-region or fabricated exercise live. High-severity safety concerns
+    push the gated row to needs_clinician_review.
+
+    Parameters mirror the chat tool args (`from_exercise_id`,
+    `to_exercise_id`, `reason`) plus the JWT-derived token and the patient's
+    currently-active protocol payload (the diff baseline).
+
+    Returns
+    -------
+    dict with keys: protocol_id, auto_applied, summary.
+    """
+    prior = prior_protocol or {}
+    region = (prior.get("body_region") or "").strip().lower()
+    exs = [dict(e) for e in prior.get("exercises", [])]
+    payload = dict(prior)
+    payload["exercises"] = [
+        {**e, "exercise_id": to_id, "name": to_id}
+        if e.get("exercise_id") == from_id
+        else e
+        for e in exs
+    ]
+    # Drop the internal live-set sentinel so it never lands on a persisted row.
+    payload.pop("_recent_set", None)
+
+    safety = _run_safety(payload, region)
+    target_ok = _in_library_and_region(to_id, region)
+    tier = "gate" if not target_ok else change_tier.classify(prior, payload, safety)
+
+    summary = f"Swapped {from_id} -> {to_id} ({reason})."
+
+    if tier == "auto":
+        protocol_id = protocol_repo.save_active_auto(
+            token,
+            payload,
+            created_by_agent="coach_swap",
+            safety_concerns=safety or None,
+        )
+        logger.info(
+            "swap routed token=%s tier=auto protocol_id=%s", token, protocol_id,
+        )
+        return {
+            "protocol_id": protocol_id,
+            "auto_applied": True,
+            "summary": summary,
+        }
+
+    high_severity = any(
+        str(c.get("severity", "")).strip().lower() == "high" for c in safety
+    )
+    status = "needs_clinician_review" if high_severity else "pending_review"
+    protocol_id = protocol_repo.save_pending(
+        token,
+        payload,
+        created_by_agent="coach_swap",
+        status=status,
+        safety_concerns=safety or None,
+    )
+    logger.info(
+        "swap routed token=%s tier=gate status=%s protocol_id=%s",
+        token, status, protocol_id,
+    )
+    return {
+        "protocol_id": protocol_id,
+        "auto_applied": False,
+        "summary": summary,
+    }

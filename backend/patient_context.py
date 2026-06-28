@@ -133,18 +133,42 @@ def _chat_trigger_executor_factory(user_id: str):
     failure so coach_chat._dispatch_tool can render an error tool_result.
     """
     async def _executor(flow: str, payload: dict) -> dict:
-        prior_protocol = fetch_protocol_for_user(user_id)
+        prior_protocol = fetch_protocol_for_user(user_id) or None
         # fetch_protocol_for_user returns a TRUTHY pending_intake sentinel (not
         # None) when the patient has no active protocol — canonical marker is
         # phase == 'pending_intake' (protocol_loader._empty_protocol_for_user,
         # the same field the frontend empty-state keys on). Passing it as the
         # "prior protocol" makes the drafter revise a plan that doesn't exist
         # instead of drafting the initial one — null it out.
+        #
+        # Load-bearing for the auto-apply tier as well: change_tier.classify
+        # gates unconditionally when prior_protocol is None (first plan of care
+        # is clinician-owned). A truthy sentinel would read as a real prior and
+        # let an initial plan classify as "auto" — live, with no clinician.
         if prior_protocol and prior_protocol.get("phase") == "pending_intake":
             prior_protocol = None
-        # draft_and_save_pending is sync (blocks on Anthropic + psycopg). Run
-        # in the default executor so the SSE stream stays responsive.
+        # The drafter / swap paths are sync (block on Anthropic + psycopg).
+        # Run in the default executor so the SSE stream stays responsive.
         loop = asyncio.get_running_loop()
+        if flow == "swap":
+            # Deterministic exercise swap (no LLM draft). apply_swap classifies
+            # the tier and either applies live or queues for clinician review.
+            result = await loop.run_in_executor(
+                None,
+                chat_protocol_drafter.apply_swap,
+                user_id,
+                payload.get("from_exercise_id", ""),
+                payload.get("to_exercise_id", ""),
+                payload.get("reason", ""),
+                prior_protocol,
+            )
+            return {
+                "pending_protocol_id": result["protocol_id"],
+                "protocol_id": result["protocol_id"],
+                "auto_applied": result["auto_applied"],
+                "summary": result["summary"],
+                "flow": flow,
+            }
         result = await loop.run_in_executor(
             None,
             chat_protocol_drafter.draft_and_save_pending,
