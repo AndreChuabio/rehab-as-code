@@ -39,6 +39,7 @@ import time
 from typing import Any, AsyncIterator, Awaitable, Callable
 
 import exercise_kb
+import protocol_repo
 from change_tier import IN_SCOPE_REGIONS
 
 logger = logging.getLogger(__name__)
@@ -402,6 +403,19 @@ TOOLS: list[dict[str, Any]] = [
                 },
                 "required": ["injury_type", "mode"],
             },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_protocol_history",
+            "description": (
+                "Return the patient's recent protocol versions (active + past) so "
+                "you can reference what was tried before. Read-only. Use when the "
+                "patient asks what changed, or to ground a swap or regression in "
+                "their history."
+            ),
+            "parameters": {"type": "object", "properties": {}},
         },
     },
 ]
@@ -798,6 +812,31 @@ async def _dispatch_tool(
             {"ok": True, **result},
             [{"type": "tool_result", "name": name, "result": result}],
         )
+
+    if name == "get_protocol_history":
+        # Read-only. No executor. PHI hygiene: log token + result count only.
+        if not user_token:
+            err = {"ok": False, "error": "no authenticated patient"}
+            return (err, [{"type": "tool_result", "name": name, "result": err}])
+        rows = protocol_repo.list_by_token(user_token)[:8]
+        logger.debug(
+            "get_protocol_history token=%s rows=%d", user_token, len(rows)
+        )
+        versions = [
+            {
+                "version": i + 1,
+                "status": r.get("status"),
+                "date": r.get("created_at"),
+                "exercises": [
+                    e.get("name")
+                    for e in (r.get("payload") or {}).get("exercises", [])
+                ],
+                "why": r.get("created_by_agent"),
+            }
+            for i, r in enumerate(rows)
+        ]
+        result = {"versions": versions}
+        return (result, [{"type": "tool_result", "name": name, "result": result}])
 
     return ({"error": f"unknown tool {name}"}, [])
 
