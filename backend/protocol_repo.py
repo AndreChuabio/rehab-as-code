@@ -546,11 +546,16 @@ def save_active_auto(
     active with auto_applied=true and parent_id = the superseded row (the
     revert target). The unique partial index on (token) WHERE status='active'
     keeps active singular.
+
+    The guard SELECT takes FOR UPDATE (matching approve()/revert()) so two
+    concurrent calls for the same token serialize on the active row instead
+    of racing into a unique-violation 500 on the partial index.
     """
     from psycopg.types.json import Json
     with _conn() as c, c.cursor() as cur:
         cur.execute(
-            "SELECT id FROM protocols WHERE token = %s AND status = 'active' LIMIT 1",
+            "SELECT id FROM protocols WHERE token = %s AND status = 'active' "
+            "LIMIT 1 FOR UPDATE",
             (token,),
         )
         active = cur.fetchone()
@@ -574,13 +579,25 @@ def save_active_auto(
 
 
 def list_auto_applied_open(limit: int = 50) -> list[dict]:
-    """Auto-applied rows not yet reverted, newest first (clinician feed)."""
+    """Auto-applied rows that are still the active protocol, newest first.
+
+    The clinician revert feed. Filters on status='active' as well as
+    auto_applied + un-reverted so a row that has since been superseded (by a
+    later auto-apply or a clinician approval) is never offered as a revert
+    target — reverting a stale row would re-activate a two-versions-old parent
+    and silently corrupt the active pointer.
+
+    The SELECT carries auto_applied / reverted_at / reverted_by explicitly so
+    _normalize_row coerces them and callers get the same shape as
+    get()/get_active() (which use SELECT *).
+    """
     with _conn() as c, c.cursor() as cur:
         cur.execute(
             "SELECT id, token, parent_id, payload, status, created_by_agent, "
-            "safety_concerns, created_at "
+            "safety_concerns, created_at, auto_applied, reverted_at, reverted_by "
             "FROM protocols "
             "WHERE auto_applied = true AND reverted_at IS NULL "
+            "  AND status = 'active' "
             "ORDER BY created_at DESC LIMIT %s",
             (limit,),
         )
@@ -588,26 +605,39 @@ def list_auto_applied_open(limit: int = 50) -> list[dict]:
 
 
 def revert(protocol_id: str, reverted_by: str) -> dict:
-    """Re-activate the parent of an open auto-applied row; stamp revert."""
+    """Re-activate the parent of an open auto-applied row; stamp revert.
+
+    Guards that the target row is the CURRENTLY-active auto-applied row
+    (status='active' AND auto_applied AND reverted_at IS NULL). The
+    status='active' check is load-bearing: without it a row that was
+    auto-applied then later superseded (by a second auto-apply or a clinician
+    approval) would still pass the guard, and reverting it would supersede the
+    newer active protocol and re-activate a stale parent. Superseding by the
+    target row's own id (not WHERE status='active') keeps the swap scoped to
+    exactly the row being reverted.
+    """
     with _conn() as c, c.cursor() as cur:
         cur.execute(
-            "SELECT token, parent_id, auto_applied, reverted_at "
+            "SELECT token, parent_id, auto_applied, reverted_at, status "
             "FROM protocols WHERE id = %s FOR UPDATE",
             (protocol_id,),
         )
         row = cur.fetchone()
         if not row:
             raise ProtocolRepoError(f"protocol {protocol_id} not found")
-        if not row["auto_applied"] or row["reverted_at"] is not None:
+        if (
+            not row["auto_applied"]
+            or row["reverted_at"] is not None
+            or row["status"] != "active"
+        ):
             raise ProtocolRepoError(
                 f"protocol {protocol_id} is not an open auto-applied row")
         if not row["parent_id"]:
             raise ProtocolRepoError(
                 f"protocol {protocol_id} has no parent to revert to")
-        token = row["token"]
         cur.execute(
-            "UPDATE protocols SET status = 'superseded' "
-            "WHERE token = %s AND status = 'active'", (token,),
+            "UPDATE protocols SET status = 'superseded' WHERE id = %s",
+            (protocol_id,),
         )
         cur.execute(
             "UPDATE protocols SET status = 'active' WHERE id = %s",
