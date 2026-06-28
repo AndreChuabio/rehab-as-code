@@ -30,11 +30,13 @@ Event protocol yielded by chat_stream():
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
 import os
 import re
+import threading
 import time
 from typing import Any, AsyncIterator, Awaitable, Callable
 
@@ -578,6 +580,55 @@ def _card_gate_reason(exercise_id: str | None, body_region: str | None) -> str |
     return None
 
 
+def _capture_intake(token: str, fields: dict[str, Any], mode: str) -> dict[str, Any]:
+    """Thin wrapper over agents.intake_agent.capture_intake_from_chat.
+
+    Isolated so the start_intake_tool dispatch branch (and tests) can stub
+    the capture without reaching Supabase. Validates, persists, and returns
+    fields_captured + fields_missing + mode. Raises IntakeCaptureError (or an
+    unexpected exception) on failure - the caller surfaces it to the model.
+    """
+    from agents.intake_agent import capture_intake_from_chat
+
+    return capture_intake_from_chat(token, fields, mode)
+
+
+def _run_plan_generation(token: str) -> None:
+    """Fire the gated plan-generation pipeline for a fresh conversational intake.
+
+    Best-effort and detached. The intake row is already persisted, so a
+    pipeline failure must NOT fake-fail the intake tool or break the SSE
+    stream. The multi-agent pipeline (researcher -> evaluator -> planner ->
+    safety_reviewer) saves its OWN gated row (pending_review /
+    needs_clinician_review) and never auto-applies - the first plan always
+    waits for a clinician. Runs in a background thread with its own event
+    loop because the dispatch path is already inside a running loop; matches
+    the real runner used by the structured intake path in main.py
+    (get_patient_agent("plan_generation").handle(PatientRequest(...))).
+    PHI hygiene: log token + outcome only, never intake values.
+    """
+
+    def _worker() -> None:
+        try:
+            from agents import PatientRequest, get_patient_agent
+
+            agent = get_patient_agent("plan_generation")
+            request = PatientRequest(
+                user_token=token,
+                message="Generate my rehab plan.",
+                slack_user_id=None,
+                metadata={"source": "conversational_intake"},
+            )
+            asyncio.run(agent.handle(request))
+            logger.info("intake auto plan-gen completed token=%s", token)
+        except Exception:
+            logger.exception("intake auto plan-gen failed token=%s", token)
+
+    threading.Thread(
+        target=_worker, name="intake-auto-plangen", daemon=True
+    ).start()
+
+
 async def _dispatch_tool(
     name: str,
     arguments: dict[str, Any],
@@ -779,11 +830,7 @@ async def _dispatch_tool(
         fields = {k: v for k, v in arguments.items() if k != "mode"}
 
         try:
-            from agents.intake_agent import (
-                IntakeCaptureError,
-                capture_intake_from_chat,
-            )
-            result = capture_intake_from_chat(user_token, fields, mode)
+            result = _capture_intake(user_token, fields, mode)
         except Exception as exc:
             # Surface the error back to the model + frontend rather than
             # pretending the capture succeeded. Both IntakeCaptureError
@@ -807,6 +854,18 @@ async def _dispatch_tool(
                 )
             err = {"ok": False, "error": str(exc)}
             return (err, [{"type": "tool_result", "name": name, "result": err}])
+
+        # Task 7: a complete fresh intake (mode="new" with nothing missing)
+        # kicks the gated plan-generation pipeline so the patient lands on a
+        # draft awaiting clinician review instead of an empty plan. An update,
+        # or a capture still missing a required field, skips it (Maya asks the
+        # missing question next turn). _run_plan_generation is best-effort and
+        # detached; the result row stays gated and is never auto-applied.
+        plan_generation = "skipped"
+        if mode == "new" and not result.get("fields_missing"):
+            _run_plan_generation(user_token)
+            plan_generation = "queued"
+        result = {**result, "plan_generation": plan_generation}
 
         return (
             {"ok": True, **result},
