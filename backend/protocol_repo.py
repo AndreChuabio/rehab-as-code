@@ -238,6 +238,25 @@ def list_patient_tokens(limit: int = 200) -> list[dict]:
     ]
 
 
+def list_active_tokens(limit: int = 1000) -> list[str]:
+    """Return the tokens of every patient with an active protocol.
+
+    The "due patient" set for scheduled reminders: a patient with an active
+    plan is in care and may want session / check-in nudges. Per-pref gating
+    (and per-patient timezone, when we add it) happens at the send site — this
+    is just the candidate roster. Raises ProtocolRepoError if the DB is
+    unavailable (the cron caller swallows it and returns a degraded result).
+    """
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            "SELECT DISTINCT token FROM protocols WHERE status = 'active' "
+            "LIMIT %s",
+            (limit,),
+        )
+        rows = cur.fetchall() or []
+    return [r["token"] for r in rows if r.get("token")]
+
+
 def approve(
     protocol_id: str,
     reviewed_by: str,

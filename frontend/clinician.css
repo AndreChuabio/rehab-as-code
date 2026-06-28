@@ -32,15 +32,15 @@
 }
 
 .clinician-badge {
-  background: rgba(122, 158, 255, 0.18);
-  color: var(--accent2);
+  background: rgba(var(--rgb-accent2), 0.18);
+  color: var(--accent);
   padding: 3px 10px;
   border-radius: 999px;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
-  border: 1px solid rgba(122, 158, 255, 0.35);
+  border: 1px solid rgba(var(--rgb-accent), 0.35);
 }
 
 .clinician-header-meta {
@@ -64,15 +64,15 @@
 
 .clinician-as-patient {
   background: transparent;
-  border: 1px solid var(--accent2);
-  color: var(--accent2);
+  border: 1px solid var(--accent);
+  color: var(--accent);
   padding: 5px 10px;
   border-radius: 6px;
   font-size: 12px;
   cursor: pointer;
 }
 .clinician-as-patient:hover {
-  background: rgba(122, 158, 255, 0.12);
+  background: rgba(var(--rgb-accent), 0.12);
   color: var(--text-strong);
 }
 
@@ -134,7 +134,7 @@
 .queue-item:hover { background: var(--surface3); }
 .queue-item.selected {
   background: var(--surface2);
-  border-left: 3px solid var(--accent2);
+  border-left: 3px solid var(--accent);
   padding-left: 13px;
 }
 
@@ -289,15 +289,15 @@
 }
 
 .patient-summary-region {
-  background: rgba(122, 158, 255, 0.12);
-  color: var(--accent2);
+  background: rgba(var(--rgb-accent2), 0.12);
+  color: var(--accent);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 3px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(122, 158, 255, 0.32);
+  border: 1px solid rgba(var(--rgb-accent), 0.32);
 }
 
 .patient-summary-injury {
@@ -357,9 +357,9 @@
   border-radius: 50%;
   background: var(--border);
 }
-.pain-dot.pain-low   { background: rgba(95, 208, 154, 0.7); }
-.pain-dot.pain-mid   { background: rgba(232, 181, 74, 0.7); }
-.pain-dot.pain-high  { background: rgba(255, 107, 122, 0.7); }
+.pain-dot.pain-low   { background: rgba(var(--rgb-success), 0.7); }
+.pain-dot.pain-mid   { background: rgba(var(--rgb-warn), 0.7); }
+.pain-dot.pain-high  { background: rgba(var(--rgb-danger), 0.7); }
 .pain-dot.pain-empty { background: var(--border); }
 
 .patient-summary-trend {
@@ -486,8 +486,8 @@
   gap: 8px;
   align-items: baseline;
   font-size: 12px;
-  background: rgba(232, 181, 74, 0.08);
-  border: 1px solid rgba(232, 181, 74, 0.28);
+  background: rgba(var(--rgb-warn), 0.08);
+  border: 1px solid rgba(var(--rgb-warn), 0.28);
   border-radius: 4px;
   padding: 4px 8px;
 }
@@ -559,8 +559,8 @@
 }
 
 .safety-concern {
-  background: rgba(255, 107, 122, 0.08);
-  border: 1px solid rgba(255, 107, 122, 0.32);
+  background: rgba(var(--rgb-danger), 0.08);
+  border: 1px solid rgba(var(--rgb-danger), 0.32);
   border-radius: 4px;
   padding: 8px 10px;
   display: grid;
@@ -611,7 +611,7 @@
 .queue-item-flagged {
   border-left: 3px solid var(--danger) !important;
   padding-left: 13px;
-  background: rgba(255, 107, 122, 0.06);
+  background: rgba(var(--rgb-danger), 0.06);
 }
 .queue-item-flagged.selected {
   background: var(--danger-bg);
@@ -662,8 +662,8 @@
 
 .narrator-retry {
   background: transparent;
-  border: 1px solid var(--accent2);
-  color: var(--accent2);
+  border: 1px solid var(--accent);
+  color: var(--accent);
   padding: 3px 10px;
   border-radius: 999px;
   font-size: 11px;
@@ -673,7 +673,7 @@
   cursor: pointer;
 }
 .narrator-retry:hover {
-  background: rgba(122, 158, 255, 0.12);
+  background: rgba(var(--rgb-accent), 0.12);
   color: var(--text-strong);
 }
 
@@ -751,10 +751,10 @@
      changed-new → accent  (the "after" line; CTA/teal)
    Tokens chosen so a clinician scanning a protocol diff reads colour as
    meaning, not arbitrary palette. */
-.diff-added       { background: rgba(95, 208, 154, 0.18);  display: inline-block; width: 100%; }
-.diff-removed     { background: rgba(255, 107, 122, 0.18); display: inline-block; width: 100%; }
-.diff-changed-old { background: rgba(232, 181, 74, 0.18);  display: inline-block; width: 100%; }
-.diff-changed-new { background: rgba(79, 179, 196, 0.22);  display: inline-block; width: 100%; }
+.diff-added       { background: rgba(var(--rgb-success), 0.18); display: inline-block; width: 100%; }
+.diff-removed     { background: rgba(var(--rgb-danger), 0.18);  display: inline-block; width: 100%; }
+.diff-changed-old { background: rgba(var(--rgb-warn), 0.18);    display: inline-block; width: 100%; }
+.diff-changed-new { background: rgba(var(--rgb-accent), 0.22);  display: inline-block; width: 100%; }
 
 /* ---- Structured exercise-level diff (primary clinician view) -----------
    Readable cards in body sans-serif (NOT 12px monospace — monospace only
@@ -862,9 +862,9 @@ details.structured-diff-group > summary.structured-diff-group-label {
   border-radius: 3px;
   letter-spacing: 0.06em;
 }
-.exercise-diff-status.status-added    { background: rgba(95, 208, 154, 0.18); color: var(--success); }
-.exercise-diff-status.status-removed   { background: rgba(255, 107, 122, 0.18); color: var(--danger); }
-.exercise-diff-status.status-modified  { background: rgba(232, 181, 74, 0.18); color: var(--warn); }
+.exercise-diff-status.status-added    { background: rgba(var(--rgb-success), 0.18); color: var(--success); }
+.exercise-diff-status.status-removed   { background: rgba(var(--rgb-danger), 0.18); color: var(--danger); }
+.exercise-diff-status.status-modified  { background: rgba(var(--rgb-warn), 0.18); color: var(--warn); }
 .exercise-diff-status.status-unchanged { background: var(--surface3); color: var(--muted); }
 
 .exercise-diff-name {
@@ -937,13 +937,13 @@ details.structured-diff-group > summary.structured-diff-group-label {
   gap: 4px;
 }
 .field-change-prose .field-change-old {
-  background: rgba(232, 181, 74, 0.12);
+  background: rgba(var(--rgb-warn), 0.12);
   border-radius: 4px;
   padding: 6px 8px;
   line-height: 1.45;
 }
 .field-change-prose .field-change-new {
-  background: rgba(79, 179, 196, 0.14);
+  background: rgba(var(--rgb-accent), 0.14);
   border-radius: 4px;
   padding: 6px 8px;
   line-height: 1.45;
@@ -984,8 +984,8 @@ details.structured-diff-group > summary.structured-diff-group-label {
   border-radius: 3px;
   font-family: ui-monospace, SF Mono, Menlo, monospace;
 }
-.ref-chip-added   { background: rgba(95, 208, 154, 0.18); color: var(--success); }
-.ref-chip-removed { background: rgba(255, 107, 122, 0.18); color: var(--danger); text-decoration: line-through; }
+.ref-chip-added   { background: rgba(var(--rgb-success), 0.18); color: var(--success); }
+.ref-chip-removed { background: rgba(var(--rgb-danger), 0.18); color: var(--danger); text-decoration: line-through; }
 
 /* Raw JSON diff demoted to a collapsed advanced toggle. */
 .clinician-diff-raw {
@@ -1120,7 +1120,7 @@ details.structured-diff-group > summary.structured-diff-group-label {
 }
 .session-item.completed   .session-status { color: var(--success); }
 .session-item.in_progress .session-status { color: var(--warn); }
-.session-item.planned     .session-status { color: var(--accent2); }
+.session-item.planned     .session-status { color: var(--accent); }
 .session-item.skipped     .session-status { color: var(--muted); }
 .session-item .session-meta {
   color: var(--muted);
@@ -1150,9 +1150,9 @@ details.structured-diff-group > summary.structured-diff-group-label {
  * critical accent (--accent) used by Approve / Reject. */
 
 .admin-badge {
-  background: rgba(120, 130, 200, 0.18);
-  color: var(--ai-text, #b8b8d8);
-  border: 1px solid rgba(140, 150, 220, 0.35);
+  background: rgba(var(--rgb-ai), 0.18);
+  color: var(--ai-accent);
+  border: 1px solid rgba(var(--rgb-ai), 0.35);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -1165,8 +1165,8 @@ details.structured-diff-group > summary.structured-diff-group-label {
 .admin-mode-switch {
   display: inline-flex;
   gap: 0;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface2);
+  border: 1px solid var(--border);
   border-radius: 6px;
   overflow: hidden;
   margin: 0 16px;
@@ -1180,26 +1180,26 @@ details.structured-diff-group > summary.structured-diff-group-label {
 .admin-mode-btn {
   background: transparent;
   border: 0;
-  color: var(--muted, #9aa3b2);
+  color: var(--muted);
   padding: 6px 14px;
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
 }
 .admin-mode-btn.active {
-  background: rgba(120, 130, 200, 0.22);
-  color: var(--ai-text, #d2d6f0);
+  background: rgba(var(--rgb-ai), 0.22);
+  color: var(--ai-accent);
 }
 .admin-mode-btn:not(.active):hover {
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface3);
 }
 
 /* "ADMIN MODE" strip — impossible to miss in screenshots. */
 .admin-mode-strip {
-  background: rgba(120, 130, 200, 0.18);
-  border-top: 2px solid rgba(140, 150, 220, 0.5);
-  border-bottom: 1px solid rgba(140, 150, 220, 0.25);
-  color: var(--ai-text, #d2d6f0);
+  background: rgba(var(--rgb-ai), 0.18);
+  border-top: 2px solid rgba(var(--rgb-ai), 0.5);
+  border-bottom: 1px solid rgba(var(--rgb-ai), 0.25);
+  color: var(--ai-accent);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.08em;
@@ -1215,9 +1215,9 @@ details.structured-diff-group > summary.structured-diff-group-label {
   flex-wrap: wrap;
 }
 .admin-filter {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: var(--text, #e2e6ee);
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--text);
   border-radius: 4px;
   padding: 4px 6px;
   font-size: 12px;
@@ -1227,54 +1227,54 @@ details.structured-diff-group > summary.structured-diff-group-label {
   flex-wrap: wrap;
   gap: 6px;
   padding: 8px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  border-bottom: 1px solid var(--border);
 }
 .metrics-pill {
   display: inline-flex;
   gap: 4px;
   align-items: center;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: var(--surface2);
+  border: 1px solid var(--border);
   border-radius: 4px;
   padding: 3px 6px;
   font-size: 11px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
-.metrics-pill-name { font-weight: 700; color: var(--ai-text, #d2d6f0); }
-.metrics-pill-val { color: var(--muted, #9aa3b2); }
-.metrics-pill-val.err { color: var(--danger, #d97070); }
+.metrics-pill-name { font-weight: 700; color: var(--ai-accent); }
+.metrics-pill-val { color: var(--muted); }
+.metrics-pill-val.err { color: var(--danger); }
 .metrics-empty { font-size: 11px; color: var(--muted); padding: 4px 8px; }
 
 .run-item {
   list-style: none;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  border-bottom: 1px solid var(--border);
   padding: 8px 12px;
   cursor: pointer;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
-  color: var(--text, #e2e6ee);
+  color: var(--text);
 }
-.run-item:hover { background: rgba(255, 255, 255, 0.03); }
-.run-item.active { background: rgba(120, 130, 200, 0.12); }
+.run-item:hover { background: var(--surface3); }
+.run-item.active { background: rgba(var(--rgb-ai), 0.12); }
 .run-item-row1 { display: flex; gap: 8px; align-items: baseline; }
 .run-item-row2 { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 4px; }
-.run-item-time { color: var(--muted, #9aa3b2); width: 32px; }
+.run-item-time { color: var(--muted); width: 32px; }
 .run-item-patient { font-weight: 600; }
 .run-item-status { margin-left: auto; }
 .run-item-decision {
   margin-left: auto;
   font-size: 10px;
-  color: var(--muted, #9aa3b2);
+  color: var(--muted);
 }
 
 .agent-chip {
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
 }
-.agent-chip-ok { background: rgba(80, 180, 130, 0.15); color: #8edcb1; }
-.agent-chip-err { background: rgba(210, 90, 90, 0.18); color: #e89a9a; }
+.agent-chip-ok { background: rgba(var(--rgb-success), 0.15); color: var(--success); }
+.agent-chip-err { background: rgba(var(--rgb-danger), 0.18); color: var(--danger); }
 
 /* Run detail */
 .admin-run-body { padding: 16px; }
@@ -1286,8 +1286,8 @@ details.structured-diff-group > summary.structured-diff-group-label {
   margin: 12px 0;
 }
 .trace-chip {
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface2);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 8px 12px;
   display: flex;
@@ -1297,14 +1297,14 @@ details.structured-diff-group > summary.structured-diff-group-label {
 }
 .trace-chip-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
 .trace-chip-value { font-size: 14px; font-weight: 700; color: var(--text); }
-.trace-chip[data-status="error"] { border-color: rgba(210, 90, 90, 0.4); }
-.trace-chip[data-status="error"] .trace-chip-value { color: #e89a9a; }
+.trace-chip[data-status="error"] { border-color: rgba(var(--rgb-danger), 0.4); }
+.trace-chip[data-status="error"] .trace-chip-value { color: var(--danger); }
 .trace-chip[data-status="missing"] { opacity: 0.5; }
 
 .admin-timeline {
   margin: 16px 0;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  background: var(--surface2);
+  border: 1px solid var(--border);
   border-radius: 6px;
   padding: 12px;
 }
@@ -1324,7 +1324,7 @@ details.structured-diff-group > summary.structured-diff-group-label {
 .timeline-track {
   flex: 1;
   height: 14px;
-  background: rgba(255, 255, 255, 0.04);
+  background: var(--surface3);
   border-radius: 3px;
   position: relative;
 }
@@ -1334,8 +1334,8 @@ details.structured-diff-group > summary.structured-diff-group-label {
   bottom: 0;
   border-radius: 3px;
 }
-.timeline-bar.bar-ok { background: rgba(80, 180, 130, 0.65); }
-.timeline-bar.bar-err { background: rgba(210, 90, 90, 0.7); }
+.timeline-bar.bar-ok { background: rgba(var(--rgb-success), 0.65); }
+.timeline-bar.bar-err { background: rgba(var(--rgb-danger), 0.7); }
 
 .admin-agent-cards {
   display: flex;
@@ -1343,11 +1343,11 @@ details.structured-diff-group > summary.structured-diff-group-label {
   gap: 8px;
 }
 .agent-card {
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--border);
   border-radius: 5px;
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--surface2);
 }
-.agent-card.card-err { border-color: rgba(210, 90, 90, 0.4); }
+.agent-card.card-err { border-color: rgba(var(--rgb-danger), 0.4); }
 .agent-card-head {
   display: flex;
   gap: 12px;
@@ -1358,12 +1358,12 @@ details.structured-diff-group > summary.structured-diff-group-label {
 }
 .agent-card-name { font-weight: 700; }
 .agent-card-status { color: var(--muted); }
-.agent-card.card-err .agent-card-status { color: #e89a9a; }
+.agent-card.card-err .agent-card-status { color: var(--danger); }
 .agent-card-time, .agent-card-tokens { color: var(--muted); }
 .agent-card-toggle {
   margin-left: auto;
-  background: rgba(255, 255, 255, 0.04);
-  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: var(--surface3);
+  border: 1px solid var(--border);
   color: var(--muted);
   font-size: 11px;
   padding: 2px 8px;
@@ -1375,7 +1375,7 @@ details.structured-diff-group > summary.structured-diff-group-label {
 .agent-card-summary {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
-  background: rgba(0, 0, 0, 0.25);
+  background: var(--surface3);
   padding: 8px;
   border-radius: 4px;
   white-space: pre-wrap;
@@ -1389,12 +1389,12 @@ details.structured-diff-group > summary.structured-diff-group-label {
   font-style: italic;
 }
 .agent-card-err {
-  background: rgba(210, 90, 90, 0.12);
-  color: #e89a9a;
+  background: rgba(var(--rgb-danger), 0.12);
+  color: var(--danger);
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 11px;
   padding: 6px 12px;
-  border-top: 1px solid rgba(210, 90, 90, 0.25);
+  border-top: 1px solid rgba(var(--rgb-danger), 0.25);
 }
 
 /* PHI reveal affordance (A5) */
@@ -1409,15 +1409,15 @@ details.structured-diff-group > summary.structured-diff-group-label {
 }
 .phi-value-hashed.phi-revealed {
   color: var(--text);
-  background: rgba(120, 130, 200, 0.12);
+  background: rgba(var(--rgb-ai), 0.12);
   padding: 1px 4px;
   border-radius: 3px;
-  border-left: 2px solid rgba(140, 150, 220, 0.5);
+  border-left: 2px solid rgba(var(--rgb-ai), 0.5);
 }
 .phi-reveal-btn {
-  background: rgba(120, 130, 200, 0.15);
-  border: 1px solid rgba(140, 150, 220, 0.35);
-  color: var(--ai-text, #d2d6f0);
+  background: rgba(var(--rgb-ai), 0.15);
+  border: 1px solid rgba(var(--rgb-ai), 0.35);
+  color: var(--ai-accent);
   font-size: 10px;
   padding: 1px 6px;
   border-radius: 3px;
@@ -1425,7 +1425,7 @@ details.structured-diff-group > summary.structured-diff-group-label {
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
-.phi-reveal-btn:hover { background: rgba(120, 130, 200, 0.25); }
+.phi-reveal-btn:hover { background: rgba(var(--rgb-ai), 0.25); }
 .phi-reveal-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 /* ---- Patients / History mode ---------------------------------------------- */
@@ -1470,7 +1470,7 @@ details.structured-diff-group > summary.structured-diff-group-label {
   margin-right: 4px;
 }
 .history-region {
-  color: var(--accent2);
+  color: var(--accent);
   text-transform: uppercase;
   font-size: 11px;
   font-weight: 600;
@@ -1522,10 +1522,10 @@ details.structured-diff-group > summary.structured-diff-group-label {
   background: var(--surface3);
   color: var(--muted);
 }
-.timeline-status.status-active { background: rgba(95, 208, 154, 0.18); color: var(--success); }
-.timeline-status.status-rejected { background: rgba(255, 107, 122, 0.18); color: var(--danger); }
-.timeline-status.status-pending_review { background: rgba(79, 179, 196, 0.20); color: var(--accent); }
-.timeline-status.status-needs_clinician_review { background: rgba(232, 181, 74, 0.18); color: var(--warn); }
+.timeline-status.status-active { background: rgba(var(--rgb-success), 0.18); color: var(--success); }
+.timeline-status.status-rejected { background: rgba(var(--rgb-danger), 0.18); color: var(--danger); }
+.timeline-status.status-pending_review { background: rgba(var(--rgb-accent), 0.20); color: var(--accent); }
+.timeline-status.status-needs_clinician_review { background: rgba(var(--rgb-warn), 0.18); color: var(--warn); }
 .timeline-pw { color: var(--text); }
 .timeline-meta {
   margin-left: auto;
@@ -1575,9 +1575,9 @@ details.structured-diff-group > summary.structured-diff-group-label {
   text-transform: uppercase;
   padding: 3px 10px;
   border-radius: 999px;
-  border: 1px solid rgba(122, 158, 255, 0.32);
-  background: rgba(122, 158, 255, 0.12);
-  color: var(--accent2);
+  border: 1px solid rgba(var(--rgb-accent), 0.32);
+  background: rgba(var(--rgb-accent2), 0.12);
+  color: var(--accent);
   white-space: nowrap;
 }
 /* Cash / self-pay reads neutral (muted) — no insurer in the loop. */
@@ -1662,15 +1662,15 @@ details.structured-diff-group > summary.structured-diff-group-label {
   text-transform: uppercase;
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(79, 179, 196, 0.14);
+  background: rgba(var(--rgb-accent), 0.14);
   color: var(--accent);
-  border: 1px solid rgba(79, 179, 196, 0.3);
+  border: 1px solid rgba(var(--rgb-accent), 0.3);
   white-space: nowrap;
 }
 .goal-tied-fall_risk {
-  background: rgba(232, 181, 74, 0.14);
+  background: rgba(var(--rgb-warn), 0.14);
   color: var(--warn);
-  border-color: rgba(232, 181, 74, 0.3);
+  border-color: rgba(var(--rgb-warn), 0.3);
 }
 /* Dashed MOCK convention: transparent fill, dashed brand-red outline.
    Must NOT compete with the solid-fill safety banner. */
@@ -1751,7 +1751,7 @@ details.structured-diff-group > summary.structured-diff-group-label {
 .superbill-num { text-align: right; font-variant-numeric: tabular-nums; }
 .superbill-range { white-space: nowrap; color: var(--muted); }
 .superbill-just { color: var(--muted); max-width: 260px; }
-.superbill-payer-note { font-size: 11px; color: var(--accent2); margin-top: 3px; }
+.superbill-payer-note { font-size: 11px; color: var(--accent); margin-top: 3px; }
 .superbill-totals {
   margin-top: 10px;
   font-size: 12px;
@@ -1763,7 +1763,7 @@ details.structured-diff-group > summary.structured-diff-group-label {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--warn);
-  border: 1px solid rgba(232, 181, 74, 0.4);
+  border: 1px solid rgba(var(--rgb-warn), 0.4);
   border-radius: 999px;
   padding: 1px 7px;
   margin-left: 4px;
@@ -1821,9 +1821,9 @@ details.structured-diff-group > summary.structured-diff-group-label {
   border-radius: 999px;
   white-space: nowrap;
 }
-.form-status-good { background: rgba(95, 208, 154, 0.15); color: var(--success); }
-.form-status-warn { background: rgba(232, 181, 74, 0.15); color: var(--warn); }
-.form-status-fail { background: rgba(255, 107, 122, 0.15); color: var(--danger); }
+.form-status-good { background: rgba(var(--rgb-success), 0.15); color: var(--success); }
+.form-status-warn { background: rgba(var(--rgb-warn), 0.15); color: var(--warn); }
+.form-status-fail { background: rgba(var(--rgb-danger), 0.15); color: var(--danger); }
 .form-ex-id { font-size: 13px; color: var(--text); font-weight: 600; }
 .form-feedback-row-meta { font-size: 12px; color: var(--muted); margin-top: 4px; }
 .form-feedback-warns {
@@ -1838,7 +1838,7 @@ details.structured-diff-group > summary.structured-diff-group-label {
   border-radius: 999px;
   background: var(--warn-bg);
   color: var(--warn);
-  border: 1px solid rgba(232, 181, 74, 0.3);
+  border: 1px solid rgba(var(--rgb-warn), 0.3);
 }
 
 @media (max-width: 768px) {

@@ -6,6 +6,18 @@
   <title>RehabAsCode — Clinician Dashboard</title>
   <link rel="stylesheet" href="/static/style.css" />
   <link rel="stylesheet" href="/static/clinician.css" />
+  <!-- No-flash theme apply. Reads the shared 'rac-theme' key (set by the
+       patient app too) before paint so a dark-mode clinician never sees a
+       light flash. clinician.js re-applies + labels the toggle on load. -->
+  <script>
+    (function () {
+      try {
+        if (localStorage.getItem("rac-theme") === "dark") {
+          document.documentElement.dataset.theme = "dark";
+        }
+      } catch (_) {}
+    })();
+  </script>
 </head>
 <body class="clinician-body">
   <header class="clinician-header">
@@ -26,6 +38,8 @@
 
     <div class="clinician-header-meta">
       <span class="clinician-email" id="clinicianEmail"></span>
+      <button type="button" class="clinician-signout" id="clinicianThemeToggle"
+              aria-pressed="false" title="Toggle light/dark theme">Dark</button>
       <button type="button" class="tour-trigger" id="clinicianTourTrigger">Take the tour</button>
       <button type="button" class="clinician-as-patient" id="clinicianAsPatient">
         View as patient
@@ -436,8 +450,8 @@
         </div>
 
         <p class="settings-hint">
-          A light and dark theme toggle for the clinician dashboard is a planned
-          follow-up, tied to the clinician re-skin.
+          Use the Dark / Light button in the header to switch themes. Your
+          choice is remembered on this device and shared with the patient app.
         </p>
       </div>
 

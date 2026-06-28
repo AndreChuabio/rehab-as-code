@@ -1330,6 +1330,37 @@ const _NOTIF_FIELDS = [
   ["settingsNotifEmail", "email_opt_in"],
 ];
 
+// The four per-type toggles are gated on email_opt_in (the master switch).
+// email_opt_in is a hard AND-gate server-side, so a per-type box that stays
+// checkable while the master is off is a false promise. When the master is
+// off we disable + dim these rows but keep their stored values intact, so a
+// user who re-enables email gets their prior selections back.
+const _NOTIF_PER_TYPE_IDS = [
+  "settingsNotifPlanUpdated",
+  "settingsNotifSymptom",
+  "settingsNotifSession",
+  "settingsNotifCheckin",
+];
+
+function _syncNotifPerTypeGating() {
+  const master = document.getElementById("settingsNotifEmail");
+  const on = !!(master && master.checked);
+  for (const id of _NOTIF_PER_TYPE_IDS) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.disabled = !on;
+    el.setAttribute("aria-disabled", on ? "false" : "true");
+    const row = el.closest(".settings-checkbox");
+    if (row) row.classList.toggle("is-subordinate", !on);
+  }
+  const hint = document.getElementById("settingsNotifTypesHint");
+  if (hint) {
+    hint.textContent = on
+      ? "When email is on, choose what we send you. Nothing is sent for a type that is turned off."
+      : "Turn on email above to choose what we send you. Your selections are saved either way.";
+  }
+}
+
 async function loadSettingsNotifications() {
   // Prefer prefs already on patientState (intake-status); else fetch.
   let prefs = patientState?.notification_prefs || null;
@@ -1346,6 +1377,7 @@ async function loadSettingsNotifications() {
     const el = document.getElementById(id);
     if (el) el.checked = !!prefs[key];
   }
+  _syncNotifPerTypeGating();
 }
 
 async function saveSettingsNotifications() {
@@ -1765,6 +1797,10 @@ function wireSettingsOnce() {
   for (const [id] of _NOTIF_FIELDS) {
     document.getElementById(id)?.addEventListener("change", saveSettingsNotifications);
   }
+  // Master email switch also re-gates the per-type rows (dim + disable when off).
+  document
+    .getElementById("settingsNotifEmail")
+    ?.addEventListener("change", _syncNotifPerTypeGating);
 
   // ── Settings v2: Coach Maya prefs (save on every change) ──────────────────
   document.getElementById("settingsCoachVoice")?.addEventListener("change", saveSettingsCoachMaya);

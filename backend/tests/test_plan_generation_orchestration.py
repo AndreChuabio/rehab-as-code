@@ -123,9 +123,11 @@ def stub_subagents(monkeypatch):
             raise EvaluatorError("simulated evaluator failure")
         return {"decision": "hold", "reasons": ["stable"], "confidence": 0.7}
 
-    def _planner(candidates, signal, intake, *, phase, week, concerns=None, token=None):
+    def _planner(candidates, signal, intake, *, phase, week, concerns=None,
+                 token=None, goal_template=None):
         attempt = state["planner_calls"]
         state["planner_calls"] += 1
+        state["last_goal_template"] = goal_template
         if state["raise_in"] == "planner":
             from agents.planner import PlannerError
             raise PlannerError("simulated planner failure")

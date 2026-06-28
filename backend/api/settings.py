@@ -29,10 +29,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from fastapi.responses import Response
 from pydantic import BaseModel
 
@@ -544,3 +545,86 @@ def set_clinician_goal_templates(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     logger.info("clinician goal_templates set user=%s", user_id)
     return stored
+
+
+# ── Internal: scheduled reminder cron ─────────────────────────────────────────
+#
+# Scheduled reminders (session / daily check-in) have no inline app event to
+# hang off the way plan_updated and symptom_flag_receipts do, so they need a
+# scheduler to call them periodically. This endpoint is the sender; the SCHEDULE
+# is the remaining deploy step.
+#
+# DEPLOY STEP (not wired this pass, flagged honestly): add a Vercel cron in
+# vercel.json so the platform hits this endpoint daily, e.g.
+#
+#   { "crons": [ { "path": "/internal/cron/reminders", "schedule": "0 16 * * *" } ] }
+#
+# Vercel cron requests cannot set a custom header, so the production wiring will
+# either move the shared secret into the path/query or rely on Vercel's signed
+# cron request — that decision is part of the deploy step. Until the cron is
+# live, NO scheduled reminders are delivered; the patient Settings UI must not
+# over-promise daily reminders (they remain saved preferences only).
+#
+# Auth: a shared-secret header (X-Cron-Secret == INTERNAL_CRON_SECRET). When the
+# secret is unset the endpoint 503s (closed by default) rather than running
+# unauthenticated. It is NOT a user endpoint — no current_user_id dependency.
+
+_CRON_SECRET_HEADER = "X-Cron-Secret"
+
+
+class CronReminderResult(BaseModel):
+    """Summary of one reminder-cron run (no PHI — counts only)."""
+    candidates: int
+    session_sent: int
+    checkin_sent: int
+
+
+@router.post("/internal/cron/reminders", response_model=CronReminderResult)
+def run_reminder_cron(
+    x_cron_secret: str | None = Header(default=None, alias=_CRON_SECRET_HEADER),
+) -> CronReminderResult:
+    """Send pref-gated session + check-in reminders to patients with active plans.
+
+    Guarded by a shared secret. Iterates patients with an active protocol and
+    fires the two scheduled-reminder emails; each send is internally gated on
+    email_opt_in + its per-type pref and is fully fail-open, so a missing
+    recipient or a provider error is silently skipped. Returns counts only —
+    never any PHI. A DB outage degrades to a zero-candidate run rather than 5xx.
+    """
+    configured_secret = (os.getenv("INTERNAL_CRON_SECRET") or "").strip()
+    if not configured_secret:
+        # Closed by default: refuse to run unauthenticated.
+        raise HTTPException(status_code=503, detail="cron not configured")
+    if (x_cron_secret or "").strip() != configured_secret:
+        raise HTTPException(status_code=403, detail="forbidden")
+
+    import notifications
+
+    try:
+        import protocol_repo
+
+        tokens = protocol_repo.list_active_tokens()
+    except Exception as exc:  # noqa: BLE001 - degrade to an empty run, never 5xx
+        logger.warning("reminder cron roster lookup failed: %s", type(exc).__name__)
+        tokens = []
+
+    session_sent = 0
+    checkin_sent = 0
+    for token in tokens:
+        try:
+            if notifications.send_session_reminder(token):
+                session_sent += 1
+            if notifications.send_checkin_reminder(token):
+                checkin_sent += 1
+        except Exception:  # noqa: BLE001 - one bad patient never stalls the run
+            logger.warning("reminder send raised for one patient (non-fatal)")
+
+    logger.info(
+        "reminder cron run candidates=%d session_sent=%d checkin_sent=%d",
+        len(tokens), session_sent, checkin_sent,
+    )
+    return CronReminderResult(
+        candidates=len(tokens),
+        session_sent=session_sent,
+        checkin_sent=checkin_sent,
+    )

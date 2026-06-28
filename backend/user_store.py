@@ -1638,6 +1638,70 @@ def resolve_clinic_phone() -> str | None:
     return env_phone
 
 
+# -- Per-payer goal-template resolution (clinic-wide-by-payer) ---------------
+#
+# Threads the clinician's per-payer goal-language template into the plan
+# generation pipeline as planner STYLE guidance (NOT a clinical override — the
+# safety_reviewer, body-region anchoring, and library-citation rules still
+# bind). v1 is single-clinic (Andre / Nikki), so we resolve the FIRST non-null
+# staff_users.goal_templates->>payer, mirroring resolve_clinic_phone. True
+# per-owning-clinician routing is PHASED: there is no patient<->clinician
+# association in the schema yet, so we cannot tie a template to the patient's
+# specific reviewing clinician without an association migration. Postgres-only
+# for the staff_users leg; degrades to "" (today's no-op) on the sqlite test
+# backend or any DB error. Generic clinician free text only — never log it
+# (it becomes Anthropic-bound, a documented PHI surface).
+
+
+def resolve_goal_template(token: str, payer_model: str | None = None) -> str:
+    """Resolve the clinic's goal-language template for the patient's payer.
+
+    Resolves the patient's payer_model (via resolve_payer_model unless one is
+    passed), then returns the FIRST non-null/non-empty staff_users.goal_templates
+    entry for that payer key. Single-clinic-by-payer (mirrors resolve_clinic_phone);
+    per-owning-clinician routing is phased pending a patient<->clinician link.
+
+    Returns "" when no DB, no staff row, or no template is set — equivalent to
+    today's None/omitted behavior so the planner prompt is unchanged. Never
+    raises; never logs the template text.
+    """
+    payer = (payer_model or "").strip().lower()
+    if payer not in PAYER_MODELS:
+        try:
+            payer = resolve_payer_model(token)
+        except Exception:  # pragma: no cover - defensive; empty beats a 500
+            return ""
+    if payer not in GOAL_TEMPLATE_KEYS:
+        return ""
+    try:
+        from db import DbConfigError, get_conn
+    except ImportError:
+        return ""
+    try:
+        with get_conn(autocommit=True) as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT goal_templates ->> %s AS tmpl FROM staff_users "
+                "WHERE goal_templates ->> %s IS NOT NULL "
+                "AND goal_templates ->> %s <> '' LIMIT 1",
+                (payer, payer, payer),
+            )
+            row = cur.fetchone()
+    except DbConfigError:
+        return ""
+    except Exception as exc:
+        # Type only — never the template text (Anthropic-bound free text).
+        logger.warning(
+            "resolve_goal_template lookup failed: %s: %s",
+            type(exc).__name__, exc,
+        )
+        return ""
+    if row:
+        tmpl = str(row.get("tmpl") or "").strip()
+        if tmpl:
+            return tmpl
+    return ""
+
+
 def save_protocol_state(token: str, state: dict) -> None:
     return _pick(
         _flat_save_protocol_state, _sql_save_protocol_state, _pg_save_protocol_state,
@@ -1720,6 +1784,84 @@ def _flat_get_display_name(token: str) -> str | None:
     intake = user.get("intake") or {}
     candidate = intake.get("name") or user.get("patient_name")
     return (candidate or "").strip() or None
+
+
+# -- Email resolver (Supabase-canonical; used by transactional email) --------
+#
+# Resolves the patient's email for notification delivery. On Postgres the
+# authoritative source is auth.users.email (requires the SELECT grant the
+# display-name resolver already depends on); we swallow a permission error the
+# same way and return None so a missing grant degrades to "no email sent"
+# rather than a 500. The flat / sqlite test backends read an `email` captured
+# on the intake payload so the happy path is exercisable without auth.users.
+#
+# PHI: the address is returned to the caller (which sends to it) but is NEVER
+# logged here.
+
+
+def get_email(token: str) -> str | None:
+    """Return the patient's email address, or None when unresolvable.
+
+    Source: auth.users.email (Postgres) or the intake payload `email`
+    (flat / sqlite). Never raises — a missing grant or row returns None.
+    """
+    if not token:
+        return None
+    email = _pick(_flat_get_email, _sql_get_email, _pg_get_email, token)
+    if isinstance(email, str):
+        email = email.strip()
+        return email or None
+    return None
+
+
+def _flat_get_email(token: str) -> str | None:
+    user = _flat_load_user(token) or {}
+    intake = user.get("intake") or {}
+    candidate = intake.get("email") or user.get("email")
+    return (candidate or "").strip() or None
+
+
+def _sql_get_email(token: str) -> str | None:
+    with _sql_conn() as c:
+        row = c.execute(
+            "SELECT json_extract(payload, '$.email') AS email "
+            "FROM intake_records WHERE token = ?",
+            (token,),
+        ).fetchone()
+    if row and row["email"]:
+        return str(row["email"]).strip() or None
+    return None
+
+
+def _pg_get_email(token: str) -> str | None:
+    with _pg_conn() as c, c.cursor() as cur:
+        # 1. auth.users.email (canonical). Swallow a permission error the same
+        #    way _pg_get_display_name does rather than 500ing the caller.
+        try:
+            cur.execute(
+                "SELECT email FROM auth.users WHERE id::text = %s",
+                (token,),
+            )
+            au = cur.fetchone()
+        except Exception as exc:
+            logger.warning("auth.users lookup failed for email: %s", type(exc).__name__)
+            au = None
+        if au and au.get("email"):
+            cleaned = str(au["email"]).strip()
+            if cleaned:
+                return cleaned
+
+        # 2. intake_records.payload.email (fallback if captured during intake).
+        cur.execute(
+            "SELECT payload->>'email' AS email FROM intake_records WHERE token = %s",
+            (token,),
+        )
+        row = cur.fetchone()
+        if row and row.get("email"):
+            cleaned = str(row["email"]).strip()
+            if cleaned:
+                return cleaned
+    return None
 
 
 def _sql_get_display_name(token: str) -> str | None:

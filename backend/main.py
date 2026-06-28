@@ -1545,6 +1545,18 @@ def approve_protocol(
         logger.exception("approve_protocol failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
+    # Pref-gated "your plan was updated" email, fired AFTER the state write so a
+    # send failure never affects the 200. result["token"] is the patient the
+    # approved protocol belongs to. notifications.send_plan_updated honors the
+    # email_opt_in master switch + the plan_updated per-type toggle internally
+    # and swallows its own errors; the extra guard here is belt-and-braces.
+    try:
+        import notifications
+
+        notifications.send_plan_updated(result.get("token"))
+    except Exception:  # noqa: BLE001 - email is best-effort; never break approve
+        logger.warning("plan_updated email hook failed (non-fatal)")
+
     return {
         "approved": True,
         "protocol_id": result["id"],
