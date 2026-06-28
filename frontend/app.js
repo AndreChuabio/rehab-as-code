@@ -3478,7 +3478,7 @@ function maybeAttachFormCheckBtn(wrap, item) {
   btn.className = "pose-form-check-btn";
   btn.dataset.state = "off";
   btn.textContent = "Start exercise";
-  btn.title = "Use your webcam for live rep + alignment feedback";
+  btn.title = "Use your webcam for live form and framing feedback";
   btn.onclick = () => togglePoseFormCheck(wrap, item, btn);
   videoWrap.parentElement.insertBefore(btn, videoWrap);
 }
@@ -4834,6 +4834,12 @@ function renderExerciseCard(card) {
                 onclick="addToTodayFromBtn(this)">
           ＋ Add to today
         </button>
+        <button class="exercise-action-btn"
+                data-log-id="${escapeHtml(card.id || "")}"
+                data-log-name="${escapeHtml(card.name || card.id || "")}"
+                onclick="logExerciseFromBtn(this)">
+          Log exercise
+        </button>
       </div>
     </div>
   `;
@@ -4872,7 +4878,7 @@ function attachChatCardFormCheckBtn(wrap, card) {
   btn.className = "pose-form-check-btn";
   btn.dataset.state = "off";
   btn.textContent = "Start exercise";
-  btn.title = "Use your webcam for live rep + alignment feedback";
+  btn.title = "Use your webcam for live form and framing feedback";
   // togglePoseFormCheck expects a `wrap` whose internal #galleryVideoWrap
   // is replaced with the camera frame. Chat cards don't have that
   // structure; we build a single-item shim so the existing toggle logic
@@ -6035,6 +6041,64 @@ async function addToTodayFromBtn(btn) {
     await refreshTodaySession();
   } catch (e) {
     console.warn("addToToday failed:", e);
+    btn.disabled = false;
+    btn.textContent = prevText;
+    showToast(`Could not log: ${e.message}`, "error");
+  }
+}
+
+// Log a completed exercise straight from a chat card. Records that the patient
+// DID the exercise as a session-history row (POST /sessions then PATCH it to
+// completed) - the same non-mutating write path "Add to today" + skip use.
+// Logging a completion is plain session history; it does NOT mutate the
+// protocol or trigger a progression decision (that stays clinician-gated).
+async function logExerciseFromBtn(btn) {
+  const id   = btn.dataset.logId   || "";
+  const name = btn.dataset.logName || id || "exercise";
+  if (!id) return;
+
+  if (!window.RehabAuth?.getJwt?.()) {
+    showToast("Sign in to log this to your record", "info");
+    return;
+  }
+
+  btn.disabled = true;
+  const prevText = btn.textContent;
+  btn.textContent = "Logging...";
+
+  try {
+    // 1. Stage the exercise (captures active protocol_id read-only for audit).
+    const res = await authedFetch(`${API_BASE}/sessions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ exercise_id: id }),
+    });
+    if (res.status === 401) {
+      btn.disabled = false;
+      btn.textContent = prevText;
+      showToast("Sign in to log this to your record", "info");
+      return;
+    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const row = await res.json();
+    // 2. Mark it completed - this is the completion record, not a progression.
+    const patch = await authedFetch(
+      `${API_BASE}/sessions/${encodeURIComponent(row.id)}`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: "completed",
+          completed_at: new Date().toISOString(),
+        }),
+      },
+    );
+    if (!patch.ok) throw new Error(`HTTP ${patch.status}`);
+    btn.textContent = "Logged";
+    showToast("Logged to your record", "info");
+    await refreshTodaySession();
+  } catch (e) {
+    console.warn("logExercise failed:", e);
     btn.disabled = false;
     btn.textContent = prevText;
     showToast(`Could not log: ${e.message}`, "error");

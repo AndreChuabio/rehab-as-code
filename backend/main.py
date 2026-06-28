@@ -1829,7 +1829,19 @@ def list_recent_sessions(
     except Exception as exc:
         logger.exception("list_recent failed")
         raise HTTPException(status_code=500, detail=str(exc))
-    rows, active_region = _enrich_sessions_with_region(rows, target)
+    # Mirror the /sessions/today PR-V hotfix: region enrichment reads the
+    # active protocol, which can fail (no DB, transient pool error). Adherence
+    # history must never go down because of an enrichment miss — degrade to
+    # unenriched rows (frontend treats null body_region as "no info") rather
+    # than 500 the clinician adherence panel.
+    try:
+        rows, active_region = _enrich_sessions_with_region(rows, target)
+    except Exception:
+        logger.exception("sessions_recent enrichment failed token=%s", target)
+        for r in rows:
+            r.setdefault("body_region", None)
+            r.setdefault("is_current_region", False)
+        active_region = None
     return {
         "sessions": rows,
         "token": target,

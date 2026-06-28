@@ -38,6 +38,7 @@ import re
 from typing import Any, AsyncIterator, Awaitable, Callable
 
 import exercise_kb
+from change_tier import IN_SCOPE_REGIONS
 
 logger = logging.getLogger(__name__)
 
@@ -127,9 +128,15 @@ TOOLS: list[dict[str, Any]] = [
         "function": {
             "name": "recommend_exercise",
             "description": (
-                "Return a single exercise from the curated library as a video card. "
-                "Use when the patient asks how to perform an exercise, asks for a regression, "
-                "or you want to ground a recommendation in a video."
+                "Return a single exercise from the curated library as an actionable "
+                "video card with a Start exercise (guided camera) and Log exercise "
+                "button. Call this whenever the patient wants to DO, START, BEGIN, or "
+                "'let's do/try' a specific exercise, picks one from their current "
+                "protocol, asks how to perform an exercise, or asks for a regression - "
+                "so the patient gets a clickable card instead of a text description. "
+                "exercise_id must be one of the library ids; if the patient names an "
+                "exercise loosely (for example 'seated ankle pumps'), pass the closest "
+                "matching library id - never invent one."
             ),
             "parameters": {
                 "type": "object",
@@ -367,7 +374,19 @@ def build_system_prompt(
         "'clinician-attention', do NOT call any fire_*_trigger tool - the "
         "orchestrator has already flagged the clinician; just respond to the "
         "patient.\n"
-        "3. When the patient asks how to do an exercise, call recommend_exercise.\n"
+        "3. When the patient asks how to do an exercise, OR signals they want to "
+        "DO / START / BEGIN / 'let's do' a specific exercise (or picks one from "
+        "their current protocol), call recommend_exercise with the matching "
+        "library id so the chat shows the actionable card (with the Start "
+        "exercise guided-camera launcher and a Log exercise button) instead of a "
+        "plain text reply. Map a colloquial or plan name to the closest "
+        "in-library id (for example 'seated ankle pumps' -> "
+        "ankle_dorsiflexion_band or ankle_alphabet; 'heel raises' -> "
+        "ankle_calf_raises_double_leg; 'wall sit' -> wall_sit; 'terminal knee "
+        "extension' -> terminal_knee_extension). Stay within the patient's own "
+        "body region. If nothing in the library matches, offer "
+        "the single closest in-library option and say you cannot start an "
+        "off-library exercise - never invent one.\n"
         "4. When the patient asks for an overview, call list_phase_exercises.\n"
         "5. When the patient explicitly asks to progress or 'plan next week', "
         "call fire_weekly_plan_trigger.\n"
@@ -432,15 +451,52 @@ async def _dispatch_tool(
     arguments: dict[str, Any],
     trigger_executor: TriggerExecutor,
     user_token: str | None = None,
+    body_region: str | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     """
     Returns (tool_result_for_llm, extra_events).
     extra_events are streamed to the frontend (e.g. card events).
+
+    `body_region` (the patient's active-protocol region, threaded by the
+    caller) scopes the fuzzy resolver so a loosely-named exercise such as
+    "seated ankle pumps" lands on an in-library ankle entry rather than a
+    knee one with overlapping vocabulary.
     """
     if name == "recommend_exercise":
-        ex = exercise_kb.find_by_id(arguments.get("exercise_id", ""))
+        requested = arguments.get("exercise_id", "")
+        ex = exercise_kb.find_by_id(requested)
+        if not ex and body_region:
+            # The model may pass a colloquial / plan name on a do/start intent
+            # (rule 3). Fall back to the conservative library resolver (exact
+            # -> slug -> region-scoped keyword) so a near-miss still surfaces
+            # a real card. Returns None on a true off-library miss, in which
+            # case Maya's prompt (rule 3 + rule 6) offers the closest option
+            # and never invents an exercise.
+            #
+            # The fuzzy fallback is GATED on a known body_region. With no
+            # active protocol the region is None and resolve_to_library would
+            # keyword-search the entire 6-region library, so a pre-intake
+            # patient (no clinician-authored plan yet) could surface an
+            # actionable do-it-now card for an out-of-scope, never-prescribed
+            # exercise. Skipping the loose resolver here keeps find_by_id
+            # exact-match only, so Maya offers the closest option in text
+            # rather than crossing regions.
+            ex = exercise_kb.resolve_to_library(
+                exercise_id=requested,
+                name=requested,
+                body_region=body_region,
+            )
         if not ex:
             return ({"error": "unknown exercise_id"}, [])
+        # Body-region anchoring: the surfaced card must be in scope, and when an
+        # active protocol exists it must match that protocol's region. Otherwise
+        # drop the card and let Maya respond in text -- out-of-region must never
+        # be surfaced as an actionable, do-it-now exercise.
+        ex_region = (exercise_kb.body_region_for(ex.get("id")) or "").lower()
+        if ex_region not in IN_SCOPE_REGIONS:
+            return ({"error": "out_of_scope_exercise"}, [])
+        if body_region and ex_region != body_region.lower().strip():
+            return ({"error": "out_of_region_exercise"}, [])
         card = exercise_kb.to_card(ex)
         return (
             {"ok": True, "exercise": card},
@@ -819,6 +875,7 @@ async def chat_stream(
 
             result, extra_events = await _dispatch_tool(
                 name, arguments, trigger_executor, user_token=user_token,
+                body_region=(protocol.get("body_region") or None),
             )
             for ev in extra_events:
                 yield ev

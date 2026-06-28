@@ -55,3 +55,32 @@ def test_prompt_builds_with_recent_set():
     assert "12 reps" in prompt
     # Behavior line still present alongside the recent-set acknowledgment.
     assert "do not try to count reps yourself" in prompt
+
+
+def test_do_start_intent_rule_present():
+    """Rule 3 must steer Maya to surface the actionable card (with the Start
+    exercise launcher) when the patient signals do/start/begin intent, so she
+    calls recommend_exercise instead of text-replying with no card."""
+    prompt = coach_chat.build_system_prompt(HEALTH, PROTOCOL, display_name="Andre")
+    assert "START" in prompt  # the DO / START / BEGIN steering
+    assert "recommend_exercise" in prompt
+    assert "actionable card" in prompt
+    assert "Start exercise" in prompt
+    # Never-invent fallback for an off-library spoken name is preserved.
+    assert "never invent one" in prompt
+    # Renumbering guard: the live-rep-count rule 10 still renders.
+    assert "10." in prompt
+
+
+def test_recommend_exercise_tool_description_covers_action_intent():
+    """The recommend_exercise tool description (not just the prompt) must
+    advertise do/start intent so gpt-4o-mini's tool selector calls it when the
+    patient wants to begin an exercise."""
+    rec = next(
+        t for t in coach_chat.TOOLS
+        if t["function"]["name"] == "recommend_exercise"
+    )
+    desc = rec["function"]["description"].lower()
+    assert "start" in desc
+    assert "let's do" in desc or "let" in desc
+    assert "never invent" in desc
