@@ -424,6 +424,29 @@ TOOLS: list[dict[str, Any]] = [
 
 
 # ---------------------------------------------------------------------------
+# Tool profile filter
+# ---------------------------------------------------------------------------
+
+# Tools excluded from voice (Tavus CVI) calls. fire_intake_trigger deletes the
+# patient's intake record - a destructive operation that must not be triggered
+# mid-conversation by voice intent. All other tools (including swap_exercise
+# and recommend_exercise) are safe on voice.
+_VOICE_EXCLUDED: frozenset[str] = frozenset({"fire_intake_trigger"})
+
+
+def tools_for_profile(profile: str) -> list[dict]:
+    """Filter the tool surface by call profile.
+
+    'text' = full tool list.
+    'voice' and any unrecognized profile = TOOLS minus destructive tools.
+    Unknown profiles default to the voice-safe set (fail-safe).
+    """
+    if profile == "text":
+        return TOOLS
+    return [t for t in TOOLS if t["function"]["name"] not in _VOICE_EXCLUDED]
+
+
+# ---------------------------------------------------------------------------
 # System prompt
 # ---------------------------------------------------------------------------
 
@@ -924,6 +947,7 @@ async def chat_stream(
     session_id: str = "default",
     last_pose_metrics: dict[str, Any] | None = None,
     clinician_attention_writer: ClinicianAttentionWriter | None = None,
+    tool_profile: str = "text",
 ) -> AsyncIterator[dict[str, Any]]:
     """
     Drive a tool-using OpenAI chat completion. Yields the event protocol
@@ -1085,7 +1109,7 @@ async def chat_stream(
             stream = client.chat.completions.create(
                 model=_model(),
                 messages=convo,
-                tools=TOOLS,
+                tools=tools_for_profile(tool_profile),
                 tool_choice="auto",
                 stream=True,
                 max_tokens=350,
