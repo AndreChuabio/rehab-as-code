@@ -3441,7 +3441,7 @@ function maybeAttachFormCheckBtn(wrap, item) {
   btn.type = "button";
   btn.className = "pose-form-check-btn";
   btn.dataset.state = "off";
-  btn.textContent = "Start guided form-check";
+  btn.textContent = "Start exercise";
   btn.title = "Use your webcam for live rep + alignment feedback";
   btn.onclick = () => togglePoseFormCheck(wrap, item, btn);
   videoWrap.parentElement.insertBefore(btn, videoWrap);
@@ -3886,7 +3886,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
     window.PoseFormCheck.stop();
     _activeGuidedPartialPoster = null;
     btn.dataset.state = "off";
-    btn.textContent = "Start guided form-check";
+    btn.textContent = "Start exercise";
     document.body.classList.remove("pose-active");
     try { window.speechSynthesis?.cancel?.(); } catch (_) {}
     if (wrap.classList.contains("incall-set-mount")) {
@@ -3914,7 +3914,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
     await window.PoseFormCheck.init();
   } catch (e) {
     btn.disabled = false;
-    btn.textContent = "Form Check";
+    btn.textContent = "Start exercise";
     document.body.classList.remove("pose-active");
     showToast(`Pose model failed to load: ${e.message}`, "error");
     return;
@@ -4520,7 +4520,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
     btn.textContent = "Stop";
   } catch (e) {
     btn.disabled = false;
-    btn.textContent = "Form Check";
+    btn.textContent = "Start exercise";
     document.body.classList.remove("pose-active");
     showToast(`Camera error: ${e.message}`, "error");
     if (wrap.classList.contains("incall-set-mount")) {
@@ -4835,7 +4835,7 @@ function attachChatCardFormCheckBtn(wrap, card) {
   btn.type = "button";
   btn.className = "pose-form-check-btn";
   btn.dataset.state = "off";
-  btn.textContent = "Start guided form-check";
+  btn.textContent = "Start exercise";
   btn.title = "Use your webcam for live rep + alignment feedback";
   // togglePoseFormCheck expects a `wrap` whose internal #galleryVideoWrap
   // is replaced with the camera frame. Chat cards don't have that

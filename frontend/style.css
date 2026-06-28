@@ -965,6 +965,8 @@ body {
 }
 .exercise-video-placeholder {
   width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
   aspect-ratio: 16 / 9;
   background: var(--surface3);
   display: flex;
@@ -1849,19 +1851,19 @@ body {
   padding: 10px 14px;
   font-size: 14px;
   font-weight: 600;
-  background: rgba(80, 220, 180, 0.18);
-  color: rgb(140, 240, 200);
-  border: 1px solid rgba(80, 220, 180, 0.5);
-  border-radius: 6px;
+  background: var(--accent);
+  color: var(--cta-text);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-btn);
   cursor: pointer;
-  transition: background .15s ease;
+  transition: filter .15s ease;
 }
-.pose-form-check-btn:hover { background: rgba(80, 220, 180, 0.25); }
+.pose-form-check-btn:hover { filter: brightness(1.12); }
 .pose-form-check-btn:disabled { opacity: 0.6; cursor: wait; }
 .pose-form-check-btn[data-state="on"] {
-  background: rgba(255, 100, 100, 0.18);
-  color: rgb(255, 140, 140);
-  border-color: rgba(255, 100, 100, 0.4);
+  background: rgba(var(--rgb-danger), 0.14);
+  color: var(--danger);
+  border-color: rgba(var(--rgb-danger), 0.45);
 }
 #poseStage.pose-stage {
   position: relative;
