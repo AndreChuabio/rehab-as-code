@@ -945,6 +945,8 @@ body {
 .exercise-video-wrap {
   position: relative;
   width: 100%;
+  max-width: 520px;
+  margin: 0 auto;
   aspect-ratio: 16 / 9;
   background: #000;
   flex: 0 0 auto;
@@ -1605,8 +1607,8 @@ body {
 /* Main player */
 .gallery-main { position: relative; }
 .gallery-video-wrap {
-  width: 100%; background: #000;
-  max-height: 340px; overflow: hidden;
+  width: 100%; max-width: 520px; margin: 0 auto; background: #000;
+  max-height: 320px; overflow: hidden;
   display: flex; align-items: center; justify-content: center;
 }
 .gallery-video-wrap video { width: 100%; max-height: 340px; display: block; object-fit: contain; }
@@ -1911,6 +1913,8 @@ body {
 .gallery-video-wrap:has(#poseRoot) {
   display: block;
   max-height: none;
+  max-width: none;  /* pose form-check reuses this wrap; don't cap it like the exercise gallery */
+  margin: 0;
   overflow: visible;
   background: transparent;
 }
