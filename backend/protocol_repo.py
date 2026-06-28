@@ -491,6 +491,31 @@ def get_review_status(token: str) -> dict | None:
         return None
 
 
+def _column_names(table: str) -> list[str]:
+    """Return column names for `table`. Backend-agnostic (sqlite + pg).
+
+    Uses `SELECT * ... LIMIT 0` so no rows are fetched; cursor.description
+    contains the column metadata for both sqlite3 and psycopg3 cursors. The
+    fallback branch (information_schema) is never reached in normal usage but
+    guards against unexpected driver behaviour.
+    """
+    with _conn() as c:
+        cur = c.cursor()
+        try:
+            cur.execute(f"SELECT * FROM {table} LIMIT 0")
+            return [d[0] for d in cur.description]
+        except Exception:
+            cur.execute(
+                "SELECT column_name FROM information_schema.columns "
+                "WHERE table_name = %s",
+                (table,),
+            )
+            return [
+                r[0] if isinstance(r, (list, tuple)) else r["column_name"]
+                for r in cur.fetchall()
+            ]
+
+
 def reject(
     protocol_id: str,
     reviewed_by: str,
