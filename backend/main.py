@@ -1069,7 +1069,19 @@ def revert_protocol(
         logger.exception("revert_protocol failed")
         raise HTTPException(status_code=500, detail=str(exc))
 
-    active = protocol_repo.get_active(result.get("token"))
+    # revert() committed above - resolve the parent id for the response only.
+    # A transient failure on this secondary read must not surface as a 500:
+    # the load-bearing write already succeeded, so degrade to reverted_to=None.
+    try:
+        active = protocol_repo.get_active(result.get("token"))
+    except Exception:
+        logger.exception(
+            "revert_protocol get_active failed token=%s protocol_id=%s",
+            result.get("token"),
+            protocol_id,
+        )
+        active = None
+
     return {
         "ok": True,
         "reverted_to": active.get("id") if active else None,

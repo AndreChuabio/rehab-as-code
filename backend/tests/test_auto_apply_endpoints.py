@@ -78,3 +78,30 @@ def test_revert_conflict_returns_409(authed_clinician_client, monkeypatch):
 
     resp = authed_clinician_client.post("/protocols/stale-1/revert")
     assert resp.status_code == 409, resp.text
+
+
+def test_revert_succeeds_when_parent_lookup_fails(authed_clinician_client, monkeypatch):
+    """revert() committed; a transient failure on the secondary get_active read
+    must degrade to reverted_to=None, not surface a misleading 500."""
+    import protocol_repo
+
+    monkeypatch.setattr(
+        protocol_repo,
+        "revert",
+        lambda protocol_id, reverted_by: {
+            "id": protocol_id,
+            "token": "patient-abc",
+            "reverted_at": None,
+        },
+    )
+
+    def _boom(token):
+        raise RuntimeError("connection dropped")
+
+    monkeypatch.setattr(protocol_repo, "get_active", _boom)
+
+    resp = authed_clinician_client.post("/protocols/auto-7/revert")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["reverted_to"] is None
