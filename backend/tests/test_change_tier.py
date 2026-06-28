@@ -25,6 +25,13 @@ def test_brand_new_exercise_added_is_gate():
     draft = _p(KNEE, [("knee_sl_squat", 20), ("knee_hop", 0)])
     assert ct.classify(prior, draft, []) == "gate"
 
+def test_multi_exercise_swap_is_gate():
+    # N-for-N overhaul where every new id is one the patient has never
+    # performed must gate, even though the count does not grow.
+    prior = _p(KNEE, [("knee_sl_squat", 20), ("knee_leg_press", 15)])
+    draft = _p(KNEE, [("exercise_never_seen_1", 10), ("exercise_never_seen_2", 5)])
+    assert ct.classify(prior, draft, []) == "gate"
+
 def test_high_severity_safety_is_gate():
     prior = _p(KNEE, [("knee_sl_squat", 20)])
     draft = _p(KNEE, [("knee_step_down", 0)])

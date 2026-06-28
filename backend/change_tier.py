@@ -59,9 +59,12 @@ def classify(prior: dict | None,
                 return "gate"
 
         d = diff_exercises(prior, draft)
-        # Net increase in exercise count (brand-new exercises not paired with
-        # removals) -> clinician. Pure swaps (same count) are regression-safe.
-        if len(d["added"]) > len(d["removed"]):
+        # Brand-new exercises are clinician-owned. Only a single 1-for-1
+        # regression swap (exactly one added, paired with a removal) stays
+        # auto-eligible. More than one new exercise, or a new exercise with no
+        # paired removal (net addition), changes the medical direction of care
+        # -> clinician.
+        if len(d["added"]) > 1 or (len(d["added"]) == 1 and not d["removed"]):
             return "gate"
         if d["load_increase"]:  # progression on any shared exercise -> clinician
             return "gate"
