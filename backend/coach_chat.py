@@ -624,9 +624,17 @@ def _run_plan_generation(token: str) -> None:
         except Exception:
             logger.exception("intake auto plan-gen failed token=%s", token)
 
-    threading.Thread(
-        target=_worker, name="intake-auto-plangen", daemon=True
-    ).start()
+    try:
+        threading.Thread(
+            target=_worker, name="intake-auto-plangen", daemon=True
+        ).start()
+    except Exception:
+        # Thread creation itself can fail (e.g. OS thread-limit exhaustion
+        # raising RuntimeError). That must stay best-effort too: swallow it
+        # so the failure never escapes into _dispatch_tool / the SSE stream.
+        logger.exception(
+            "intake auto plan-gen thread start failed token=%s", token
+        )
 
 
 async def _dispatch_tool(
