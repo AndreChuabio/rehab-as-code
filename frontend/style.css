@@ -974,6 +974,17 @@ body {
   justify-content: center;
   border-radius: 4px 4px 0 0;
 }
+/* When the chat-card form-check (.pose-split) is mounted inside the
+   video-thumb placeholder, drop the 520px cap and the 16:9 aspect-ratio.
+   Those keep the resting thumbnail small, but they strangle the side-by-side
+   pose panels (520px wide + 857px tall -> floating video + pink letterbox).
+   Removing them lets the placeholder fill the card width and shrink to the
+   pose-split's own height, matching the full-width gallery render. */
+.exercise-video-placeholder:has(.pose-split) {
+  max-width: none;
+  aspect-ratio: auto;
+  height: auto;
+}
 .video-placeholder-text {
   color: #555;
   font-size: 0.8rem;
@@ -2124,6 +2135,11 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* Match the ref panel's black fill so the toolbar (white title +
+     light-green status pill) reads on a dark surface instead of bleeding
+     onto the pink placeholder behind it. */
+  background: #000;
+  border-radius: 6px;
 }
 .pose-split-live .pose-toolbar { flex: 0 0 auto; }
 .pose-split-live .pose-warnings { flex: 0 0 auto; }
