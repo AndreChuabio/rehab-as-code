@@ -2027,9 +2027,8 @@ body {
   gap: 12px;
   width: 100%;
   align-items: stretch;
-  /* Claim most of the viewport. object-fit: contain on the ref video means
-     we may show letterbox bands when video aspect != column aspect — that's
-     intentional. Patients need to see the whole demo, not a cropped middle. */
+  /* Claim most of the viewport. The reference video uses object-fit: cover
+     so it fills its column without letterbox bands. */
   min-height: 560px;
   height: calc(100vh - 160px);
   max-height: 88vh;
@@ -2104,7 +2103,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .pose-split-ref video {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;   /* fill the column without letterbox bands */
   display: block;
 }
 .pose-split-ref-label {
@@ -2130,6 +2129,16 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .pose-split-live .pose-warnings { flex: 0 0 auto; }
 .pose-split-live .pose-session-card { flex: 0 0 auto; }
 .pose-split-live #poseStage.pose-stage { flex: 1 1 auto; }
+/* Prevent the preflight card from overflowing the stage in the side-by-side
+   layout. The card is bottom-anchored (align-items: flex-end) and #poseStage
+   has overflow: hidden — without a height cap the card's title is clipped
+   at the top when the stage is shorter than the card. max-height constrains
+   it to the available stage height; overflow-y: auto provides a scroll escape
+   instead of clipping. */
+.pose-split-live #poseStage .pose-preflight-card {
+  max-height: calc(100% - 40px);
+  overflow-y: auto;
+}
 
 .pose-title {
   display: flex;
