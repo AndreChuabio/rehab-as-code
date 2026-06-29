@@ -2225,6 +2225,9 @@ async function _showVideoActive(conversationUrl, conversationId) {
         }
       } catch (_) {}
     });
+    // Incoming Tavus tool calls (delivery: app_message) ride this same Daily
+    // data channel; route monitor_exercise_form -> the in-call form-check.
+    tavusCall.on("app-message", _onTavusAppMessage);
     await tavusCall.join({ url: conversationUrl });
   } catch (e) {
     console.error("tavus call join failed", e);
@@ -2503,6 +2506,54 @@ function stopInCallCalfSet(hurt) {
     showToast("Set stopped. Tell Maya what hurts.", "info");
   }
 }
+
+// Pure discriminate + parse for an inbound Tavus app-message. Returns
+// {action, toolCallId} when the message is a monitor_exercise_form tool_call,
+// or null for anything else (other tools, utterances, our own echo/interrupt,
+// canvas events, malformed). DOM-free + side-effect-free so it unit-tests in
+// node; mirrored byte-for-byte in frontend/tests/form_check_tool.test.js.
+//
+// Defensive on the two pieces the Tavus docs leave as a stub: the inbound
+// `properties` nesting (vs a flat payload) and whether `arguments` is a JSON
+// string or an object. The HMAC delivery.api path sends arguments as a string;
+// the app_message path may pre-parse one - tolerate both.
+function parseTavusToolCall(data) {
+  if (!data || data.message_type !== "conversation"
+      || data.event_type !== "conversation.tool_call") return null;
+  const p = (data.properties && typeof data.properties === "object")
+    ? data.properties : data;
+  const name = p.name || p.tool_name;
+  if (name !== "monitor_exercise_form") return null;
+  let args = p.arguments;
+  if (typeof args === "string") {
+    try { args = JSON.parse(args || "{}"); } catch (_) { args = {}; }
+  }
+  if (!args || typeof args !== "object") args = {};
+  const action = String(args.action || "start").toLowerCase() === "stop"
+    ? "stop" : "start";
+  return { action, toolCallId: p.tool_call_id || null };
+}
+
+// Daily app-message listener for the live Tavus call. Maya's monitor_exercise_form
+// tool (delivery: app_message, on_resolve: fire_and_forget) lands here; we flip
+// the in-call form-check overlay via the same start/stop functions the on-screen
+// buttons use. No tool_result is sent back - fire_and_forget needs none. The
+// first-fire console.log settles the doc-unverified `properties` shape on a live
+// call; it carries no PHI (the only arg is action: start|stop).
+function _onTavusAppMessage(ev) {
+  const data = ev && ev.data;
+  if (!data || data.event_type !== "conversation.tool_call") return;
+  try { console.log("[tavus] tool_call", JSON.stringify(data)); } catch (_) {}
+  const call = parseTavusToolCall(data);
+  if (!call) return;
+  if (call.action === "stop") stopInCallCalfSet(false);
+  else startInCallCalfSet();
+}
+
+// Test hook (same convention as window.__flowHelpers / __greetingHelpers):
+// exposes the pure parser for the node unit test, and the handler so routing
+// can be exercised from the console offline - no live call or credits needed.
+window.__formCheckTool = { parseTavusToolCall, onAppMessage: _onTavusAppMessage };
 
 function toggleTavusMute() {
   if (!tavusCall) return;
