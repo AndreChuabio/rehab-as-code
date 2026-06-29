@@ -121,6 +121,13 @@ app.include_router(admin_router)
 from api.tavus_proxy import router as tavus_proxy_router  # noqa: E402
 app.include_router(tavus_proxy_router)
 
+# Tavus LLM-tool delivery.api callback. Read-only Supabase reads (protocol /
+# history / approved exercises) the avatar's tool calls dispatch to; HMAC-signed
+# (X-Tavus-Signature), patient recovered from conversation_id. Mounted under
+# /tavus/tools/*.
+from api.tavus_tools import router as tavus_tools_router  # noqa: E402
+app.include_router(tavus_tools_router)
+
 # Junction (the rebrand of Vital) wearable-connect router. Hosted-Link flow +
 # refresh + status, all Depends(current_user_id); mounted under /api/junction/*.
 from api.junction import router as junction_router  # noqa: E402
