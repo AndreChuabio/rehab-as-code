@@ -3915,8 +3915,19 @@ function renderPoseSession(container, repsHistory, repSummary) {
 // Voice driver: pose.js receives suppressInternalVoice: true so the
 // wrapper owns all spoken cues (counts, corrections, set-complete, rest).
 async function togglePoseFormCheck(wrap, item, btn) {
-  const videoWrap = wrap.querySelector("#galleryVideoWrap");
+  // Find the video container even after the Sora clip has replaced the
+  // placeholder. On a chat card, attachChatCardFormCheckBtn tags the
+  // .exercise-video-placeholder as #galleryVideoWrap, but revealVideoOnCard
+  // later swaps that placeholder for an .exercise-video-wrap holding the
+  // <video> -- dropping the #galleryVideoWrap id. The old lookup then returned
+  // null and "Start exercise" silently no-op'd. Fall back to whichever
+  // container exists and normalize its id so the swap-in / restore logic below
+  // (which reuses this element) works unchanged for every entry point.
+  const videoWrap = wrap.querySelector("#galleryVideoWrap")
+    || wrap.querySelector(".exercise-video-wrap")
+    || wrap.querySelector(".exercise-video-placeholder");
   if (!videoWrap) return;
+  if (videoWrap.id !== "galleryVideoWrap") videoWrap.id = "galleryVideoWrap";
 
   if (btn.dataset.state === "on") {
     window.PoseFormCheck.stop();
