@@ -136,14 +136,19 @@ def test_dispatch_recommend_exercise_valid_id_emits_card():
 
 
 def test_dispatch_recommend_exercise_resolves_loose_name():
-    """A do/start intent like 'seated ankle pumps' (not a library id) must
-    resolve to a real in-library ankle card via resolve_to_library scoped to
-    the patient's body_region, NOT fall through to an unknown-exercise error."""
+    """A loose do/start intent that shares a DISTINCTIVE word with a library
+    exercise (e.g. 'seated heel raise' -> the calf-raise entry) must resolve
+    to that real in-library ankle card, NOT fall through to unknown-exercise.
+
+    Note: a loose name whose only overlap is the shared region word ('seated
+    ankle pumps' -> just 'ankle') must NOT resolve to an arbitrary same-region
+    exercise; that is covered by test_resolve_region_token and is the correct
+    behavior (Maya flags it rather than showing a clinically-wrong video)."""
     import coach_chat
 
     result, extras = asyncio.run(coach_chat._dispatch_tool(
         name="recommend_exercise",
-        arguments={"exercise_id": "seated ankle pumps"},
+        arguments={"exercise_id": "seated heel raise"},
         trigger_executor=_noop_executor,
         body_region="ankle",
     ))
