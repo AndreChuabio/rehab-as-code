@@ -5258,6 +5258,13 @@ function buildPickerItems(exercises) {
       name: ex.name || ex.id || "exercise",
       default_dose: ex.default_dose || ex.spec || "",
       cues: ex.cues || [],
+      // Carry the fields the guided form-check gate needs: without
+      // form_check_supported + library_id every stepped exercise falls to the
+      // self-paced branch (no camera, no rep counting, no /pose/session write).
+      library_id: ex.library_id || "",
+      form_check_supported: ex.form_check_supported === true,
+      spec: ex.spec || "",
+      video_url: ex.video_url || "",
       generated_video_url: ex.generated_video_url || "",
       youtube_id: ex.youtube_id || "",
       youtube_watch_url: ex.youtube_watch_url || "",
