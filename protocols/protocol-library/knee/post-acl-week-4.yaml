@@ -11,7 +11,7 @@ goals:
   - normalize gait at walking speed
 
 exercises:
-  - name: mini_squats
+  - name: mini_squat
     sets: 3
     reps: 12
     load: bodyweight

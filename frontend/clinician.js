@@ -1250,7 +1250,9 @@
     body.innerHTML = renderFormFeedback(data);
   }
 
-  const FORM_STATUS_LABEL = { good: "GOOD", warn: "WARN", fail: "FAIL" };
+  // Canonical worst_status enum is good|warn|bad (matches pose.js + the
+  // backend rank map). Key on "bad" so the FAIL chip actually renders.
+  const FORM_STATUS_LABEL = { good: "GOOD", warn: "WARN", bad: "FAIL" };
 
   function renderFormFeedback(data) {
     const exercises = Array.isArray(data.exercises) ? data.exercises : [];

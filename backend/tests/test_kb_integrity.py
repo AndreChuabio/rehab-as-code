@@ -331,3 +331,28 @@ def test_resolve_to_library_respects_body_region_scope():
     )
     assert res is not None
     assert res.get("body_region") == "ankle"
+
+
+def test_every_protocol_library_name_resolves_in_kb():
+    """Every `- name:` in protocols/protocol-library/**/*.yaml must resolve via
+    exercise_kb.find_by_id (EXACT match — same as the planner's validator).
+
+    The researcher cites these names as candidate exercise_ids; the planner
+    emits them into the draft; _planner_invalid_ids (plan_generation_agent.py)
+    then hard-rejects any id find_by_id can't resolve — no fuzzy fallback. So a
+    protocol-library name with no exact KB entry 502s plan generation (or drops
+    the exercise) for that injury. Regression guard: knee post-ACL week-4 once
+    shipped mini_squats / single_leg_balance / heel_raises with no KB match.
+    """
+    import re
+
+    unresolved: list[str] = []
+    for path in sorted(_LIBRARY_ROOT.rglob("*.yaml")):
+        text = path.read_text()
+        for name in re.findall(r"^\s*-\s*name:\s*(\S+)", text, re.MULTILINE):
+            if exercise_kb.find_by_id(name) is None:
+                unresolved.append(f"{path.relative_to(_REPO_ROOT)}: {name}")
+    assert not unresolved, (
+        "protocol-library exercise names with no exact KB entry (the planner "
+        "validator would 502 or drop these):\n  " + "\n  ".join(unresolved)
+    )

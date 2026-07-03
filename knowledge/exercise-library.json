@@ -1144,6 +1144,50 @@
       "default_dose": "3 x 15, 1-2 lb",
       "body_region": "elbow",
       "form_check_supported": false
+    },
+    {
+      "id": "single_leg_balance",
+      "name": "Single-Leg Balance",
+      "phase": [
+        "strength"
+      ],
+      "injury_types": [
+        "knee"
+      ],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Stable surface first",
+        "Aim for 30s without touchdown",
+        "Soft knee, eyes forward"
+      ],
+      "regression_of": null,
+      "progression_to": [],
+      "default_dose": "3 x 30s",
+      "body_region": "knee",
+      "form_check_supported": false
+    },
+    {
+      "id": "heel_raises",
+      "name": "Heel Raises",
+      "phase": [
+        "strength"
+      ],
+      "injury_types": [
+        "knee"
+      ],
+      "youtube_id": "",
+      "thumbnail_url": "",
+      "cues": [
+        "Bilateral first",
+        "Rise onto balls of both feet",
+        "Progress to single-leg if tolerated"
+      ],
+      "regression_of": null,
+      "progression_to": [],
+      "default_dose": "3 x 15",
+      "body_region": "knee",
+      "form_check_supported": false
     }
   ]
 }

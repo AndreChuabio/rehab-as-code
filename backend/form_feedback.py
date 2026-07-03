@@ -22,7 +22,7 @@ DATA CONTRACT (keyed off the /pose/session handler in backend/main.py):
       {
         "rep_count":    int | None,
         "best_depth":   float | None,
-        "worst_status": "good" | "warn" | "fail",
+        "worst_status": "good" | "warn" | "bad",
         "warnings": [ { "id": str, "msg": str, "status": str }, ... ],
       }
   Plus row-level `exercise_id`, `completed_at`, `created_at`. Non-completed
@@ -40,8 +40,10 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 # Ranks for collapsing per-session worst_status into a per-exercise worst.
-# Mirrors the rank map in main._summarize_pose_set so "fail" always wins.
-_STATUS_RANK: dict[str, int] = {"good": 0, "warn": 1, "fail": 2}
+# Mirrors the rank map in main._summarize_pose_set. The client vocabulary is
+# good|warn|bad (frontend/pose.js) — "bad" must be the top rank or bad-form
+# sets roll up as "good".
+_STATUS_RANK: dict[str, int] = {"good": 0, "warn": 1, "bad": 2}
 
 _NOTE_SIGNAL = (
     "Presence/aggregate form feedback from a 2D home webcam — a trend signal "
@@ -92,7 +94,7 @@ def summarize_form(token: str, *, window_days: int = 28) -> dict[str, Any]:
               "exercise_id": str,
               "n_sessions": int,
               "total_reps": int,
-              "worst_status": "good" | "warn" | "fail",
+              "worst_status": "good" | "warn" | "bad",
               "warnings": [ {"id": str, "msg": str, "count": int}, ... ],
               "last_seen": "YYYY-MM-DD" | None,
             },

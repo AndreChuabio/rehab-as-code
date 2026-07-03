@@ -842,7 +842,11 @@ def _summarize_pose_set(reps: list[PoseRepRecord]) -> tuple[int, float | None, s
     rep_count = len(reps)
     depths = [r.depth_min for r in reps if r.depth_min is not None]
     best_depth = min(depths) if depths else None
-    rank = {"good": 0, "warn": 1, "fail": 2}
+    # The pose client (frontend/pose.js) emits status good|warn|bad — NOT
+    # "fail". A "bad" key here is load-bearing: without it the worst form a
+    # rep can carry ranks equal to "good" and the whole set launders to
+    # "good", hiding the exact signal the form-check exists to surface.
+    rank = {"good": 0, "warn": 1, "bad": 2}
     worst_status = "good"
     for r in reps:
         if rank.get(r.status or "good", 0) > rank.get(worst_status, 0):
@@ -895,7 +899,7 @@ async def pose_session(
         protocol_id = active["id"] if active else None
 
         import session_repo as _sr
-        _sr.upsert_completed_pose(
+        mirror = _sr.upsert_completed_pose(
             token=user_id,
             exercise_id=req.exercise_id,
             pose_metrics={
@@ -908,11 +912,18 @@ async def pose_session(
             completed_at=req.ended_at,
             protocol_id=protocol_id,
         )
+        session_row_id = (mirror or {}).get("id")
     except Exception as exc:
         logger.warning("sessions mirror failed for pose set: %s", exc)
+        session_row_id = None
 
+    # Return the SESSIONS-row id (not the checkins PK from save_checkin's
+    # payload). The frontend forwards this as `associated_session_id` on the
+    # auto-checkin, and session_repo's LEFT JOIN matches it against s.id — so
+    # the "how it felt" line + pain/RPE only link when we hand back the
+    # sessions id. Fall back to the checkins id only if the mirror failed.
     return {
-        "session_id": payload.get("session_id"),
+        "session_id": session_row_id or payload.get("session_id"),
         "rep_count": rep_count,
         "best_depth": best_depth,
         "worst_status": worst_status,
@@ -1533,7 +1544,7 @@ def _serialize_protocol_row(row: dict | None) -> dict | None:
 def approve_protocol(
     protocol_id: str,
     req: ApproveProtocolRequest,
-    user_id: str = Depends(current_user_id),
+    user_id: str = Depends(require_clinician_id),
 ):
     """Promote a pending_review protocol to active. Transactional — supersedes
     the previous active row in the same statement. Idempotency: re-calling
@@ -1577,7 +1588,7 @@ def approve_protocol(
 def reject_protocol(
     protocol_id: str,
     req: RejectProtocolRequest,
-    user_id: str = Depends(current_user_id),
+    user_id: str = Depends(require_clinician_id),
 ):
     """Mark a pending_review protocol as rejected. Active row unchanged.
     Notes required for the audit trail."""
@@ -1836,7 +1847,18 @@ def list_recent_sessions(
     except Exception as exc:
         logger.exception("list_recent failed")
         raise HTTPException(status_code=500, detail=str(exc))
-    rows, active_region = _enrich_sessions_with_region(rows, target)
+    # Same defensive wrap as /sessions/today (PR-V): a failure in the
+    # enrichment helpers must never take down the clinician adherence panel
+    # or the patient history pane — rows render unenriched, real exception
+    # lands in Vercel logs.
+    try:
+        rows, active_region = _enrich_sessions_with_region(rows, target)
+    except Exception:
+        logger.exception("sessions_recent enrichment failed token=%s", target)
+        for r in rows:
+            r.setdefault("body_region", None)
+            r.setdefault("is_current_region", False)
+        active_region = None
     return {
         "sessions": rows,
         "token": target,

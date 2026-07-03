@@ -2395,6 +2395,9 @@ const STATIC_DEMO_VIDEO_IDS = new Set([
   "shoulder_prone_y", "shoulder_scapular_retraction", "shoulder_sleeper_stretch",
   "shoulder_wall_slides", "single_leg_squat", "stationary_bike",
   "terminal_knee_extension", "wall_sit",
+  // knee post-ACL week-4 exercises: reuse the ankle clips for the same
+  // physical movement (single-leg balance / heel raises).
+  "single_leg_balance", "heel_raises",
 ]);
 
 // Resolve a reference demo-video URL for an exercise, or "" when none exists.
