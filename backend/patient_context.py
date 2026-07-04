@@ -133,7 +133,15 @@ def _chat_trigger_executor_factory(user_id: str):
     failure so coach_chat._dispatch_tool can render an error tool_result.
     """
     async def _executor(flow: str, payload: dict) -> dict:
-        prior_protocol = fetch_protocol_for_user(user_id) or None
+        prior_protocol = fetch_protocol_for_user(user_id)
+        # fetch_protocol_for_user returns a TRUTHY pending_intake sentinel (not
+        # None) when the patient has no active protocol — canonical marker is
+        # phase == 'pending_intake' (protocol_loader._empty_protocol_for_user,
+        # the same field the frontend empty-state keys on). Passing it as the
+        # "prior protocol" makes the drafter revise a plan that doesn't exist
+        # instead of drafting the initial one — null it out.
+        if prior_protocol and prior_protocol.get("phase") == "pending_intake":
+            prior_protocol = None
         # draft_and_save_pending is sync (blocks on Anthropic + psycopg). Run
         # in the default executor so the SSE stream stays responsive.
         loop = asyncio.get_running_loop()

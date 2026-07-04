@@ -80,18 +80,29 @@ ANKLE_INTAKE = {
 def _setup_drafter_env(
     monkeypatch: pytest.MonkeyPatch,
     intake: dict[str, Any],
-) -> None:
-    """Stub user_store + protocol_repo + anthropic for a drafter run."""
+) -> dict[str, Any]:
+    """Stub user_store + protocol_repo + anthropic for a drafter run.
+
+    Returns a dict the caller can inspect after the run — it captures the
+    status + safety_concerns the drafter passed to save_pending (the
+    library-coverage gate)."""
     import user_store
 
     monkeypatch.setattr(user_store, "get_intake", lambda token: intake)
     monkeypatch.setattr(user_store, "get_display_name", lambda token: intake["name"])
 
-    def _save_pending(token, payload, created_by_agent=None):
+    captured: dict[str, Any] = {}
+
+    def _save_pending(token, payload, created_by_agent=None, *,
+                      status="pending_review", safety_concerns=None):
+        captured["status"] = status
+        captured["safety_concerns"] = safety_concerns
+        captured["payload"] = payload
         return "pending-id-stub"
 
     import protocol_repo
     monkeypatch.setattr(protocol_repo, "save_pending", _save_pending)
+    return captured
 
 
 # --- Tests -------------------------------------------------------------------
@@ -219,7 +230,8 @@ def test_drafter_stamps_body_region_on_payload(
 
     captured: dict[str, Any] = {}
 
-    def _capture_save(token, payload, created_by_agent=None):
+    def _capture_save(token, payload, created_by_agent=None, *,
+                      status="pending_review", safety_concerns=None):
         captured["payload"] = payload
         return "pending-id-stub"
 
@@ -238,6 +250,62 @@ def test_drafter_stamps_body_region_on_payload(
     drafter.draft_and_save_pending(token="test-token", flow="checkin", payload={})
 
     assert captured["payload"]["body_region"] == "ankle"
+
+
+SHOULDER_INTAKE = {
+    "name": "Test Shoulder Patient",
+    "age": 40,
+    "injury_type": "rotator cuff strain",   # resolves to shoulder (out of scope)
+    "symptoms": ["pain overhead"],
+    "goals": ["reach overhead"],
+}
+
+
+def test_drafter_out_of_scope_region_routes_to_needs_clinician_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A chat draft for an out-of-scope region (shoulder) must go to
+    needs_clinician_review with a library_coverage concern — same gate the
+    multi-agent pipeline applies. Regression: chat drafts used to ALL save as
+    plain pending_review regardless of region, skipping the escalation."""
+    captured = _setup_drafter_env(monkeypatch, SHOULDER_INTAKE)
+    _stub_anthropic(monkeypatch, [_propose_block({
+        "summary": "Shoulder mobility work this week.",
+        "patient": "Test Shoulder Patient",
+        "phase": "subacute",
+        "week": 2,
+        "exercises": [
+            {"name": "shoulder_pendulum", "sets": 3, "reps": 10, "load": "bodyweight"},
+        ],
+    })])
+
+    import chat_protocol_drafter as drafter
+    drafter.draft_and_save_pending(token="test-token", flow="checkin", payload={})
+
+    assert captured["status"] == "needs_clinician_review"
+    concerns = captured["safety_concerns"] or []
+    assert any(c.get("category") == "library_coverage" for c in concerns)
+
+
+def test_drafter_in_scope_region_stays_pending_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An in-scope (ankle) chat draft saves as pending_review (no escalation)."""
+    captured = _setup_drafter_env(monkeypatch, ANKLE_INTAKE)
+    _stub_anthropic(monkeypatch, [_propose_block({
+        "summary": "Ankle work this week.",
+        "patient": "Test Ankle Patient",
+        "phase": "subacute",
+        "week": 2,
+        "exercises": [
+            {"name": "ankle_dorsiflexion_band", "sets": 3, "reps": 15, "load": "yellow band"},
+        ],
+    })])
+
+    import chat_protocol_drafter as drafter
+    drafter.draft_and_save_pending(token="test-token", flow="checkin", payload={})
+
+    assert captured["status"] == "pending_review"
 
 
 def test_drafter_does_not_enforce_when_intake_missing(

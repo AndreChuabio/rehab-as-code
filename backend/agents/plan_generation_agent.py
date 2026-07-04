@@ -695,9 +695,28 @@ class PlanGenerationAgent(PatientAgent):
                 token, exc,
             )
 
+        # Wearables: resolve through the get_health_data seam (Junction/Apple),
+        # NOT the stale user_store snapshot. Only feed REAL data into the
+        # clinical pipeline — the mock's baked-in declining-HRV trend would
+        # otherwise trigger spurious HOLDs (the -8ms rule) on data the patient
+        # never generated. health=None is handled by the evaluator ("if
+        # health:") and lets the doctrine's partial-data rule apply honestly.
+        health: dict[str, Any] | None = None
+        try:
+            import health_mock
+            hd = health_mock.get_health_data(user_token=token)
+            if hd and (
+                hd.get("status") == "connected" or hd.get("source") == "apple_watch"
+            ):
+                health = hd
+        except Exception as exc:
+            logger.info(
+                "plan_generation: health resolve failed token=%s: %s", token, exc
+            )
+
         return {
             "intake": intake,
-            "health": user.get("health"),
+            "health": health,
             "history": history,
             "active_payload": active_payload,
             "recent_sessions": recent_sessions,

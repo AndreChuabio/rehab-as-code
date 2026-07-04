@@ -188,11 +188,17 @@ def me_role(user_id: str | None = Depends(optional_user_id)):
     """Return the caller's role for client-side routing.
 
     role=anonymous   no JWT
-    role=patient     authenticated, not in clinicians table
-    role=clinician   authenticated, in clinicians table
+    role=patient     authenticated, not staff
+    role=clinician   authenticated staff (clinician)
+    role=admin       authenticated staff with admin role (superset of clinician)
     """
     if not user_id:
         return {"role": "anonymous", "user_id": None}
+    # admin is a strict superset of clinician — check it FIRST, else an admin
+    # is reported as a plain clinician and the /admin pipeline-debug chrome
+    # (gated on role=='admin' in clinician.js) stays permanently hidden.
+    if is_admin(user_id):
+        return {"role": "admin", "user_id": user_id}
     if is_clinician(user_id):
         return {"role": "clinician", "user_id": user_id}
     return {"role": "patient", "user_id": user_id}
@@ -513,8 +519,24 @@ def get_context(user_id: str | None = Depends(optional_user_id)):
 # Apple Health onboarding — token-based Shortcut magic link
 # -------------------------------------------------------------------------
 
-def _base_url() -> str:
-    return (os.getenv("PUBLIC_BASE_URL") or "http://localhost:8000").rstrip("/")
+def _base_url(request: Request | None = None) -> str:
+    """Resolve the public base URL for onboarding links.
+
+    PUBLIC_BASE_URL wins when set. Otherwise derive it from the incoming
+    request (honoring the x-forwarded-* headers Vercel sets) so prod links
+    never embed http://localhost:8000. Falls back to localhost only when
+    neither is available (a bare unit test).
+    """
+    env = (os.getenv("PUBLIC_BASE_URL") or "").rstrip("/")
+    if env:
+        return env
+    if request is not None:
+        proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+        if host:
+            return f"{proto}://{host}".rstrip("/")
+        return str(request.base_url).rstrip("/")
+    return "http://localhost:8000"
 
 
 def _qr_svg(url: str) -> str:
@@ -526,13 +548,13 @@ def _qr_svg(url: str) -> str:
 
 
 @app.post("/connect/apple-health")
-def connect_apple_health():
+def connect_apple_health(request: Request):
     """
     Generate a new user token and return the onboarding URL.
     Share the returned onboard_url with the patient via Slack, SMS, or QR code.
     """
     token = create_token()
-    base = _base_url()
+    base = _base_url(request)
     onboard_url = f"{base}/onboard/{token}"
     magic_link = f"shortcuts://import-shortcut?url={quote(f'{base}/shortcut/{token}', safe='')}&name=RehabCoach%20Sync"
     return {
@@ -560,12 +582,12 @@ def connect_status(token: str):
 
 
 @app.get("/onboard/{token}", response_class=HTMLResponse)
-def onboard_page(token: str):
+def onboard_page(token: str, request: Request):
     """Mobile-friendly onboarding page. Patient opens this on iPhone and taps Install."""
     if not token_exists(token):
         raise HTTPException(status_code=404, detail="unknown token")
 
-    base = _base_url()
+    base = _base_url(request)
     magic_link = f"shortcuts://import-shortcut?url={quote(f'{base}/shortcut/{token}', safe='')}&name=RehabCoach%20Sync"
     qr_svg = _qr_svg(magic_link)
 
@@ -978,9 +1000,16 @@ def list_pending_protocols(
         token = row.get("token")
         if token and token not in patient_lookup:
             user = user_store.load_user(token) or {}
-            patient_lookup[token] = user.get("patient_name") or (
-                user.get("intake") or {}
-            ).get("name")
+            name = user.get("patient_name") or (user.get("intake") or {}).get("name")
+            if not name:
+                # Never surface a raw UUID in the queue: fall back to the
+                # canonical resolver (full_name -> email local-part -> "the
+                # patient"), same as the roster endpoint below.
+                try:
+                    name = user_store.get_display_name(token)
+                except Exception:
+                    name = None
+            patient_lookup[token] = name
         out.append({
             "id": row["id"],
             "token": token,
