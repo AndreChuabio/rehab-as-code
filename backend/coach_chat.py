@@ -551,9 +551,16 @@ async def _dispatch_tool(
             _us.delete_intake(user_token)
         except Exception as exc:
             logger.exception("delete_intake failed")
+            # Emit an error-shaped tool_result (not an empty event list) so the
+            # frontend's r.ok===false branch surfaces the failure instead of
+            # the patient silently seeing nothing happen.
             return (
                 {"ok": False, "error": str(exc)},
-                [],
+                [{
+                    "type": "tool_result",
+                    "name": name,
+                    "result": {"ok": False, "error": str(exc)},
+                }],
             )
         reason = arguments.get("reason", "patient requested restart")
         return (

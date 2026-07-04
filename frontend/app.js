@@ -916,7 +916,7 @@ function formatRelativeAgo(iso) {
 function showIntakeModal() {
   const modal = document.getElementById("intakeModal");
   const log = document.getElementById("intakeLog");
-  const fill = document.getElementById("intakeProgressFill");
+  const fill = document.getElementById("intakeModalProgressFill");
   if (!modal) return;
   // If the legacy demo chat was already running (e.g., the page loaded with
   // #intake before auth resolved), tear it down so the modal isn't competing
@@ -1002,7 +1002,7 @@ async function submitIntakeTurn(userText) {
     }
 
     // Crude progress indicator: bump fill by 1/8 each round.
-    const fill = document.getElementById("intakeProgressFill");
+    const fill = document.getElementById("intakeModalProgressFill");
     if (fill) {
       const turns = intakeHistory.filter((m) => m.role === "user").length;
       fill.style.width = `${Math.min(100, (turns / 7) * 100)}%`;
@@ -1392,9 +1392,14 @@ async function saveSettingsNotifications() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     });
-    if (res.ok && patientState) patientState.notification_prefs = await res.json();
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (patientState) patientState.notification_prefs = await res.json();
   } catch (e) {
     console.warn("settings notifications save failed", e);
+    // Don't leave an unsaved value looking saved: tell the patient + re-seed
+    // the controls from the last known server state.
+    showToast("Couldn't save notification settings — reverted.", "error");
+    loadSettingsNotifications();
   }
 }
 
@@ -1434,9 +1439,14 @@ async function saveSettingsCoachMaya() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ voice, greeting_cadence: cadence, language }),
     });
-    if (res.ok && patientState) patientState.coach_prefs = await res.json();
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (patientState) patientState.coach_prefs = await res.json();
   } catch (e) {
     console.warn("settings coach prefs save failed", e);
+    // Re-seed UI + localStorage mirrors from the last known server state so
+    // the optimistic localStorage writes above don't persist an unsaved value.
+    showToast("Couldn't save Coach Maya settings — reverted.", "error");
+    renderSettingsCoachMaya();
   }
 }
 
@@ -2452,6 +2462,11 @@ async function startInCallCalfSet() {
   const stage = document.getElementById("tavusStage");
   if (!mount) return;
 
+  // Idempotent: a duplicate "start" (Maya firing the tool twice, or a
+  // start-over-a-running-set) must NOT re-enter — that resets the state
+  // machine and loses the running set's reps. Drop it while a set is live.
+  if (_inCallSetBtn && _inCallSetBtn.dataset.state === "on") return;
+
   // Promote the in-set layout: the rep hero + self-view PiP become the focal
   // elements, Maya recedes to the coach backdrop.
   if (stage) stage.dataset.set = "on";
@@ -3118,12 +3133,17 @@ function updateFreqSummary() {
   const confirmBtn = document.getElementById("confirmFreqBtn");
   if (!el) return;
   const count = selectedDays.size;
+  // Both a day selection AND at least one exercise are required before the
+  // weekly-plan draft can fire — otherwise the pipeline drafts an empty plan.
+  if (confirmBtn) confirmBtn.disabled = !(count > 0 && _pendingPlan.length > 0);
   if (count === 0) {
     el.textContent = "No days selected";
-    if (confirmBtn) confirmBtn.disabled = true;
     return;
   }
-  if (confirmBtn) confirmBtn.disabled = false;
+  if (_pendingPlan.length === 0) {
+    el.textContent = "Add at least one exercise";
+    return;
+  }
   const ordered = DAYS.filter(d => selectedDays.has(d));
   if (count === 7) {
     el.textContent = "Every day (7 days/week)";
@@ -3137,6 +3157,9 @@ function updateFreqSummary() {
 }
 
 function confirmFrequencyAndGenerate() {
+  // Guard: never fire a weekly-plan draft with no exercises (mirrors the
+  // disabled-button state; protects against a stale onclick).
+  if (!_pendingPlan.length) return;
   const btn = document.getElementById("confirmFreqBtn");
   if (btn) { btn.disabled = true; btn.textContent = "Generating..."; }
 
@@ -3239,7 +3262,9 @@ function addToPlan(btn) {
 
   const genBtn = document.getElementById("confirmFreqBtn");
   if (genBtn) {
-    genBtn.disabled = false;
+    // Enable only when at least one training day is also selected (days
+    // default to all, so this is normally on after the first add).
+    genBtn.disabled = selectedDays.size === 0;
     genBtn.textContent = `Generate Plan (${_pendingPlan.length} exercise${_pendingPlan.length > 1 ? "s" : ""} selected)`;
   }
 }
@@ -3454,6 +3479,10 @@ function switchGalleryItem(idx) {
   const activeBtn = wrap.querySelector(".pose-form-check-btn[data-state='on']");
   if (activeBtn) {
     try { window.PoseFormCheck?.stop?.(); } catch (_) {}
+    // Log the partial set before switching away — same as the manual-Stop
+    // path; the poster self-guards so a natural finish / zero reps is a no-op.
+    try { _activeGuidedPartialPoster?.(); } catch (_) {}
+    _activeGuidedPartialPoster = null;
     try { window.speechSynthesis?.cancel?.(); } catch (_) {}
     document.body.classList.remove("pose-active");
   }
@@ -3985,6 +4014,12 @@ async function togglePoseFormCheck(wrap, item, btn) {
 
   if (btn.dataset.state === "on") {
     window.PoseFormCheck.stop();
+    // Log the partial set from the real detected reps BEFORE clearing the
+    // poster — a manual Stop mid-set otherwise discards them (the in-call
+    // path already logs them). The poster's own guards (guided.submitted /
+    // repsHistoryAll.length) make this a no-op after a natural finish or a
+    // zero-rep stop.
+    try { _activeGuidedPartialPoster?.(); } catch (_) {}
     _activeGuidedPartialPoster = null;
     btn.dataset.state = "off";
     btn.textContent = "Start exercise";
@@ -4157,9 +4192,13 @@ async function togglePoseFormCheck(wrap, item, btn) {
   const presenceDone = videoWrap.querySelector("#posePresenceDoneBtn");
   // PR-U2: cache the engaged exercise's mode so the active-phase logic
   // can branch on presence vs rep-tracked without re-reading the
-  // EXERCISES map every frame. Computed once at engage time.
+  // EXERCISES map every frame. Computed once at engage time. Key on
+  // library_id||id — the SAME key PoseFormCheck.start uses — so a
+  // planner-renamed presence exercise doesn't miss its mode and trap the
+  // patient in a set that never ends.
+  const poseKey = item.ex.library_id || item.ex.id;
   const isPresenceMode =
-    window.PoseFormCheck?.EXERCISES?.[item.ex.id]?.mode === "presence";
+    window.PoseFormCheck?.EXERCISES?.[poseKey]?.mode === "presence";
   // Hold duration for presence mode. Library entries don't (yet) carry
   // a duration_min; we default to 60s/set, which lines up with the
   // typical PT cue ("hold for one minute"). When library/protocol
@@ -4435,7 +4474,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
     // camera at your ankles" instead of the generic "step into frame"
     // (which is wrong for seated exercises).
     const fs = payload.framingStatus;
-    const exDef = window.PoseFormCheck.EXERCISES?.[item.ex.id];
+    const exDef = window.PoseFormCheck.EXERCISES?.[poseKey];
     const expected = (exDef?.checks || []).length;
     const got = (payload.metrics || []).length;
     const trackingChip = `Tracking ${got}/${expected} ${expected === 1 ? "marker" : "markers"}`;
@@ -4609,6 +4648,12 @@ async function togglePoseFormCheck(wrap, item, btn) {
       suppressInternalVoice: true,  // PR-J wrapper drives all voice
     };
     if (liveStream) startOpts.stream = liveStream;
+    // Tear down any engine still running from a previous exercise before
+    // starting this one. pose.js start() silently no-ops when already running,
+    // so launching the next guided exercise over a still-running form-check
+    // would otherwise leave a dead "starting camera..." shell. stop() is
+    // idempotent and safe when nothing is running.
+    try { window.PoseFormCheck.stop(); } catch (_) {}
     await window.PoseFormCheck.start(
       videoEl,
       canvasEl,
@@ -4626,6 +4671,17 @@ async function togglePoseFormCheck(wrap, item, btn) {
     showToast(`Camera error: ${e.message}`, "error");
     if (wrap.classList.contains("incall-set-mount")) {
       _resetInCallSetUi();
+    } else if (wrap.classList.contains("exercise-card")) {
+      // Chat-card path: restore the video placeholder so the card doesn't stay
+      // stuck on a dead pose skeleton, and DON'T run switchGalleryItem (which
+      // would reset an unrelated exercise in the gallery). Mirrors the
+      // stop-path restore.
+      if (videoWrap) {
+        videoWrap.innerHTML =
+          '<span class="video-placeholder-text">Add to today to load video</span>';
+        videoWrap.className = "exercise-video-placeholder";
+        videoWrap.id = "galleryVideoWrap";
+      }
     } else {
       const activeIdx = Array.from(wrap.querySelectorAll(".gallery-thumb-btn"))
         .findIndex((b) => b.classList.contains("active"));
@@ -4782,7 +4838,12 @@ function handleChatEvent(event, coachBubble, appendDelta) {
       if (event.result) {
         const r = event.result;
         const flowLabel = r.flow ? r.flow.replace(/_/g, " ") : "draft";
-        if (r.pending_protocol_id) {
+        if (event.name === "fire_intake_trigger" && r.action === "redirect_intake_ui") {
+          // Intake was wiped server-side — reopen the intake modal NOW rather
+          // than leaving the patient staring at nothing until a manual reload.
+          renderToolResultLine(event);
+          refreshPatientState({ openModalIfNeeded: true }).catch(() => {});
+        } else if (r.pending_protocol_id) {
           renderToolResultLine(event);
           renderPendingProtocolCard(r.pending_protocol_id, r.summary, flowLabel);
           refreshProtocol();
@@ -6120,7 +6181,14 @@ function rememberExerciseName(id, name) {
 }
 
 function exerciseDisplayName(id) {
-  return _EXERCISE_NAME_LOOKUP[id] || id;
+  if (_EXERCISE_NAME_LOOKUP[id]) return _EXERCISE_NAME_LOOKUP[id];
+  if (!id) return id;
+  // Fallback for a fresh page load before the gallery has populated the
+  // lookup: prettify the snake_case id ("ankle_calf_raises_double_leg" ->
+  // "Ankle Calf Raises Double Leg") so History + the Today's-session sidebar
+  // never render a raw id. Once the gallery loads, the canonical library name
+  // (via rememberExerciseName) takes precedence.
+  return String(id).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function renderTodaySession() {
