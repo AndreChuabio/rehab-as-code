@@ -6499,12 +6499,20 @@ async function addToTodayFromBtn(btn) {
 
 const _EXERCISE_NAME_LOOKUP = {}; // exercise_id -> friendly name; populated by gallery renders
 
+// True for id-shaped strings (snake_case tokens like "stationary_bike").
+// Demo/planner payloads sometimes carry the id AS the name; storing or
+// returning those defeats the prettifier.
+function _isIdShaped(s) {
+  return typeof s === "string" && /^[a-z0-9_]+$/.test(s) && s.includes("_");
+}
+
 function rememberExerciseName(id, name) {
-  if (id && name) _EXERCISE_NAME_LOOKUP[id] = name;
+  if (id && name && !_isIdShaped(name)) _EXERCISE_NAME_LOOKUP[id] = name;
 }
 
 function exerciseDisplayName(id) {
-  if (_EXERCISE_NAME_LOOKUP[id]) return _EXERCISE_NAME_LOOKUP[id];
+  const hit = _EXERCISE_NAME_LOOKUP[id];
+  if (hit && !_isIdShaped(hit)) return hit;
   if (!id) return id;
   // Fallback for a fresh page load before the gallery has populated the
   // lookup: prettify the snake_case id ("ankle_calf_raises_double_leg" ->
