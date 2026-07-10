@@ -995,8 +995,16 @@ body {
 }
 .exercise-card .pose-split {
   min-height: 0;
-  height: 420px;
-  max-height: 420px;
+  /* Viewport-relative so the whole card (panels + Stop/Add buttons) fits the
+     chat pane without scrolling, even on shorter screens. */
+  height: min(340px, 42vh);
+  max-height: 340px;
+}
+/* During the form-check the exercise title + cues are already shown on the
+   video overlay — hide the duplicated ones below so the card stays compact. */
+.exercise-card:has(.pose-split) .exercise-title-row,
+.exercise-card:has(.pose-split) .exercise-cues {
+  display: none;
 }
 .video-placeholder-text {
   color: #555;
