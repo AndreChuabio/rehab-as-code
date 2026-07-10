@@ -3310,13 +3310,15 @@ async function loadExerciseCards() {
   const log = document.getElementById("chatLog");
 
   const render = (exercises, opts = {}) => {
+    appendBrowseAllAffordance(opts.activeTab || "plan");
     if (!exercises.length) {
       appendChatBubble("coach", "No exercises matched - try Browse all to see the full library.");
     } else {
       renderExerciseGallery(exercises);
     }
-    appendBrowseAllAffordance(opts.activeTab || "plan");
-    scrollChatLog();
+    // Land at the top of the library (segmented control + detail view)
+    // rather than the bottom of the card grid.
+    if (log) log.scrollTop = 0;
   };
 
   if (approvedPlanExercises.length) {
@@ -3333,10 +3335,11 @@ async function loadExerciseCards() {
   }
 }
 
-// "Browse all exercises" affordance below the active gallery. Clicking it
-// fetches /exercises (the full library, no auth) and re-renders the gallery
-// with the entire catalogue. Includes a phase filter so the patient can
-// narrow to acute/subacute/strength.
+// Exercise-library header panel rendered ABOVE the gallery: a mono eyebrow
+// label on its own row (no collision with the controls), a two-segment
+// My plan | Browse all control, and the phase filter (Browse-all only).
+// Clicking Browse all fetches /exercises (the full library, no auth) and
+// re-renders the gallery grouped by body region.
 function appendBrowseAllAffordance(activeTab) {
   const log = document.getElementById("chatLog");
   if (!log) return;
@@ -3348,24 +3351,23 @@ function appendBrowseAllAffordance(activeTab) {
   panel.id = "browseAllPanel";
   panel.className = "chat-bubble coach browse-all-panel";
   panel.innerHTML = `
-    <div class="browse-all-header">
-      <strong>Exercise library</strong>
-      <span class="browse-all-tabs">
-        <button type="button" class="browse-all-tab ${activeTab === "plan" ? "active" : ""}"
-                data-tab="plan">My plan</button>
-        <button type="button" class="browse-all-tab ${activeTab === "all" ? "active" : ""}"
-                data-tab="all">Browse all</button>
-      </span>
+    <div class="browse-all-label">Exercise library</div>
+    <div class="browse-all-tabs" role="tablist">
+      <button type="button" role="tab" aria-selected="${activeTab === "plan"}"
+              class="browse-all-tab ${activeTab === "plan" ? "active" : ""}"
+              data-tab="plan">My plan</button>
+      <button type="button" role="tab" aria-selected="${activeTab === "all"}"
+              class="browse-all-tab ${activeTab === "all" ? "active" : ""}"
+              data-tab="all">Browse all</button>
     </div>
     <div class="browse-all-filters" id="browseAllFilters" style="display:none">
-      <label>Phase
-        <select id="browseAllPhase">
-          <option value="">any</option>
-          <option value="acute">acute</option>
-          <option value="subacute">subacute</option>
-          <option value="strength">strength</option>
-        </select>
-      </label>
+      <label for="browseAllPhase">Phase</label>
+      <select id="browseAllPhase">
+        <option value="">any</option>
+        <option value="acute">acute</option>
+        <option value="subacute">subacute</option>
+        <option value="strength">strength</option>
+      </select>
     </div>
   `;
   log.appendChild(panel);
@@ -3391,9 +3393,10 @@ async function switchExerciseTab(tab) {
 
 async function loadAllExercises(phase) {
   clearChatLog();
-  appendChatBubble("coach", phase
-    ? `Showing all ${escapeHtml(phase)} exercises in the library.`
-    : "Showing the full exercise library.");
+  appendBrowseAllAffordance("all");
+  // Re-set the phase select to its current value after re-render
+  const phaseEl = document.getElementById("browseAllPhase");
+  if (phaseEl && phase) phaseEl.value = phase;
   try {
     const url = phase
       ? `${API_BASE}/exercises?phase=${encodeURIComponent(phase)}`
@@ -3405,27 +3408,36 @@ async function loadAllExercises(phase) {
     if (!exercises.length) {
       appendChatBubble("coach", "No exercises matched that filter.");
     } else {
-      renderExerciseGallery(exercises);
+      renderExerciseGallery(exercises, { groupByRegion: true });
     }
-    appendBrowseAllAffordance("all");
-    // Re-set the phase select to its current value after re-render
-    const phaseEl = document.getElementById("browseAllPhase");
-    if (phaseEl && phase) phaseEl.value = phase;
-    scrollChatLog();
+    const log = document.getElementById("chatLog");
+    if (log) log.scrollTop = 0;
   } catch (e) {
     appendChatBubble("error", `Could not load library: ${e.message}`);
   }
 }
 
-// Single gallery: large main player + thumbnail strip to switch exercises
-function renderExerciseGallery(exercises) {
+// "low_back" -> "Low Back" for grid section headers + placeholder tiles.
+function regionDisplayLabel(region) {
+  if (!region) return "";
+  return String(region).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Exercise library: detail view (main player) on top, responsive card grid
+// below. Browse-all mode (opts.groupByRegion) groups the grid by body_region
+// with section headers; My-plan mode stays a flat grid of the protocol's
+// exercises. The .gallery-thumbs / .gallery-thumb-btn class names are
+// load-bearing: switchGalleryItem toggles .active over them, the
+// togglePoseFormCheck error path queries them, and the pose-active CSS
+// hides .gallery-thumbs while a form-check is running.
+function renderExerciseGallery(exercises, opts = {}) {
   const log = document.getElementById("chatLog");
 
   const wrap = document.createElement("div");
   wrap.className = "exercise-gallery";
 
   // Build per-exercise data (video src + thumb src)
-  const items = exercises.map((ex) => {
+  const buildItem = (ex) => {
     const genUrl   = ex.generated_video_url || "";
     const ytId     = ex.youtube_id || "";
     const watchUrl = ex.youtube_watch_url || "";
@@ -3434,23 +3446,63 @@ function renderExerciseGallery(exercises) {
     // "Wall Squat" rather than "wall_squat" when /sessions/today returns.
     rememberExerciseName(ex.id || ex.name, ex.name || ex.id);
     return { ex, genUrl, ytId, watchUrl, thumb };
-  });
+  };
 
-  const thumbsHtml = items.map((item, i) => {
-    const thumbContent = item.genUrl
-      ? `<video src="${escapeHtml(item.genUrl)}" muted preload="metadata" class="gallery-thumb-video"></video>`
-      : item.thumb
-        ? `<img src="${escapeHtml(item.thumb)}" alt="${escapeHtml(item.ex.name)}" class="gallery-thumb-img" />`
-        : `<div class="gallery-thumb-blank"></div>`;
+  // Group browse-all by body_region (first-appearance order). Items are
+  // flattened in grouped order so each card's data-idx keeps matching
+  // querySelectorAll document order, which switchGalleryItem and the
+  // togglePoseFormCheck error path both rely on.
+  let groups;
+  if (opts.groupByRegion) {
+    const byRegion = new Map();
+    exercises.forEach((ex) => {
+      const key = ex.body_region || "other";
+      if (!byRegion.has(key)) byRegion.set(key, []);
+      byRegion.get(key).push(ex);
+    });
+    groups = [...byRegion.entries()].map(([region, list]) => ({ region, list }));
+  } else {
+    groups = [{ region: null, list: exercises }];
+  }
+
+  const items = [];
+  const cardHtml = (item, i) => {
+    // Never render a raw id: fall back to the prettified display name.
+    const name = item.ex.name || exerciseDisplayName(item.ex.id);
+    const dose = item.ex.default_dose || item.ex.spec || "";
+    const videoSrc = _refVideoSrc(item.ex);
+    const media = item.thumb
+      ? `<img src="${escapeHtml(item.thumb)}" alt="${escapeHtml(name)}" class="gallery-thumb-img" loading="lazy" />`
+      : videoSrc
+        ? `<video src="${escapeHtml(videoSrc)}" muted preload="metadata" class="gallery-thumb-video"></video>`
+        : `<div class="gallery-thumb-blank">${escapeHtml(regionDisplayLabel(item.ex.body_region) || "no preview")}</div>`;
+    const fcBadge = item.ex.form_check_supported === true
+      ? `<span class="gallery-thumb-fc">form check</span>`
+      : "";
     return `
-      <button class="gallery-thumb-btn${i === 0 ? " active" : ""}" data-idx="${i}" onclick="switchGalleryItem(${i})">
-        ${thumbContent}
-        <span class="gallery-thumb-label">${escapeHtml(item.ex.name || item.ex.id || "")}</span>
+      <button class="gallery-thumb-btn${i === 0 ? " active" : ""}" data-idx="${i}" onclick="switchGalleryItem(${i}, true)">
+        ${media}
+        <span class="gallery-thumb-meta">
+          <span class="gallery-thumb-label">${escapeHtml(name)}</span>
+          ${dose ? `<span class="gallery-thumb-dose">${escapeHtml(dose)}</span>` : ""}
+          ${fcBadge}
+        </span>
       </button>`;
+  };
+
+  const gridHtml = groups.map((group) => {
+    const cards = group.list.map((ex) => {
+      const item = buildItem(ex);
+      items.push(item);
+      return cardHtml(item, items.length - 1);
+    }).join("");
+    const head = group.region
+      ? `<div class="gallery-group-head">${escapeHtml(regionDisplayLabel(group.region) || "Other")} (${group.list.length})</div>`
+      : "";
+    return `<div class="gallery-group">${head}<div class="gallery-grid">${cards}</div></div>`;
   }).join("");
 
   wrap.innerHTML = `
-    <div class="gallery-thumbs">${thumbsHtml}</div>
     <div class="gallery-main">
       <div class="gallery-video-wrap" id="galleryVideoWrap"></div>
       <div class="gallery-main-info">
@@ -3460,6 +3512,7 @@ function renderExerciseGallery(exercises) {
       </div>
       <ul class="gallery-cues" id="galleryCues"></ul>
     </div>
+    <div class="gallery-thumbs">${gridHtml}</div>
   `;
   log.appendChild(wrap);
 
@@ -3470,7 +3523,7 @@ function renderExerciseGallery(exercises) {
   switchGalleryItem(0);
 }
 
-function switchGalleryItem(idx) {
+function switchGalleryItem(idx, scrollToDetail = false) {
   const wrap = window._galleryWrap;
   if (!wrap) return;
   const items = wrap._galleryItems;
@@ -3532,7 +3585,7 @@ function switchGalleryItem(idx) {
   videoWrap.innerHTML = mediaHtml;
 
   // Update info strip
-  wrap.querySelector("#galleryTitle").textContent = item.ex.name || item.ex.id || "";
+  wrap.querySelector("#galleryTitle").textContent = item.ex.name || exerciseDisplayName(item.ex.id);
   wrap.querySelector("#galleryDose").textContent  = item.ex.default_dose || item.ex.spec || "";
   wrap.querySelector("#galleryBadge").innerHTML   = badge;
   const cuesEl = wrap.querySelector("#galleryCues");
@@ -3540,6 +3593,17 @@ function switchGalleryItem(idx) {
 
   // Form Check (feature-flagged): swap demo video for webcam + pose overlay
   maybeAttachFormCheckBtn(wrap, item);
+
+  // Card clicks pass scrollToDetail=true so the detail view (above the grid)
+  // comes back into view; programmatic calls (initial render, form-check
+  // teardown paths) leave the scroll position alone.
+  if (scrollToDetail) {
+    const main = wrap.querySelector(".gallery-main");
+    if (main && typeof main.scrollIntoView === "function") {
+      const reduced = document.documentElement.dataset.reducedMotion === "1";
+      main.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "nearest" });
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------

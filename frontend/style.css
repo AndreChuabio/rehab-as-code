@@ -1599,7 +1599,10 @@ body {
   font-family: var(--font-mono);
 }
 
-/* Exercise gallery (step 3) — thumbnails on top, main player below */
+/* Exercise gallery (step 3) — detail view (main player) on top, responsive
+   card grid below. .gallery-thumbs / .gallery-thumb-btn class names are
+   load-bearing (pose-active hide rule, switchGalleryItem active-toggle,
+   togglePoseFormCheck error path); only the presentation changed. */
 .exercise-gallery {
   width: 100%;
   background: var(--surface);
@@ -1608,35 +1611,77 @@ body {
   overflow: hidden;
   margin: 8px 0;
 }
-/* Thumbnail strip — top, horizontal */
+/* Card grid — below the detail view */
 .gallery-thumbs {
-  display: flex;
-  border-bottom: 1px solid var(--border);
-  overflow-x: auto;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--border);
+}
+.gallery-group + .gallery-group { margin-top: 16px; }
+.gallery-group-head {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-mono);
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+.gallery-group-head::before { content: "// "; }
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
 }
 .gallery-thumb-btn {
-  flex: 1; min-width: 72px; max-width: 160px;
-  background: none; border: none; border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; align-items: stretch;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
   cursor: pointer; padding: 0;
-  display: flex; flex-direction: column; align-items: center;
-  transition: background 0.15s;
+  font-family: inherit;
+  transition: border-color var(--dur-base) var(--ease), background var(--dur-base) var(--ease);
 }
-.gallery-thumb-btn:last-child { border-right: none; }
-.gallery-thumb-btn:hover { background: var(--surface2); }
-.gallery-thumb-btn.active { background: var(--surface2); box-shadow: inset 0 3px 0 var(--accent); }
+.gallery-thumb-btn:hover { background: var(--surface2); border-color: var(--border-strong); }
+.gallery-thumb-btn.active { border-color: var(--accent); box-shadow: var(--shadow-focus); }
 .gallery-thumb-video,
 .gallery-thumb-img,
 .gallery-thumb-blank {
   width: 100%; aspect-ratio: 16/9; object-fit: cover;
   display: block; pointer-events: none;
 }
-.gallery-thumb-blank { background: #111; }
+.gallery-thumb-blank {
+  background: var(--surface2);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: var(--fs-11);
+  text-transform: uppercase; letter-spacing: var(--ls-mono);
+  color: var(--muted);
+}
+.gallery-thumb-meta {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 8px 10px 10px; width: 100%;
+}
 .gallery-thumb-label {
-  font-size: 10px; color: var(--muted);
-  padding: 3px 4px 4px; text-align: center;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%;
+  font-size: var(--fs-13); font-weight: var(--fw-semibold);
+  color: var(--text);
+  overflow: hidden; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
 .gallery-thumb-btn.active .gallery-thumb-label { color: var(--accent); }
+.gallery-thumb-dose {
+  font-family: var(--font-mono); font-size: var(--fs-11);
+  color: var(--muted);
+}
+.gallery-thumb-fc {
+  align-self: flex-start;
+  font-size: var(--fs-11); font-weight: var(--fw-medium);
+  color: var(--accent);
+  border: 1px solid rgba(var(--rgb-accent), 0.35);
+  border-radius: var(--radius-pill);
+  padding: 1px 8px;
+  margin-top: 2px;
+}
 
 /* Main player */
 .gallery-main { position: relative; }
@@ -2107,9 +2152,10 @@ body {
 .incall-set-mount .pose-preflight-cues { display: none; }
 
 /* When form-check is on, hide chat chrome that's competing for space
-   (gallery thumbs strip, Maya header chip, suggestion chips). The chat
-   input at the bottom stays — it's cheap enough to keep. */
+   (gallery card grid, library header panel, Maya header chip, suggestion
+   chips). The chat input at the bottom stays — it's cheap enough to keep. */
 body.pose-active .gallery-thumbs,
+body.pose-active .browse-all-panel,
 body.pose-active .chat-suggestions,
 body.pose-active .chat-header { display: none !important; }
 body.pose-active .agent-panel { display: none; }
@@ -3056,42 +3102,62 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .browse-all-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
-.browse-all-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.browse-all-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-mono);
+  color: var(--muted);
 }
+.browse-all-label::before { content: "// "; }
+/* Segmented control: two equal-width pill segments in one container */
 .browse-all-tabs {
-  display: inline-flex;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 4px;
 }
 .browse-all-tab {
   background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 12px;
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 7px 12px;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  text-align: center;
   cursor: pointer;
   font-family: inherit;
-  color: inherit;
+  color: var(--muted);
+  transition: var(--transition-btn);
 }
+.browse-all-tab:hover { color: var(--text); }
 .browse-all-tab.active {
   background: var(--accent);
-  color: var(--bg);
-  border-color: var(--accent);
+  color: var(--cta-text);
 }
 .browse-all-filters {
   display: flex;
-  gap: 12px;
-  font-size: 12px;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-12);
   color: var(--muted);
 }
 .browse-all-filters select {
-  margin-left: 4px;
   font-family: inherit;
+  font-size: var(--fs-13);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  padding: 5px 10px;
 }
+.browse-all-filters select:focus { outline: none; box-shadow: var(--shadow-focus); }
 
 .today-session-item.completed { opacity: 0.7; }
 .today-session-item.skipped { opacity: 0.45; text-decoration: line-through; }
