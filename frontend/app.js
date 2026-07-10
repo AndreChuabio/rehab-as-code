@@ -3596,8 +3596,13 @@ function renderExerciseGallery(exercises, opts = {}) {
 
   const items = [];
   const cardHtml = (item, i) => {
-    // Never render a raw id: fall back to the prettified display name.
-    const name = item.ex.name || exerciseDisplayName(item.ex.id);
+    // Never render a raw id: the demo protocol's name field IS the id
+    // (e.g. "stationary_bike"), so a truthy name alone is not enough —
+    // route id-shaped names through the prettifier too.
+    const rawName = item.ex.name || "";
+    const name = (rawName && !/^[a-z0-9_]+$/.test(rawName))
+      ? rawName
+      : exerciseDisplayName(item.ex.library_id || item.ex.id || rawName);
     const dose = item.ex.default_dose || item.ex.spec || "";
     const videoSrc = _refVideoSrc(item.ex);
     const media = item.thumb
@@ -3713,8 +3718,13 @@ function switchGalleryItem(idx, scrollToDetail = false) {
   }
   videoWrap.innerHTML = mediaHtml;
 
-  // Update info strip
-  wrap.querySelector("#galleryTitle").textContent = item.ex.name || exerciseDisplayName(item.ex.id);
+  // Update info strip. Same raw-id guard as the grid cards: the demo
+  // protocol's name field is the id itself, so prettify id-shaped names.
+  const titleRaw = item.ex.name || "";
+  wrap.querySelector("#galleryTitle").textContent =
+    (titleRaw && !/^[a-z0-9_]+$/.test(titleRaw))
+      ? titleRaw
+      : exerciseDisplayName(item.ex.library_id || item.ex.id || titleRaw);
   wrap.querySelector("#galleryDose").textContent  = item.ex.default_dose || item.ex.spec || "";
   wrap.querySelector("#galleryBadge").innerHTML   = badge;
   const cuesEl = wrap.querySelector("#galleryCues");
