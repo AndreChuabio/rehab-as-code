@@ -3564,6 +3564,33 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   color: rgba(255, 220, 130, 0.95);
   min-height: 20px;
 }
+/* Camera picker inside the preflight card. Shown only when >1 camera exists;
+   the escape hatch from OS auto-framing (Center Stage) face-zoom. */
+#poseStage .pose-preflight-camera {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
+}
+#poseStage .pose-preflight-camera label { font-weight: 600; }
+#poseStage .pose-preflight-camera select {
+  flex: 1 1 160px;
+  min-width: 0;
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+#poseStage .pose-preflight-camera select option { color: #111; }
+#poseStage .pose-preflight-camera-hint {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+}
 #poseStage .pose-preflight-go {
   margin-top: 6px;
   padding: 12px 18px;

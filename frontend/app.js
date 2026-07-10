@@ -4374,6 +4374,11 @@ async function togglePoseFormCheck(wrap, item, btn) {
                   </div>
                 </div>
                 <div class="pose-preflight-status" id="posePreflightStatus">Waiting for camera...</div>
+                <div class="pose-preflight-camera" id="posePreflightCameraRow" hidden>
+                  <label for="posePreflightCamera">Camera</label>
+                  <select id="posePreflightCamera"></select>
+                  <span class="pose-preflight-camera-hint">Zooming in on your face? That camera auto-frames (Center Stage) - switch to another one.</span>
+                </div>
                 <button class="pose-preflight-go" id="posePreflightGoBtn" type="button">Start</button>
                 <button class="pose-preflight-start-anyway" id="posePreflightAnywayBtn" type="button" hidden>Start anyway - tracking may be less accurate</button>
               </div>
@@ -4933,6 +4938,30 @@ async function togglePoseFormCheck(wrap, item, btn) {
       if (guided.phase !== "preflight" || guided.framingReady) return;
       preflightAnyway.hidden = false;
     }, GUIDED.START_ANYWAY_DELAY_MS);
+    // Camera picker: OS auto-framing (macOS Center Stage / Continuity Camera)
+    // zooms the default camera onto the face and the patient can never frame
+    // their whole body — the only web-side fix is switching cameras. Only
+    // offered when pose.js owns the stream (not the in-call Daily-fed one)
+    // and more than one camera exists. Selection persists via pose.js.
+    if (!liveStream) {
+      const camRow = videoWrap.querySelector("#posePreflightCameraRow");
+      const camSel = videoWrap.querySelector("#posePreflightCamera");
+      if (camRow && camSel && window.PoseFormCheck.listCameras) {
+        window.PoseFormCheck.listCameras().then((cams) => {
+          if (!camRow.isConnected || cams.length < 2) return;
+          const saved = (() => {
+            try { return localStorage.getItem("rac_pose_camera_id"); } catch (_) { return null; }
+          })();
+          camSel.innerHTML = cams.map((c) =>
+            `<option value="${escapeHtml(c.deviceId)}"${c.deviceId === saved ? " selected" : ""}>${escapeHtml(c.label)}</option>`
+          ).join("");
+          camSel.onchange = () => {
+            window.PoseFormCheck.switchCamera(camSel.value);
+          };
+          camRow.hidden = false;
+        }).catch(() => {});
+      }
+    }
     btn.disabled = false;
     btn.dataset.state = "on";
     btn.textContent = "Stop";
