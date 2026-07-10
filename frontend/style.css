@@ -3237,6 +3237,29 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 #poseStage.pose-stage--preflight .pose-frame-guide { display: block; }
 
+/* P2: persistent partial-view caveat chip. JS unhides it only when a set
+   was started via "Start anyway" before framing passed; it stays up for
+   the rest of the engagement (z above the rest/between/preflight scrims)
+   so the counts-accuracy tradeoff remains visible. Bottom-left avoids the
+   set/rep counters (top corners) and the mobile Mark-set-done button
+   (bottom-right). */
+#poseStage .pose-partial-chip {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 8;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(255, 220, 130, 0.95);
+  background: rgba(20, 24, 28, 0.75);
+  border: 1px solid rgba(255, 220, 130, 0.35);
+  border-radius: 999px;
+  pointer-events: none;
+}
+#poseStage .pose-partial-chip[hidden] { display: none; }
+
 /* Set + rep counters. Top corners. Large text. White with shadow so it
    reads against any background. */
 #poseStage .pose-overlay-set {
@@ -3560,6 +3583,26 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 #poseStage .pose-preflight-go:not(:disabled):hover {
   background: rgba(100, 235, 195, 1);
 }
+/* P2 guidance-not-gate: subdued secondary Start under the primary. JS
+   reveals it once the camera has been live for START_ANYWAY_DELAY_MS
+   without framing passing, so a strict fully-in-frame gate never hard-
+   blocks the session; the primary keeps the green ready treatment. */
+#poseStage .pose-preflight-start-anyway {
+  margin-top: 2px;
+  padding: 4px 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+#poseStage .pose-preflight-start-anyway:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+#poseStage .pose-preflight-start-anyway[hidden] { display: none; }
 
 /* Mobile tightening at 375px wide. */
 @media (max-width: 480px) {

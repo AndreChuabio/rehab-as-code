@@ -4056,6 +4056,7 @@ const GUIDED = {
   REST_SECONDS_DEFAULT:       30,
   CORRECTION_BUBBLE_MS:       1500,
   CORRECTION_GAP_MS:          900,   // min gap between two distinct correction utterances
+  START_ANYWAY_DELAY_MS:      5000,  // camera-live time before "Start anyway" reveals
 };
 
 // ── Pose set telemetry (POST /pose/session) ─────────────────────────────────
@@ -4323,6 +4324,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
           <video id="poseVideo" playsinline muted autoplay></video>
           <canvas id="poseCanvas" class="pose-overlay-canvas"></canvas>
           <div class="pose-frame-guide" aria-hidden="true"></div>
+          <div class="pose-partial-chip" id="posePartialChip" hidden>Partial view - counts may be less accurate</div>
           <div class="pose-overlay" id="poseGuidedOverlay">
             <div class="pose-overlay-set" id="poseSetLabel"></div>
             <div class="pose-overlay-rep" id="poseRepLabel"></div>
@@ -4363,6 +4365,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
                 </div>
                 <div class="pose-preflight-status" id="posePreflightStatus">Waiting for camera...</div>
                 <button class="pose-preflight-go" id="posePreflightGoBtn" type="button">Start</button>
+                <button class="pose-preflight-start-anyway" id="posePreflightAnywayBtn" type="button" hidden>Start anyway - tracking may be less accurate</button>
               </div>
             </div>
           </div>
@@ -4394,6 +4397,8 @@ async function togglePoseFormCheck(wrap, item, btn) {
   const preflightEl  = videoWrap.querySelector("#posePreflight");
   const preflightSt  = videoWrap.querySelector("#posePreflightStatus");
   const preflightGo  = videoWrap.querySelector("#posePreflightGoBtn");
+  const preflightAnyway = videoWrap.querySelector("#posePreflightAnywayBtn");
+  const partialChip  = videoWrap.querySelector("#posePartialChip");
   const presenceDone = videoWrap.querySelector("#posePresenceDoneBtn");
   // PR-U2: cache the engaged exercise's mode so the active-phase logic
   // can branch on presence vs rep-tracked without re-reading the
@@ -4444,6 +4449,9 @@ async function togglePoseFormCheck(wrap, item, btn) {
     spokenCorrectionsThisRep: new Set(),
     lastInRep: false,
     detectedSinceTs: null,       // preflight: continuous-detection timer
+    framingReady: false,         // preflight: last known framing gate state
+    cameraLiveTs: null,          // preflight: when the camera stream came up
+    startAnywayTimer: null,      // preflight: one-shot "Start anyway" reveal
     submitted: false,
     restTimer: null,
     correctionFadeTimer: null,
@@ -4469,6 +4477,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
     if (guided.restTimer)           { clearInterval(guided.restTimer); guided.restTimer = null; }
     if (guided.correctionFadeTimer) { clearTimeout(guided.correctionFadeTimer); guided.correctionFadeTimer = null; }
     if (guided.presenceTimer)       { clearInterval(guided.presenceTimer); guided.presenceTimer = null; }
+    if (guided.startAnywayTimer)    { clearTimeout(guided.startAnywayTimer); guided.startAnywayTimer = null; }
   }
 
   function updateSetRepLabels() {
@@ -4526,6 +4535,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
     guided.spokenCorrectionsThisRep.clear();
     guided.lastInRep = false;
     guided.lastSpokenCount = -1;
+    if (guided.startAnywayTimer) { clearTimeout(guided.startAnywayTimer); guided.startAnywayTimer = null; }
     preflightEl.hidden = true;
     stageEl.classList.remove("pose-stage--preflight");
     restOverlay.hidden = true;
@@ -4669,6 +4679,26 @@ async function togglePoseFormCheck(wrap, item, btn) {
   betweenGo.onclick = () => { if (guided.phase === "between") startSet(); };
   doneClose.onclick = () => { btn.click(); };
 
+  // P2 guidance-not-gate: strict fully-in-frame gates are the top barrier
+  // to session starts, so after the camera has been live for
+  // START_ANYWAY_DELAY_MS without framing passing we reveal a subdued
+  // "Start anyway" affordance under the primary Start instead of hard-
+  // blocking. Primary Start still auto-enables the moment framing passes
+  // (unchanged); a degraded start shows the partial-view caveat chip so
+  // the data-quality tradeoff stays visible on the stage.
+  function syncStartAnyway(ready) {
+    guided.framingReady = !!ready;
+    if (!preflightAnyway) return;
+    if (guided.framingReady) {
+      preflightAnyway.hidden = true;
+    } else if (
+      guided.cameraLiveTs != null &&
+      performance.now() - guided.cameraLiveTs >= GUIDED.START_ANYWAY_DELAY_MS
+    ) {
+      preflightAnyway.hidden = false;
+    }
+  }
+
   function handlePreflight(payload) {
     // PR-U5: Start button stays clickable so the patient can step away
     // from the keyboard before the rep loop starts.
@@ -4698,6 +4728,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
       } else {
         preflightGo.classList.remove("ready");
       }
+      syncStartAnyway(fs.ready);
       return;
     }
 
@@ -4715,10 +4746,21 @@ async function togglePoseFormCheck(wrap, item, btn) {
     } else {
       preflightGo.classList.remove("ready");
     }
+    syncStartAnyway(got >= 1);
   }
 
   preflightGo.onclick = () => {
     // First user gesture: warm up speechSynthesis (Safari autoplay gate).
+    if (poseVoiceEnabled()) { try { speakNow("Set 1 of " + guided.totalSets); } catch (_) {} }
+    startSet();
+  };
+
+  if (preflightAnyway) preflightAnyway.onclick = () => {
+    // Degraded start: the patient chose to begin before framing passed.
+    // Surface the tradeoff on the stage for the rest of the engagement;
+    // nothing extra is sent to the backend — logged reps are still the
+    // real detected reps.
+    if (partialChip) partialChip.hidden = false;
     if (poseVoiceEnabled()) { try { speakNow("Set 1 of " + guided.totalSets); } catch (_) {} }
     startSet();
   };
@@ -4866,6 +4908,20 @@ async function togglePoseFormCheck(wrap, item, btn) {
       onPosePayload,
       startOpts,
     );
+    // P2 guidance-not-gate: camera is live from here. pose.js publishes no
+    // payloads while nobody is detected in frame, so the frame-driven
+    // syncStartAnyway path alone can never fire for an empty stage — this
+    // one-shot timer covers it. isConnected guards a stale timer from an
+    // engagement whose DOM was already torn down by Stop; a restart builds
+    // a fresh closure (fresh guided + timer), so the delay is
+    // per-engagement by construction.
+    guided.cameraLiveTs = performance.now();
+    guided.startAnywayTimer = setTimeout(() => {
+      guided.startAnywayTimer = null;
+      if (!preflightAnyway || !preflightAnyway.isConnected) return;
+      if (guided.phase !== "preflight" || guided.framingReady) return;
+      preflightAnyway.hidden = false;
+    }, GUIDED.START_ANYWAY_DELAY_MS);
     btn.disabled = false;
     btn.dataset.state = "on";
     btn.textContent = "Stop";
