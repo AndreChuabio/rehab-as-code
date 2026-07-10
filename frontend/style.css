@@ -985,6 +985,19 @@ body {
   aspect-ratio: auto;
   height: auto;
 }
+/* Chat-card form-check: the side-by-side otherwise claims the whole viewport
+   (calc(100vh-160px) tall, full card width) and dominates the chat. Cap it to
+   a comfortable size, centered. Scoped to .exercise-card so the full-screen
+   gallery form-check and the in-call PiP are untouched. */
+.exercise-card .exercise-video-placeholder:has(.pose-split) {
+  max-width: 880px;
+  margin: 0 auto;
+}
+.exercise-card .pose-split {
+  min-height: 0;
+  height: 420px;
+  max-height: 420px;
+}
 .video-placeholder-text {
   color: #555;
   font-size: 0.8rem;
