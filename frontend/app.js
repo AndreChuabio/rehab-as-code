@@ -4716,7 +4716,36 @@ function onChatSubmit(event) {
   input.value = "";
   appendChatBubble("user", text);
   if (handleFlowAnswer(text)) return;
+  // "log / do / start an exercise" (no specific one named) -> show the clickable
+  // protocol picker (tap a row -> the MediaPipe form-check) instead of a text
+  // back-and-forth ("which exercise?" ... "how many reps?").
+  if (_wantsExercisePicker(text)) {
+    appendChatBubble("coach", "Here's your plan — tap an exercise to start the form check.");
+    _showExercisePickerFromChat();
+    return;
+  }
   sendChat(text, { skipUserBubble: true });
+}
+
+// Generic "let's log / do / start an exercise" intent, with NO specific
+// exercise named (a named one is handled by the video-card route / Maya). A
+// "check-in" is a different flow and must not trip this.
+function _wantsExercisePicker(text) {
+  const t = (text || "").toLowerCase();
+  if (/check.?in/.test(t)) return false;
+  return /\b(log|do|start|begin|record|track)\b/.test(t)
+      && /\b(exercises?|workout|session|my sets?)\b/.test(t);
+}
+
+// Show the Today's-session exercise picker in the chat (clickable protocol
+// list -> form-check). Re-render it if a session is already active; otherwise
+// bootstrap one.
+function _showExercisePickerFromChat() {
+  if (_todaysSessionState.active && (_todaysSessionState.exercises || []).length) {
+    renderExercisePicker();
+  } else {
+    startTodaysSession();
+  }
 }
 
 function sendChatPreset(text) {
