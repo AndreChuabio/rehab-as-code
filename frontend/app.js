@@ -4316,8 +4316,8 @@ async function togglePoseFormCheck(wrap, item, btn) {
       ${refPanel}
       <div class="pose-root pose-split-live" id="poseRoot">
         <div class="pose-toolbar">
-          <div class="pose-title" title="${escapeHtml(item.ex.name)}">
-            <span class="pose-title-name">${escapeHtml(item.ex.name)}</span>
+          <div class="pose-title" title="${escapeHtml(friendlyExerciseLabel(item.ex.name))}">
+            <span class="pose-title-name">${escapeHtml(friendlyExerciseLabel(item.ex.name))}</span>
             <span class="pose-title-dose">${escapeHtml(effectiveDose)}</span>
             ${prescribed ? `<span class="pose-title-prescribed" title="From your active protocol">prescribed</span>` : ""}
           </div>
@@ -4363,7 +4363,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
             </div>
             <div class="pose-preflight" id="posePreflight">
               <div class="pose-preflight-card">
-                <div class="pose-preflight-title">${escapeHtml(item.ex.name)}</div>
+                <div class="pose-preflight-title">${escapeHtml(friendlyExerciseLabel(item.ex.name))}</div>
                 <div class="pose-preflight-cues">
                   <ul>${(item.ex.cues || []).slice(0, 3).map((c) => `<li>${escapeHtml(c)}</li>`).join("")}</ul>
                 </div>
@@ -4661,7 +4661,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
         renderAutoCheckinCard({
           sessionId: result.sessionId,
           worstStatus: result.worstStatus,
-          exerciseName: item.ex.name || item.ex.id,
+          exerciseName: friendlyExerciseLabel(item.ex.name || item.ex.id),
         });
       });
     }
@@ -4899,7 +4899,8 @@ async function togglePoseFormCheck(wrap, item, btn) {
     // plain gallery form-check path → pose.js opens its own camera as before.
     const liveStream = _tavusLocalStream();
     const startOpts = {
-      exerciseName:          item.ex.name,
+      // Display/voice only - the pose engine keys on poseExId, never this.
+      exerciseName:          friendlyExerciseLabel(item.ex.name || item.ex.id),
       targetDose:            item.ex.default_dose,
       voice:                 speakCue,
       suppressInternalVoice: true,  // PR-J wrapper drives all voice
