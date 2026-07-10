@@ -2873,20 +2873,20 @@ const INTAKE_QUESTIONS = [
   { key: "age",      q: "How old are you?",                                  hint: "e.g. 26" },
   { key: "injury",   q: "What was your injury or surgery?",                  hint: "e.g. ACL reconstruction" },
   { key: "timing",   q: "When was your surgery or injury?",                  hint: "e.g. 3 weeks ago" },
-  { key: "pain",     q: "On a scale of 1–10, what's your current pain level?", hint: "no default — type your number" },
+  { key: "pain",     q: "On a scale of 1–10, what's your current pain level?", hint: "tap a number below", kind: "scale", min: 1, max: 10 },
   { key: "symptoms", q: "Any specific symptoms?",                            hint: "e.g. tightness at end-range flexion" },
 ];
 
 const SYMPTOM_QUESTIONS = [
   { key: "location",  q: "Where is the pain or discomfort?",  hint: "e.g. inner knee" },
   { key: "type",      q: "How would you describe it?",         hint: "e.g. sharp, dull, ache, tightness" },
-  { key: "level",     q: "Pain level 1–10?",                   hint: "type your number" },
+  { key: "level",     q: "Pain level 1–10?",                   hint: "tap a number below", kind: "scale", min: 1, max: 10 },
   { key: "trigger",   q: "When does it happen?",               hint: "e.g. during single-leg squats" },
   { key: "duration",  q: "How long has this been going on?",   hint: "e.g. started today" },
 ];
 
 const CHECKIN_QUESTIONS = [
-  { key: "rating",     q: "How did today's session go overall? (1–10)", hint: "your rating" },
+  { key: "rating",     q: "How did today's session go overall? (1–10)", hint: "tap a number below", kind: "scale", min: 1, max: 10 },
   { key: "completed",  q: "Which exercises did you complete?",          hint: "e.g. heel slides, quad sets" },
   { key: "strong",     q: "What felt strong or improved today?",        hint: "e.g. quad set felt stronger" },
   { key: "difficult",  q: "Anything that felt difficult or caused discomfort? (or type \"none\")", hint: "e.g. single-leg balance was shaky, or 'none'" },
@@ -2952,10 +2952,24 @@ function updateFlowUI(active) {
   const cancelBtn = document.getElementById("intakeCancelBtn");
   const suggestions = document.getElementById("chatSuggestions");
   const quickActions = document.querySelector(".quick-actions");
+  const answerChips = document.getElementById("flowAnswerChips");
   if (bar) bar.style.display = active ? "flex" : "none";
-  if (cancelBtn) cancelBtn.style.display = active ? "inline-flex" : "none";
+  if (cancelBtn) {
+    cancelBtn.style.display = active ? "inline-flex" : "none";
+    // Name the flow actually being cancelled — "cancel check-in" during a
+    // check-in, "cancel intake" during intake — derived from FLOW_META,
+    // never hardcoded.
+    const flowLabel = activeFlow ? FLOW_META[activeFlow.type]?.label : null;
+    if (active && flowLabel) {
+      cancelBtn.textContent = `✕ cancel ${flowLabel.toLowerCase()}`;
+    }
+  }
   if (suggestions) suggestions.style.display = active ? "none" : "flex";
   if (quickActions) quickActions.style.display = active ? "none" : "flex";
+  if (answerChips && !active) {
+    answerChips.hidden = true;
+    answerChips.innerHTML = "";
+  }
   if (active) updateFlowProgress();
 }
 
@@ -2968,6 +2982,49 @@ function updateFlowProgress() {
   const fill = document.getElementById("intakeProgressFill");
   if (fill) fill.style.width = `${(activeFlow.step / total) * 100}%`;
   prefillFlowInput();
+  renderFlowAnswerChips();
+}
+
+// Tappable answer chips for guided-flow questions, rendered above the chat
+// input. Scale questions (kind "scale", e.g. pain / rating 1-10) get a
+// numeric chip row; yes/no questions (kind "yesno") get Yes / No; free-text
+// questions get no chips. Tapping a chip routes through the same
+// handleFlowAnswer path as typed input so validation and state stay
+// single-source. Chips are cleared by updateFlowUI(false) when the flow
+// completes or is cancelled.
+function renderFlowAnswerChips() {
+  const row = document.getElementById("flowAnswerChips");
+  if (!row) return;
+  row.innerHTML = "";
+  const meta = activeFlow ? FLOW_META[activeFlow.type] : null;
+  const q = meta ? meta.questions[activeFlow.step] : null;
+  let values = [];
+  if (q && q.kind === "scale") {
+    const min = Number.isFinite(q.min) ? q.min : 1;
+    const max = Number.isFinite(q.max) ? q.max : 10;
+    for (let v = min; v <= max; v++) values.push(String(v));
+  } else if (q && q.kind === "yesno") {
+    values = ["Yes", "No"];
+  }
+  if (!values.length) {
+    row.hidden = true;
+    return;
+  }
+  values.forEach((v) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chat-chip flow-chip";
+    btn.textContent = v;
+    btn.onclick = () => submitFlowChip(v);
+    row.appendChild(btn);
+  });
+  row.hidden = false;
+}
+
+function submitFlowChip(value) {
+  if (!activeFlow) return;
+  appendChatBubble("user", value);
+  handleFlowAnswer(value);
 }
 
 function resetInputPlaceholder() {

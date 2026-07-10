@@ -220,9 +220,11 @@
             <div class="chat-header">
               <h3>Coach Maya</h3>
               <span class="chat-tag">grounded in exercise library</span>
+              <!-- Label is set per-flow by updateFlowUI ("cancel intake" /
+                   "cancel symptom" / "cancel check-in"). -->
               <button class="intake-cancel-btn" id="intakeCancelBtn"
                       style="display:none" onclick="cancelFlow()">
-                ✕ cancel intake
+                ✕ cancel
               </button>
             </div>
             <div class="intake-progress" id="intakeProgressBar" style="display:none">
@@ -273,6 +275,12 @@
                 Log a check-in
               </button>
             </div>
+
+            <!-- Tappable answer chips for guided flows (pain / rating scales,
+                 yes-no). Painted by renderFlowAnswerChips while the active
+                 flow question expects a fixed-choice answer. -->
+            <div class="flow-answer-chips" id="flowAnswerChips" hidden
+                 role="group" aria-label="Tap an answer"></div>
 
             <form class="chat-input-row" id="chatInputRow" onsubmit="onChatSubmit(event)">
               <input

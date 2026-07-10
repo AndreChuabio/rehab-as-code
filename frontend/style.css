@@ -1151,6 +1151,23 @@ body {
 }
 .chat-chip:disabled { opacity: 0.5; cursor: not-allowed; }
 
+/* Tappable answer chips for guided flows (pain / rating scales, yes-no).
+   Rendered by renderFlowAnswerChips above the input row while the active
+   flow question expects a fixed-choice answer. Reuses .chat-chip; the
+   .flow-chip modifier centers short numeric labels. */
+.flow-answer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.flow-answer-chips[hidden] { display: none; }
+.flow-chip {
+  min-width: 34px;
+  text-align: center;
+  font-family: var(--font-mono);
+  color: var(--text);
+}
+
 /* Input row */
 .chat-input-row {
   display: flex;
@@ -1386,14 +1403,17 @@ body {
 .stage-chat .chat-card .chat-header,
 .stage-chat .chat-card .intake-progress,
 .stage-chat .chat-card .chat-suggestions,
+.stage-chat .chat-card .flow-answer-chips,
 .stage-chat .chat-card .quick-actions,
 .stage-chat .chat-card .chat-input-row {
   flex: 0 0 auto;
 }
 /* Visual separation between the scrollable message stream and the pinned
    bottom region (chips + quick-actions + input) so the user can see where
-   the conversation ends. */
-.stage-chat .chat-card .chat-suggestions {
+   the conversation ends. The flow-answer chips take the suggestions row's
+   place while a guided flow is active, so they share the treatment. */
+.stage-chat .chat-card .chat-suggestions,
+.stage-chat .chat-card .flow-answer-chips:not([hidden]) {
   border-top: 1px solid var(--border);
   padding-top: 10px;
   margin-top: 4px;
