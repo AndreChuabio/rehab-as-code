@@ -72,12 +72,8 @@
         <section class="card today-session-card" id="todaySessionCard"
                  style="display:none">
           <h3>Today's Session</h3>
-          <!-- PR-M flow-stitching: post-approval "Start today's session" CTA.
-               Mirrors the chat-scroll CTA at #todaysFlowChatCTA. Both fire the
-               same handler (startTodaysSession). Hidden until refreshPatientState
-               sees review_status.state === "recently_approved" AND today has no
-               completed sessions. -->
-          <div class="todays-session-sidebar-cta" id="todaysFlowSidebarCTA" hidden></div>
+          <!-- Session entry lives in the chat hero card (#todaysSessionHero);
+               the old sidebar CTA mirror was removed with it. -->
           <ul class="today-session-list" id="todaySessionList"></ul>
           <p class="today-session-hint">
             Logged to your record. Reviewed by your clinician.
@@ -235,6 +231,12 @@
                 <div class="intake-progress-fill" id="intakeProgressFill"></div>
               </div>
             </div>
+            <!-- Today's-session hero. The single daily entry point, pinned
+                 above the chat log (sibling, so it never scrolls away and
+                 never pushes the input row off screen). Painted by
+                 refreshTodaysFlowCTA in three states: Start (default),
+                 Continue (mid-session), and a calm done-for-today state. -->
+            <div class="todays-hero" id="todaysSessionHero" hidden></div>
             <div class="chat-log" id="chatLog">
               <div class="chat-empty" id="chatEmpty">
                 Ask Coach Maya to swap an exercise, log a symptom, or plan next week.

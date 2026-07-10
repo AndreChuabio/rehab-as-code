@@ -608,12 +608,12 @@ async function refreshPatientState({ openModalIfNeeded = true } = {}) {
   // change it. Idempotent — hides the card when no payer_model is present.
   renderPatientPayerGoals(patientState?.payer_model, patientState?.goals);
 
-  // PR-M flow stitching: surface the "Start today's session" CTA when a
-  // protocol was recently approved and the patient hasn't started today
-  // yet. Decoupled from openModalIfNeeded — the CTA is an inline render,
-  // not a blocking modal, so it should refresh on every state poll.
-  // Errors are logged + swallowed; the CTA is a soft affordance and
-  // should never break the rest of refreshPatientState.
+  // PR-M flow stitching: repaint the today's-session hero card above the
+  // chat log (Start / Continue / done-for-today). Decoupled from
+  // openModalIfNeeded — the hero is an inline render, not a blocking
+  // modal, so it should refresh on every state poll. Errors are logged +
+  // swallowed; the hero is a soft affordance and should never break the
+  // rest of refreshPatientState.
   refreshTodaysFlowCTA().catch((e) =>
     console.warn("refreshTodaysFlowCTA failed:", e),
   );
@@ -2034,6 +2034,11 @@ function renderCalendar(events) {
 // Protocol panel
 // ---------------------------------------------------------------------------
 
+// Count of exercises on the active protocol, cached by renderProtocol.
+// Feeds the today's-session hero (refreshTodaysFlowCTA) — including demo
+// mode, where patientState is null but /protocol still returns a plan.
+let _activeProtocolExerciseCount = 0;
+
 async function loadProtocol() {
   // PR-V3: drop the localStorage `intakeComplete` gate. Same reasoning as
   // PR-U7's removal of the planApproved gate — localStorage is unreliable
@@ -2049,6 +2054,12 @@ async function loadProtocol() {
     // Legacy GitHub repo link is gone (PR-bus retired); the existing
     // maybeRedirectToClinician + maybeRenderBackToDashboard helpers
     // surface the dashboard affordance for staff users.
+    // Repaint the today's-session hero now that the exercise count is
+    // fresh. This is the demo-mode entry path too — refreshPatientState
+    // bails without a JWT, but loadProtocol always runs on boot.
+    refreshTodaysFlowCTA().catch((e) =>
+      console.warn("refreshTodaysFlowCTA failed:", e),
+    );
   } catch (e) {
     console.error("Failed to load protocol:", e);
   }
@@ -2061,6 +2072,7 @@ function renderProtocol({ protocol }) {
   const isPendingIntake =
     !exercises.length ||
     protocol.phase === "pending_intake";
+  _activeProtocolExerciseCount = isPendingIntake ? 0 : exercises.length;
 
   if (isPendingIntake) {
     meta.textContent = "no protocol yet";
@@ -5284,21 +5296,22 @@ async function postAutoCheckin(payload) {
   });
 }
 
-// ── PR-M: Flow stitching after clinician approval ───────────────────────────
+// ── PR-M: Flow stitching — the today's-session hero ─────────────────────────
 //
-// After a clinician approves a draft protocol, walk the patient through
-// pick → guided → check-in as a single stepped flow rather than three
-// disconnected UI surfaces. Trigger condition:
+// Walk the patient through pick → guided → check-in as a single stepped
+// flow rather than three disconnected UI surfaces. Entry point is the
+// HERO card pinned above the chat log (#todaysSessionHero), shown for any
+// active protocol with exercises:
 //
-//   review_status.state === "recently_approved"
-//   AND no /sessions/today rows have status === "completed"
+//   default   -> "N exercises - ~M min" + Start   (nothing completed today)
+//   continue  -> "Continue - X of N done"         (mid-session)
+//   done      -> calm "Done for today"            (completed rows today)
 //
 // Architecture:
 //   * todaysSessionState holds the session position (in-memory; lost on
 //     reload — acceptable for v1, patient can pick up from the gallery).
-//   * The "Start today's session?" CTA renders both inline at the top of
-//     the chat scroll and inside the sidebar today-session card.
-//   * Click → fetch /protocol/exercises → render an in-chat picker.
+//   * refreshTodaysFlowCTA paints the hero from protocol + session state.
+//   * Start → fetch /protocol/exercises → render an in-chat picker.
 //   * Click an exercise (or "Start with first") → render its library card
 //     in chat AND auto-trigger the form-check button on it. Reuses
 //     renderExerciseCard + togglePoseFormCheck (no fork of the pose flow).
@@ -5320,8 +5333,8 @@ const _todaysSessionState = {
 // Re-entrancy lock for refreshTodaysFlowCTA. Supabase onChange fires multiple
 // times per load (INITIAL_SESSION -> SIGNED_IN/TOKEN_REFRESHED), each firing
 // refreshPatientState -> refreshTodaysFlowCTA. Without this, two invocations
-// both pass the teardown (DOM empty), both await refreshTodaySession, then
-// both append a CTA — rendering two stacked "Your plan is ready" cards.
+// would both repaint the hero across the awaited refreshTodaySession and
+// could double-bind click handlers or paint from stale state.
 let _todaysFlowCtaRendering = false;
 
 // Pure helper. Given the current state, return the next exercise to play
@@ -5608,39 +5621,72 @@ if (typeof window !== "undefined") {
   window.renderStateAwareGreeting = renderStateAwareGreeting;
 }
 
-// Refresh the "Start today's session" CTA. Decides visibility from
-// patientState + today's session list; renders into both the chat scroll
-// and the sidebar today-session card. Idempotent — safe to call on every
-// patient-state poll.
+// Paint one hero state into the mount. Counts only — no PHI reaches the
+// hero markup or the console from here.
+function renderTodaysHero(hero, { title, sub, btnLabel, onClick, done = false }) {
+  if (!hero) return;
+  hero.hidden = false;
+  hero.classList.toggle("done", done);
+  hero.innerHTML = `
+    <div class="todays-hero-copy">
+      <div class="todays-hero-eyebrow">Today's session</div>
+      <div class="todays-hero-title">${escapeHtml(title)}</div>
+      ${sub ? `<div class="todays-hero-sub">${escapeHtml(sub)}</div>` : ""}
+    </div>
+    ${btnLabel ? `<button type="button" class="todays-hero-btn${done ? " subdued" : ""}">${escapeHtml(btnLabel)}</button>` : ""}
+  `;
+  const btn = hero.querySelector("button");
+  if (btn && typeof onClick === "function") btn.addEventListener("click", onClick);
+}
+
+// Refresh the today's-session hero card pinned above the chat log. One
+// render path, three states, decided from _todaysSessionState + the
+// active protocol's exercise count + today's session list. The count is
+// cached by renderProtocol from /protocol, so the hero works in demo
+// mode too (patientState null, /sessions/today would 401). Idempotent —
+// safe to call on every patient-state poll.
 async function refreshTodaysFlowCTA() {
-  // Serialize concurrent invocations (see _todaysFlowCtaRendering above). A
-  // second overlapping call would otherwise append a duplicate CTA across the
-  // `await refreshTodaySession()` below. Skipping it is safe — the in-flight
-  // call renders from current state, and any later state change re-invokes.
+  // Serialize concurrent invocations (see _todaysFlowCtaRendering above).
+  // Skipping the second call is safe — the in-flight call renders from
+  // current state, and any later state change re-invokes.
   if (_todaysFlowCtaRendering) return;
   _todaysFlowCtaRendering = true;
   try {
-    const sidebarSlot = document.getElementById("todaysFlowSidebarCTA");
-    const chatLog = document.getElementById("chatLog");
+    const hero = document.getElementById("todaysSessionHero");
+    if (!hero) return;
 
-    // Tear down stale CTAs first; we always rebuild from current state.
-    if (sidebarSlot) {
-      sidebarSlot.innerHTML = "";
-      sidebarSlot.hidden = true;
+    // Mid-session: the picker owns the chat scroll; the hero offers a
+    // compact Continue affordance that re-opens the picker.
+    if (_todaysSessionState.active) {
+      const total = (_todaysSessionState.exercises || []).length;
+      const done = (_todaysSessionState.completedIds || []).length;
+      if (!total || done >= total) {
+        // Complete (or empty) — renderWorkoutComplete resets the flow
+        // state and re-invokes; stay hidden until then.
+        hero.hidden = true;
+        hero.innerHTML = "";
+        return;
+      }
+      renderTodaysHero(hero, {
+        title: `Continue - ${done} of ${total} done`,
+        sub: "Pick up where you left off",
+        btnLabel: "Continue",
+        onClick: () => renderExercisePicker(),
+      });
+      return;
     }
-    const existingChatCta = document.getElementById("todaysFlowChatCTA");
-    if (existingChatCta) existingChatCta.remove();
 
-    // Don't show the CTA mid-flow — once the patient clicks Start, the picker
-    // owns the chat scroll. The flow itself surfaces the next-exercise CTA.
-    if (_todaysSessionState.active) return;
+    // No active protocol with exercises -> no hero.
+    const total = _activeProtocolExerciseCount;
+    if (!total) {
+      hero.hidden = true;
+      hero.innerHTML = "";
+      return;
+    }
 
-    const reviewState = patientState?.review_status?.state;
-    if (reviewState !== "recently_approved") return;
-
-    // Today's session: refresh if we don't already have a fresh mirror, then
-    // gate on completion count. If any row is completed today, the patient
-    // has already started — don't double-prompt.
+    // Today's session: refresh when authed, then branch on completion
+    // count. Demo mode has no JWT — todaySession stays empty and the
+    // hero degrades to the default Start state.
     if (window.RehabAuth?.getJwt?.()) {
       try {
         await refreshTodaySession();
@@ -5649,59 +5695,37 @@ async function refreshTodaysFlowCTA() {
       }
     }
     const completedToday = todaySession.filter((s) => s.status === "completed").length;
-    if (completedToday > 0) return;
-
-    // Render inline CTA at the top of the chat scroll.
-    if (chatLog) {
-      // Atomic teardown-before-insert: defends against any stale node that
-      // slipped in across the await above (belt-and-suspenders with the lock).
-      const stale = document.getElementById("todaysFlowChatCTA");
-      if (stale) stale.remove();
-      const cta = document.createElement("div");
-      cta.id = "todaysFlowChatCTA";
-      cta.className = "todays-session-cta";
-      cta.innerHTML = `
-        <div class="todays-session-cta-title">Your plan is ready.</div>
-        <div class="todays-session-cta-sub">Start today's session?</div>
-        <button type="button" class="todays-session-cta-btn">Start session →</button>
-      `;
-      cta.querySelector("button").addEventListener("click", startTodaysSession);
-      // Insert right after the chat-empty placeholder if present, else prepend.
-      const empty = document.getElementById("chatEmpty");
-      if (empty && empty.parentElement === chatLog) {
-        empty.insertAdjacentElement("afterend", cta);
-      } else {
-        chatLog.insertBefore(cta, chatLog.firstChild);
-      }
+    if (completedToday > 0) {
+      renderTodaysHero(hero, {
+        done: true,
+        title: "Done for today",
+        sub: "Session logged. Your clinician can see it.",
+        btnLabel: "View history",
+        onClick: () => switchStage("history"),
+      });
+      return;
     }
 
-    // Mirror in the sidebar.
-    if (sidebarSlot) {
-      sidebarSlot.hidden = false;
-      sidebarSlot.innerHTML = `
-        <button type="button" class="todays-session-sidebar-btn">
-          Start today's session →
-        </button>
-      `;
-      sidebarSlot.querySelector("button").addEventListener("click", startTodaysSession);
-    }
+    // Default: one big Start. Duration heuristic: ~3 min per exercise,
+    // floored at 5 so a one-exercise plan doesn't read as trivial.
+    const mins = Math.max(5, 3 * total);
+    renderTodaysHero(hero, {
+      title: `${total} exercise${total === 1 ? "" : "s"} - ~${mins} min`,
+      sub: "Guided form-check, one exercise at a time",
+      btnLabel: "Start",
+      onClick: startTodaysSession,
+    });
   } finally {
     _todaysFlowCtaRendering = false;
   }
 }
 
-// Click handler for both CTAs. Fetches the active protocol's exercises
-// from /protocol/exercises, populates _todaysSessionState, and renders
-// the in-chat picker. Surfaces a friendly toast on failure (no silent
-// fallback — an empty picker would confuse the patient).
+// Click handler for the hero Start button. Fetches the active protocol's
+// exercises from /protocol/exercises, populates _todaysSessionState, and
+// renders the in-chat picker. Surfaces a friendly toast on failure (no
+// silent fallback — an empty picker would confuse the patient).
 async function startTodaysSession() {
   if (_todaysSessionState.active) return;
-  // Tear down the entry CTAs immediately so the picker has a clean slate.
-  const sidebarSlot = document.getElementById("todaysFlowSidebarCTA");
-  if (sidebarSlot) { sidebarSlot.hidden = true; sidebarSlot.innerHTML = ""; }
-  const chatCta = document.getElementById("todaysFlowChatCTA");
-  if (chatCta) chatCta.remove();
-
   showCoachWorkingIndicator();
   try {
     const res = await authedFetch(`${API_BASE}/protocol/exercises`);
@@ -5722,6 +5746,8 @@ async function startTodaysSession() {
     console.info("[flow-m] startTodaysSession exercises=%d", items.length);
     hideCoachWorkingIndicator();
     renderExercisePicker();
+    // Flip the hero to its Continue state now that a session is live.
+    refreshTodaysFlowCTA().catch(() => {});
   } catch (e) {
     hideCoachWorkingIndicator();
     console.warn("startTodaysSession failed:", e);
@@ -5898,6 +5924,7 @@ function launchCurrentExercise() {
         if (!_todaysSessionState.completedIds.includes(exId)) {
           _todaysSessionState.completedIds.push(exId);
         }
+        refreshTodaysFlowCTA().catch(() => {});
         renderNextExerciseCTA();
       });
       return;
@@ -5925,6 +5952,9 @@ function advanceToNextExercise() {
     "[flow-m] advanceToNextExercise idx=%d done=%d/%d",
     idx, _todaysSessionState.completedIds.length, items.length,
   );
+
+  // Keep the hero's "X of N done" count fresh.
+  refreshTodaysFlowCTA().catch(() => {});
 
   // All done?
   if (_todaysSessionState.completedIds.length >= items.length) {
@@ -6030,8 +6060,8 @@ function renderWorkoutComplete() {
 
   log.appendChild(card);
 
-  // Reset flow state so the entry CTA is suppressed (completedToday > 0
-  // gates it via /sessions/today on next refresh).
+  // Reset flow state so the hero flips to done-for-today (completedToday
+  // > 0 selects it via /sessions/today on next refresh).
   _todaysSessionState.active = false;
   _todaysSessionState.exercises = [];
   _todaysSessionState.currentIdx = -1;
@@ -6040,7 +6070,7 @@ function renderWorkoutComplete() {
   _todaysSessionState.startedAtMs = null;
 
   // Refresh today-session sidebar mirror (status flags should be up to date
-  // from the /pose/session writes during the flow) and the CTA.
+  // from the /pose/session writes during the flow) and the hero.
   refreshTodaySession().catch(() => {});
   refreshTodaysFlowCTA().catch(() => {});
   scrollChatLog();
@@ -6048,7 +6078,7 @@ function renderWorkoutComplete() {
 
 // Patient bails out mid-flow. We keep the completedIds (already persisted
 // via /sessions POSTs / /pose/session writes), drop the active flag so
-// the entry CTA can re-render on next refresh, and clear the in-flight
+// the hero can re-render on next refresh, and clear the in-flight
 // picker / next-CTA. Re-entry from the gallery still works.
 function bailFlow() {
   console.info(
@@ -6064,9 +6094,9 @@ function bailFlow() {
   document.querySelectorAll(".next-exercise-cta").forEach((n) => n.remove());
 
   showToast("Saved your progress. Pick up anytime from the exercise tab.", "info");
-  // Don't re-show the post-approval CTA right away — the patient just
-  // dismissed it. refreshTodaysFlowCTA() gates on completedToday from
-  // /sessions/today; the CTA returns naturally if zero completed today.
+  // Repaint the hero from server truth: done-for-today if any completed
+  // rows landed, otherwise back to the default Start state.
+  refreshTodaysFlowCTA().catch(() => {});
 }
 
 // "Coach Maya is on it" transient. Quick-action buttons + sendChat() both

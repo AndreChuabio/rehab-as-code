@@ -3873,67 +3873,84 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
    tokens (var(--surface2), var(--border), var(--accent)).
 */
 
-/* Top-of-chat "Start today's session" CTA. Renders when
-   review_status.state === "recently_approved" AND no completed sessions today.
-   Sits above the chat-empty placeholder, dropped into chatLog.
-   PR-Q: outer tile uses --success rgba (the protocol was approved — that's
-   a "you can start" cue, not a CTA colour). The button inside stays --accent. */
-.todays-session-cta {
-  align-self: stretch;
-  background: linear-gradient(135deg, rgba(var(--rgb-success),  0.14), rgba(var(--rgb-success),  0.04));
-  border: 1px solid rgba(var(--rgb-success),  0.4);
-  border-radius: 10px;
-  padding: 16px 14px;
+/* Today's-session HERO card (#todaysSessionHero). Pinned above the chat
+   log as a sibling inside the flex chat-card, so the log shrinks and the
+   input row never moves below the fold. Single row, compact — well under
+   the 120px ceiling. States: default Start, mid-session Continue, and a
+   calm .done treatment (success tint, subdued button). */
+.todays-hero {
+  flex: 0 0 auto;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background: linear-gradient(135deg, rgba(var(--rgb-accent),  0.10), rgba(var(--rgb-accent2),  0.05));
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  padding: 14px 18px;
+  max-height: 120px;
   animation: fadeIn 0.2s ease-out;
 }
-.todays-session-cta-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text);
+.todays-hero[hidden] { display: none; }
+.todays-hero.done {
+  background: rgba(var(--rgb-success),  0.08);
+  border-color: rgba(var(--rgb-success),  0.35);
 }
-.todays-session-cta-sub {
-  font-size: 13px;
+.todays-hero-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.todays-hero-eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-mono);
   color: var(--muted);
-  margin-bottom: 4px;
 }
-.todays-session-cta-btn {
-  align-self: flex-start;
+.todays-hero-eyebrow::before { content: "// "; }
+.todays-hero-title {
+  font-family: var(--font-serif);
+  font-size: var(--fs-20);
+  font-weight: var(--fw-semibold);
+  color: var(--text-strong);
+  line-height: 1.2;
+}
+.todays-hero.done .todays-hero-title { color: var(--success); }
+.todays-hero-sub {
+  font-size: var(--fs-13);
+  color: var(--muted);
+}
+.todays-hero-btn {
+  flex-shrink: 0;
   background: var(--accent);
   color: var(--bg);
   border: none;
-  border-radius: 8px;
-  padding: 10px 16px;
-  font-size: 14px;
-  font-weight: 600;
+  border-radius: 10px;
+  padding: 12px 24px;
+  font-size: var(--fs-15);
+  font-weight: var(--fw-semibold);
   cursor: pointer;
-  min-height: 40px;
+  min-height: 44px;
   transition: filter 0.12s ease;
 }
-.todays-session-cta-btn:hover { filter: brightness(1.08); }
-.todays-session-cta-btn:focus-visible {
+.todays-hero-btn:hover { filter: brightness(1.08); }
+.todays-hero-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-
-/* Sidebar mirror of the same CTA. Lighter footprint — single button. */
-.todays-session-sidebar-cta { margin-bottom: 10px; }
-.todays-session-sidebar-btn {
-  width: 100%;
-  background: var(--accent);
-  color: var(--bg);
-  border: none;
-  border-radius: 8px;
-  padding: 10px 12px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  min-height: 40px;
+.todays-hero-btn.subdued {
+  background: var(--surface2);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  font-weight: var(--fw-medium);
 }
-.todays-session-sidebar-btn:hover { filter: brightness(1.08); }
+.todays-hero-btn.subdued:hover { background: var(--surface3); filter: none; }
+/* During an in-chat form-check the camera owns the vertical budget; the
+   picker / next-exercise CTAs already carry the flow inside the log. */
+body.pose-active .stage-chat .todays-hero { display: none; }
 
 /* In-chat exercise picker. Shows when the patient clicks the entry CTA.
    Lists every protocol exercise; row click jumps to that exercise. */
@@ -4166,8 +4183,9 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 
 @media (max-width: 480px) {
-  .todays-session-cta { padding: 14px 12px; }
-  .todays-session-cta-btn { width: 100%; }
+  .todays-hero { padding: 12px 14px; gap: 10px; }
+  .todays-hero-title { font-size: var(--fs-16); }
+  .todays-hero-btn { padding: 10px 16px; }
   .exercise-picker-card { padding: 12px; }
   .picker-row { padding: 12px; min-height: 48px; font-size: 13px; }
   .picker-action { width: 100%; }
