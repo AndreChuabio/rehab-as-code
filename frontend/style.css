@@ -3578,14 +3578,20 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 #poseStage .pose-preflight-camera select {
   flex: 1 1 160px;
   min-width: 0;
-  background: rgba(255, 255, 255, 0.12);
-  color: #fff;
-  border: 1px solid rgba(255, 255, 255, 0.3);
+  /* Native light select with DARK text: macOS Chrome keeps the native light
+     background for closed selects, so white text renders invisible. Do not
+     fight the native appearance - guarantee readability instead. */
+  background: #f4f2f5;
+  color: #1c1320;
+  border: 1px solid rgba(255, 255, 255, 0.35);
   border-radius: 6px;
   padding: 4px 8px;
   font-size: 12px;
 }
-#poseStage .pose-preflight-camera select option { color: #111; }
+#poseStage .pose-preflight-camera select option {
+  color: #1c1320;
+  background: #fff;
+}
 #poseStage .pose-preflight-camera-hint {
   flex-basis: 100%;
   font-size: 11px;

@@ -4949,14 +4949,21 @@ async function togglePoseFormCheck(wrap, item, btn) {
       if (camRow && camSel && window.PoseFormCheck.listCameras) {
         window.PoseFormCheck.listCameras().then((cams) => {
           if (!camRow.isConnected || cams.length < 2) return;
-          const saved = (() => {
+          // Preselect the camera actually feeding the stream (falls back to
+          // the saved preference) so the closed select never reads blank.
+          const active = window.PoseFormCheck.currentCameraId?.() || (() => {
             try { return localStorage.getItem("rac_pose_camera_id"); } catch (_) { return null; }
           })();
           camSel.innerHTML = cams.map((c) =>
-            `<option value="${escapeHtml(c.deviceId)}"${c.deviceId === saved ? " selected" : ""}>${escapeHtml(c.label)}</option>`
+            `<option value="${escapeHtml(c.deviceId)}"${c.deviceId === active ? " selected" : ""}>${escapeHtml(c.label)}</option>`
           ).join("");
-          camSel.onchange = () => {
-            window.PoseFormCheck.switchCamera(camSel.value);
+          camSel.onchange = async () => {
+            const label = camSel.options[camSel.selectedIndex]?.text || "camera";
+            const ok = await window.PoseFormCheck.switchCamera(camSel.value);
+            showToast(
+              ok ? `Switched to ${label}` : "Could not switch camera - it may be in use by another app",
+              ok ? "info" : "error",
+            );
           };
           camRow.hidden = false;
         }).catch(() => {});

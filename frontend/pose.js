@@ -1430,15 +1430,28 @@ function _cameraConstraints() {
 }
 
 // List available cameras. Labels are only populated after a getUserMedia
-// grant, so call this from the preflight (camera already live).
+// grant, so call this from the preflight (camera already live). Devices with
+// an empty deviceId (no permission yet) are unusable for switching - drop
+// them rather than rendering options that cannot be selected.
 async function listCameras() {
   try {
     const devices = await navigator.mediaDevices.enumerateDevices();
     return devices
-      .filter((d) => d.kind === "videoinput")
+      .filter((d) => d.kind === "videoinput" && d.deviceId)
       .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Camera ${i + 1}` }));
   } catch (_) {
     return [];
+  }
+}
+
+// The deviceId of the camera actually feeding the live stream (for
+// preselecting the picker), or null.
+function currentCameraId() {
+  try {
+    const track = stream && stream.getVideoTracks()[0];
+    return (track && track.getSettings().deviceId) || null;
+  } catch (_) {
+    return null;
   }
 }
 
@@ -1490,7 +1503,7 @@ function stop() {
 
 window.PoseFormCheck = {
   init, start, stop, EXERCISES, FRAMING_CONFIG, assessFraming,
-  listCameras, switchCamera,
+  listCameras, switchCamera, currentCameraId,
 };
 
 // Expose the pure rise-rep step + thresholds for the DOM-free node test
