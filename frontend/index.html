@@ -80,11 +80,14 @@
           </p>
         </section>
 
-        <section class="card calendar-card">
-          <h3>Today's Schedule</h3>
-          <ul class="event-list" id="eventList">
-            <li class="loading-text">Loading...</li>
-          </ul>
+        <section class="card momentum-card">
+          <h3>Your Momentum</h3>
+          <!-- Streak + sessions-this-week, computed client-side from
+               /sessions/recent?days=30 by loadMomentum. Quiet zero-state
+               when unauthed or no completed sessions yet. -->
+          <div class="stats momentum-stats" id="momentumStats">
+            <div class="loading-text">Loading...</div>
+          </div>
         </section>
 
       </aside>
@@ -132,7 +135,7 @@
                 </button>
               </div>
               <p class="video-hint" id="videoHint">
-                Video is the visceral surface. The chat tab is where actions happen.
+                Talk with Maya face to face. For plan changes and logging, use Coach Chat.
               </p>
             </div>
             <div class="loading-session" id="loadingSession" style="display:none">
@@ -242,7 +245,7 @@
             <div class="chat-log" id="chatLog">
               <div class="chat-empty" id="chatEmpty">
                 Ask Coach Maya to swap an exercise, log a symptom, or plan next week.
-                Every recommendation links to a video. Every command queues a clinician review.
+                Every recommendation links to a video. Plan changes go to your clinician for review.
               </div>
             </div>
             <div class="chat-suggestions" id="chatSuggestions">

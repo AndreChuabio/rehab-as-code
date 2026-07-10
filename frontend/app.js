@@ -1819,7 +1819,7 @@ function wireSettingsOnce() {
 }
 
 // ---------------------------------------------------------------------------
-// Sidebar: wearable signals + calendar
+// Sidebar: wearable signals + momentum
 // ---------------------------------------------------------------------------
 
 async function loadSidebar() {
@@ -1827,18 +1827,16 @@ async function loadSidebar() {
     // authedFetch on /health-data so a connected patient's Junction row resolves
     // server-side via current_user_id (the single get_health_data seam). Falls
     // back to mock defaults when unauthed or not connected.
-    const [healthRes, calRes] = await Promise.all([
-      authedFetch(`${API_BASE}/health-data`),
-      fetch(`${API_BASE}/calendar`),
-    ]);
+    const healthRes = await authedFetch(`${API_BASE}/health-data`);
     const health = await healthRes.json();
-    const cal = await calRes.json();
     renderHealth(health);
-    renderCalendar(cal.events);
   } catch (e) {
     console.error("Failed to load sidebar data:", e);
-    showToast("Could not connect to backend - is it running?", "error");
+    showToast("Could not load your data. Check your connection and try again.", "error");
   }
+  // Momentum loads independently — its failures render a quiet zero-state,
+  // never a toast, so it must not share the health card's error path.
+  loadMomentum();
 }
 
 // Render the three score values. When `live` is false the values are admittedly
@@ -2012,22 +2010,95 @@ async function handleJunctionReturn() {
   loadSidebar();
 }
 
-function renderCalendar(events) {
-  const list = document.getElementById("eventList");
-  if (!events || events.length === 0) {
-    list.innerHTML = "<li class='loading-text'>No events today</li>";
+// ---------------------------------------------------------------------------
+// Sidebar: momentum (streak + sessions this week)
+//
+// Reads /sessions/recent?days=30 (same self-scoped endpoint as the History
+// pane) and reduces the completed rows to two numbers: a consecutive-day
+// streak (ending today, or yesterday as grace so a morning visit does not
+// zero last night's streak) and completed sessions this calendar week
+// (Monday start), both in local time. Any failure — demo mode 401s here —
+// renders the quiet zero-state, never an error.
+// ---------------------------------------------------------------------------
+
+// Local-time YYYY-MM-DD key. toISOString would shift the day near midnight
+// for non-UTC patients, so build the key from local date parts.
+function _localDayKey(d) {
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+// Pure reducer over /sessions/recent rows -> { streak, weekCount,
+// hasCompleted }. Counts only status === "completed" rows; timestamps come
+// from completed_at with created_at as the fallback for legacy rows.
+function computeMomentum(sessions, now = new Date()) {
+  const completedDays = new Set();
+  let weekCount = 0;
+  let hasCompleted = false;
+
+  // Start of the current Monday-based week, local midnight.
+  const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+
+  for (const s of sessions || []) {
+    if (!s || s.status !== "completed") continue;
+    const ts = new Date(s.completed_at || s.created_at || "");
+    if (Number.isNaN(ts.getTime())) continue;
+    hasCompleted = true;
+    completedDays.add(_localDayKey(ts));
+    if (ts >= weekStart) weekCount += 1;
+  }
+
+  // Walk backwards from today (or yesterday, grace) while every day has at
+  // least one completed session.
+  let streak = 0;
+  const cursor = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (!completedDays.has(_localDayKey(cursor))) {
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  while (completedDays.has(_localDayKey(cursor))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return { streak, weekCount, hasCompleted };
+}
+
+async function loadMomentum() {
+  const host = document.getElementById("momentumStats");
+  if (!host) return;
+  let sessions = [];
+  try {
+    const res = await authedFetch(`${API_BASE}/sessions/recent?days=30`);
+    if (res.ok) {
+      const data = await res.json();
+      sessions = data?.sessions || [];
+    }
+  } catch (e) {
+    // Quiet by design: momentum is motivational, never an error surface.
+    console.warn("loadMomentum failed:", e);
+  }
+  renderMomentum(computeMomentum(sessions));
+}
+
+function renderMomentum({ streak, weekCount, hasCompleted }) {
+  const host = document.getElementById("momentumStats");
+  if (!host) return;
+  if (!hasCompleted) {
+    host.innerHTML =
+      `<div class="momentum-empty">Complete your first session to start a streak.</div>`;
     return;
   }
-  list.innerHTML = events
-    .map(
-      (e) => `
-    <li class="event-item ${e.type === "high_stakes" ? "high-stakes" : ""}">
-      <span class="event-time">${e.time}</span>
-      <span class="event-title">${e.title}</span>
-    </li>
-  `,
-    )
-    .join("");
+  host.innerHTML = `
+    <div class="stat">
+      <span class="stat-label">Current streak</span>
+      <span class="stat-value">${streak} day${streak === 1 ? "" : "s"}</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Sessions this week</span>
+      <span class="stat-value">${weekCount}</span>
+    </div>
+  `;
 }
 
 // ---------------------------------------------------------------------------
@@ -2095,11 +2166,12 @@ function renderProtocol({ protocol }) {
       if (ex.sets && ex.reps) parts.push(`${ex.sets}x${ex.reps}`);
       if (ex.duration_min) parts.push(`${ex.duration_min} min`);
       if (ex.ROM_target_deg != null) parts.push(`ROM ${ex.ROM_target_deg} deg`);
-      if (ex.intensity) parts.push(ex.intensity);
+      if (ex.load) parts.push(friendlySpec(ex.load));
+      if (ex.intensity) parts.push(friendlySpec(ex.intensity));
       const spec = parts.length ? parts.join(" - ") : "see protocol";
       return `
     <li class="protocol-exercise">
-      <span class="ex-name">${escapeHtml(ex.name || "unnamed")}</span>
+      <span class="ex-name">${escapeHtml(friendlyExerciseLabel(ex.name))}</span>
       <span class="ex-spec">${escapeHtml(spec)}</span>
     </li>
   `;
@@ -2220,7 +2292,7 @@ async function _showVideoActive(conversationUrl, conversationId) {
   els.active.style.display = "flex";
 
   if (!window.Daily || typeof window.Daily.createCallObject !== "function") {
-    showToast("Video SDK failed to load. Hard-refresh and retry.", "error");
+    showToast("Video could not load. Refresh the page and try again.", "error");
     _showVideoPreSession();
     return;
   }
@@ -3163,8 +3235,8 @@ async function renderPlanBuilder() {
     rowsEl.innerHTML = exercises.map(ex => `
       <div class="plan-row">
         <div class="plan-row-info">
-          <span class="plan-row-name">${escapeHtml(ex.name)}</span>
-          <span class="plan-row-spec">${escapeHtml(ex.spec || ex.default_dose || "")}</span>
+          <span class="plan-row-name">${escapeHtml(friendlyExerciseLabel(ex.name))}</span>
+          <span class="plan-row-spec">${escapeHtml(friendlySpec(ex.spec || ex.default_dose || ""))}</span>
         </div>
         <button class="plan-add-btn"
                 data-ex-id="${escapeHtml(ex.id || ex.name)}"
@@ -3275,8 +3347,8 @@ async function showPlanWithApprove() {
     const rows = exercises.map(ex => `
       <div class="plan-row" id="plan-row-${escapeHtml(ex.id || ex.name)}">
         <div class="plan-row-info">
-          <span class="plan-row-name">${escapeHtml(ex.name)}</span>
-          <span class="plan-row-spec">${escapeHtml(ex.spec || ex.default_dose || "")}</span>
+          <span class="plan-row-name">${escapeHtml(friendlyExerciseLabel(ex.name))}</span>
+          <span class="plan-row-spec">${escapeHtml(friendlySpec(ex.spec || ex.default_dose || ""))}</span>
         </div>
         <button class="plan-add-btn"
                 data-ex-id="${escapeHtml(ex.id || ex.name)}"
@@ -5899,18 +5971,23 @@ function renderExercisePicker() {
   const total = items.length;
   const doneCount = items.length - remaining.length;
 
-  const headline = doneCount === 0
+  // Rough session estimate off the exercises still to do: ~3 min each,
+  // floored at 5 so a one-exercise day never reads "~3 min".
+  const estMin = Math.max(5, 3 * remaining.length);
+  const durationNote = remaining.length ? ` · ~${estMin} min` : "";
+  const headline = (doneCount === 0
     ? `Today's plan: ${total} exercise${total === 1 ? "" : "s"}`
-    : `Today's plan: ${doneCount} of ${total} done — ${remaining.length} to go`;
+    : `Today's plan: ${doneCount} of ${total} done — ${remaining.length} to go`)
+    + durationNote;
 
   const rows = items.map((ex) => {
     const isDone = completed.has(ex.id);
-    const dose = ex.default_dose ? `<span class="picker-row-dose">${escapeHtml(ex.default_dose)}</span>` : "";
+    const dose = ex.default_dose ? `<span class="picker-row-dose">${escapeHtml(friendlySpec(ex.default_dose))}</span>` : "";
     const checkGlyph = isDone ? "✓" : "";
     return `
       <button type="button" class="picker-row ${isDone ? "done" : ""}" data-ex-id="${escapeHtml(ex.id)}" ${isDone ? "disabled" : ""}>
         <span class="picker-row-check" aria-hidden="true">${checkGlyph}</span>
-        <span class="picker-row-name">${escapeHtml(ex.name)}</span>
+        <span class="picker-row-name">${escapeHtml(friendlyExerciseLabel(ex.name))}</span>
         ${dose}
       </button>
     `;
@@ -6369,6 +6446,25 @@ function exerciseDisplayName(id) {
   // never render a raw id. Once the gallery loads, the canonical library name
   // (via rememberExerciseName) takes precedence.
   return String(id).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Display-only prettifier for protocol payload names that can carry raw
+// machine ids ("stationary_bike"). Curated names ("Terminal Knee Extension")
+// pass through untouched; only snake_case ids take the exerciseDisplayName
+// lookup + prettify path. Never feed the result back into data-ex-* dataset
+// attributes or API payloads — those stay raw ids.
+function friendlyExerciseLabel(raw) {
+  if (!raw) return "unnamed";
+  const s = String(raw);
+  return /^[a-z0-9]+(?:_[a-z0-9]+)*$/.test(s) ? exerciseDisplayName(s) : s;
+}
+
+// Display-only prettifier for dose/spec/intensity strings that can carry raw
+// load tokens ("3×10 yellow_band" -> "3×10 yellow band"). Lowercase on
+// purpose — these are qualifiers, not titles.
+function friendlySpec(raw) {
+  if (raw == null) return "";
+  return String(raw).replace(/_/g, " ");
 }
 
 function renderTodaySession() {

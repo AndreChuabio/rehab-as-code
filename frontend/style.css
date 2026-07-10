@@ -382,7 +382,7 @@ body {
 .protocol-card h3,
 .payer-goals-card h3,
 .today-session-card h3,
-.calendar-card h3,
+.momentum-card h3,
 .recommendations h3 {
   display: block;
   font-family: var(--font-mono);
@@ -397,7 +397,7 @@ body {
 .protocol-card h3::before,
 .payer-goals-card h3::before,
 .today-session-card h3::before,
-.calendar-card h3::before,
+.momentum-card h3::before,
 .recommendations h3::before { content: "// "; }
 
 /* Health Stats */
@@ -428,22 +428,13 @@ body {
 .health-caption.sample { color: var(--muted); }
 .health-caption.live { color: var(--muted); }
 
-/* Calendar */
-.event-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
-.event-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
-  background: var(--surface2);
-  border-radius: 8px;
-  border-left: 3px solid var(--border);
+/* Momentum (streak + sessions this week) — reuses the .stats / .stat rows
+   from the health card; only the zero-state needs its own rule. */
+.momentum-empty {
+  color: var(--muted);
   font-size: 13px;
+  line-height: 1.4;
 }
-.event-item.high-stakes { border-left-color: var(--warn); }
-.event-time { color: var(--muted); font-size: 11px; }
-.event-title { font-weight: 500; }
-.badge { font-size: 10px; color: var(--warn); margin-top: 2px; }
 .loading-text { color: var(--muted); font-size: 13px; }
 
 .source-badge {
