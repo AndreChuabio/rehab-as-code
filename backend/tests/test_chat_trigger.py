@@ -233,3 +233,74 @@ def test_dispatch_recommend_exercise_out_of_region_for_active_protocol_dropped()
 
     assert result == {"error": "out_of_region_exercise"}
     assert [e for e in extras if e.get("type") == "card"] == []
+
+
+# ---------------------------------------------------------------------------
+# list_phase_exercises dispatch: overview must be region-scoped and must NOT
+# flood the chat with a card per exercise.
+# ---------------------------------------------------------------------------
+#
+# Prod bug (2026-08-03): "review specific exercises" called list_phase_exercises
+# with no region filter, returning every exercise in the phase across all six
+# regions AND emitting one actionable card each -- ~31 cards including an
+# out-of-region "Eccentric Wrist Extension" for an ankle/knee patient. The tool
+# must share recommend_exercise's region gate and stay text-only.
+
+
+def _phase_regions(exercises):
+    import exercise_kb
+    return {
+        (exercise_kb.body_region_for(e["id"]) or "").lower() for e in exercises
+    }
+
+
+def test_dispatch_list_phase_exercises_scopes_to_patient_region():
+    """An overview for a patient whose active protocol is ankle must return
+    ONLY ankle exercises -- never a knee/elbow/shoulder entry from the same
+    phase."""
+    import coach_chat
+
+    result, extras = asyncio.run(coach_chat._dispatch_tool(
+        name="list_phase_exercises",
+        arguments={"phase": "subacute"},
+        trigger_executor=_noop_executor,
+        body_region="ankle",
+    ))
+
+    assert result["ok"] is True
+    assert result["count"] > 0, "expected at least one in-region ankle exercise"
+    assert _phase_regions(result["exercises"]) == {"ankle"}
+
+
+def test_dispatch_list_phase_exercises_out_of_scope_regions_dropped():
+    """With no active protocol (body_region=None) the overview must still be
+    limited to in-scope regions (knee + ankle) -- never surface elbow,
+    shoulder, low_back, or hamstring exercises."""
+    import coach_chat
+    from change_tier import IN_SCOPE_REGIONS
+
+    result, extras = asyncio.run(coach_chat._dispatch_tool(
+        name="list_phase_exercises",
+        arguments={"phase": "subacute"},
+        trigger_executor=_noop_executor,
+        body_region=None,
+    ))
+
+    assert result["ok"] is True
+    assert _phase_regions(result["exercises"]) <= IN_SCOPE_REGIONS
+
+
+def test_dispatch_list_phase_exercises_emits_no_card_flood():
+    """The overview is informational: it returns exercises as data for Maya to
+    summarize in text, and must NOT emit a card-per-exercise. A single
+    actionable card only comes from recommend_exercise on an explicit do/start."""
+    import coach_chat
+
+    _result, extras = asyncio.run(coach_chat._dispatch_tool(
+        name="list_phase_exercises",
+        arguments={"phase": "subacute"},
+        trigger_executor=_noop_executor,
+        body_region="ankle",
+    ))
+
+    assert [e for e in extras if e.get("type") == "card"] == []

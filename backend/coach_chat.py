@@ -446,6 +446,26 @@ ClinicianAttentionWriter = Callable[
 ]
 
 
+def _card_gate_reason(exercise_id: str | None, body_region: str | None) -> str | None:
+    """Single source of truth for whether an exercise card may be surfaced.
+
+    Returns None when the card is allowed, else the drop reason:
+      - "out_of_scope_exercise": region is outside IN_SCOPE_REGIONS (knee+ankle)
+      - "out_of_region_exercise": in scope but not the patient's active region
+
+    Both card-emitting tools (recommend_exercise + list_phase_exercises) route
+    through this so their region logic can never drift apart -- an unguarded
+    second path is exactly what surfaced an out-of-region "Eccentric Wrist
+    Extension" to an ankle/knee patient (2026-08-03).
+    """
+    ex_region = (exercise_kb.body_region_for(exercise_id) or "").lower()
+    if ex_region not in IN_SCOPE_REGIONS:
+        return "out_of_scope_exercise"
+    if body_region and ex_region != body_region.lower().strip():
+        return "out_of_region_exercise"
+    return None
+
+
 async def _dispatch_tool(
     name: str,
     arguments: dict[str, Any],
@@ -491,12 +511,11 @@ async def _dispatch_tool(
         # Body-region anchoring: the surfaced card must be in scope, and when an
         # active protocol exists it must match that protocol's region. Otherwise
         # drop the card and let Maya respond in text -- out-of-region must never
-        # be surfaced as an actionable, do-it-now exercise.
-        ex_region = (exercise_kb.body_region_for(ex.get("id")) or "").lower()
-        if ex_region not in IN_SCOPE_REGIONS:
-            return ({"error": "out_of_scope_exercise"}, [])
-        if body_region and ex_region != body_region.lower().strip():
-            return ({"error": "out_of_region_exercise"}, [])
+        # be surfaced as an actionable, do-it-now exercise. Shared gate keeps
+        # this identical to list_phase_exercises below.
+        gate = _card_gate_reason(ex.get("id"), body_region)
+        if gate:
+            return ({"error": gate}, [])
         card = exercise_kb.to_card(ex)
         return (
             {"ok": True, "exercise": card},
@@ -507,10 +526,23 @@ async def _dispatch_tool(
         phase = arguments.get("phase", "")
         injury_type = arguments.get("injury_type")
         matches = exercise_kb.find_by_phase(phase, injury_type=injury_type)
-        cards = [exercise_kb.to_card(ex) for ex in matches]
+        # Region-scope the overview: find_by_phase spans all six regions, so an
+        # unfiltered list surfaced out-of-scope/out-of-region exercises (e.g.
+        # an elbow "Eccentric Wrist Extension" for an ankle patient). Route each
+        # entry through the same gate recommend_exercise uses.
+        in_scope = [
+            ex for ex in matches
+            if _card_gate_reason(ex.get("id"), body_region) is None
+        ]
+        cards = [exercise_kb.to_card(ex) for ex in in_scope]
+        # The overview is informational -- return the in-region set as data for
+        # Maya to summarize in text. Do NOT emit a card per exercise: that
+        # flooded the chat with an actionable "Add to today" card for every
+        # entry in the phase. A single actionable card comes only from
+        # recommend_exercise on an explicit do/start intent.
         return (
             {"ok": True, "count": len(cards), "exercises": cards},
-            [{"type": "card", "card": c} for c in cards],
+            [],
         )
 
     if name == "fire_symptom_trigger":
