@@ -516,10 +516,25 @@ async def _dispatch_tool(
         phase = arguments.get("phase", "")
         injury_type = arguments.get("injury_type")
         matches = exercise_kb.find_by_phase(phase, injury_type=injury_type)
-        cards = [exercise_kb.to_card(ex) for ex in matches]
+        # In-scope regions for the guided library (knee + ankle). find_by_phase
+        # spans all six regions, so an unfiltered overview surfaced out-of-scope
+        # exercises (e.g. an elbow "Eccentric Wrist Extension" for an ankle
+        # patient) and emitted one actionable card each -- flooding the chat.
+        _IN_SCOPE_REGIONS = {"knee", "ankle"}
+        in_scope = [
+            ex for ex in matches
+            if (exercise_kb.body_region_for(ex.get("id")) or "").lower()
+            in _IN_SCOPE_REGIONS
+        ]
+        cards = [exercise_kb.to_card(ex) for ex in in_scope]
+        # The overview is informational: return the in-scope set as data for
+        # Maya to summarize in text. Do NOT emit a card per exercise -- that
+        # flooded the chat with an actionable "Add to today" card for every
+        # entry in the phase. A single actionable card comes only from
+        # recommend_exercise on an explicit do/start intent.
         return (
             {"ok": True, "count": len(cards), "exercises": cards},
-            [{"type": "card", "card": c} for c in cards],
+            [],
         )
 
     if name == "fire_symptom_trigger":

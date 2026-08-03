@@ -102,3 +102,55 @@ def test_chat_rejects_unauthenticated(unauthed_client):
         json={"session_id": "default", "message": "hi", "history": []},
     )
     assert resp.status_code == 401, resp.text
+
+
+# ---------------------------------------------------------------------------
+# list_phase_exercises: overview must stay in-scope and NOT flood the chat.
+# ---------------------------------------------------------------------------
+#
+# Prod bug (2026-08-03): "review specific exercises" called list_phase_exercises
+# with no region filter, returning every exercise in the phase across all six
+# regions AND emitting one actionable card each -- ~31 cards including an
+# out-of-scope "Eccentric Wrist Extension" (elbow) for an ankle/knee patient.
+
+
+def _noop_executor(*_args, **_kwargs):
+    raise AssertionError("trigger executor must not be called for list_phase_exercises")
+
+
+def _phase_regions(exercises):
+    import exercise_kb
+    return {
+        (exercise_kb.body_region_for(e["id"]) or "").lower() for e in exercises
+    }
+
+
+def test_dispatch_list_phase_exercises_only_in_scope_regions():
+    """find_by_phase spans all six regions; the overview must return only
+    in-scope (knee + ankle) exercises -- never elbow/shoulder/low_back/
+    hamstring entries from the same phase."""
+    import coach_chat
+
+    result, _extras = asyncio.run(coach_chat._dispatch_tool(
+        name="list_phase_exercises",
+        arguments={"phase": "subacute"},
+        trigger_executor=_noop_executor,
+    ))
+
+    assert result["ok"] is True
+    assert result["count"] > 0, "expected at least one in-scope exercise"
+    assert _phase_regions(result["exercises"]) <= {"knee", "ankle"}
+
+
+def test_dispatch_list_phase_exercises_emits_no_card_flood():
+    """The overview is informational: it returns exercises as data for Maya to
+    summarize in text, and must NOT emit a card-per-exercise."""
+    import coach_chat
+
+    _result, extras = asyncio.run(coach_chat._dispatch_tool(
+        name="list_phase_exercises",
+        arguments={"phase": "subacute"},
+        trigger_executor=_noop_executor,
+    ))
+
+    assert [e for e in extras if e.get("type") == "card"] == []
