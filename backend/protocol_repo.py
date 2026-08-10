@@ -127,7 +127,8 @@ def _normalize_row(row: dict) -> dict:
     # sqlite3 (0/1). Coerce to bool so callers get a consistent type.
     if "auto_applied" in row:
         row["auto_applied"] = bool(row["auto_applied"])
-    # reverted_by is UUID in Postgres; str() is a no-op on plain strings.
+    # reverted_by is TEXT in both backends (matches reviewed_by); str() is a
+    # defensive no-op so callers can rely on the type regardless of driver.
     if row.get("reverted_by") is not None:
         row["reverted_by"] = str(row["reverted_by"])
     return row

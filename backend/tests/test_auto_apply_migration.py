@@ -74,3 +74,61 @@ def test_protocols_table_has_auto_apply_columns(tmp_path, monkeypatch):
     assert "auto_applied" in cols
     assert "reverted_at" in cols
     assert "reverted_by" in cols
+
+
+# ---------------------------------------------------------------------------
+# Static assertions on the migration SQL itself.
+#
+# The whole suite runs on sqlite (conftest forces STORAGE_BACKEND=sqlite), which
+# is permissive about types -- so a Postgres-only type mismatch passes here
+# silently. It already nearly shipped once: reverted_by was declared `uuid`
+# while these tests write reverted_by="clin-1", which Postgres rejects with
+# `invalid input syntax for type uuid`. These read the migration file directly
+# so the two backends cannot drift apart again unnoticed.
+
+_MIGRATION = (
+    Path(__file__).resolve().parents[2]
+    / "supabase" / "migrations" / "20260628120000_protocol_auto_apply.sql"
+)
+
+
+def _migration_sql() -> str:
+    """The migration's executable SQL, lowercased with -- comments stripped.
+
+    Comments are stripped because they discuss the very constructs these tests
+    forbid (e.g. the note explaining why CONCURRENTLY is not used).
+    """
+    assert _MIGRATION.exists(), f"migration missing at {_MIGRATION}"
+    lines = [
+        line.split("--", 1)[0]
+        for line in _MIGRATION.read_text().splitlines()
+    ]
+    return "\n".join(lines).lower()
+
+
+def test_reverted_by_is_text_not_uuid():
+    """reverted_by must be TEXT to match protocols.reviewed_by and
+    staff_users.user_id -- every actor column in this schema is TEXT, and the
+    revert path is handed plain strings."""
+    sql = _migration_sql()
+    assert "reverted_by  text" in sql or "reverted_by text" in sql
+    assert "reverted_by  uuid" not in sql and "reverted_by uuid" not in sql
+
+
+def test_auto_applied_feed_index_matches_the_query():
+    """list_auto_applied_open is cross-patient and orders by created_at alone.
+    An index leading on token cannot be walked for that ORDER BY, so it degrades
+    to a full partial-index scan plus a Sort and costs writes for nothing."""
+    sql = _migration_sql()
+    assert "protocols_auto_applied_open_idx" in sql
+    assert "(created_at desc)" in sql
+    assert "(token, created_at desc)" not in sql
+
+
+def test_no_create_index_concurrently():
+    """Supabase CLI >= 2.92.1 wraps each migration file in an implicit pipeline;
+    CREATE INDEX CONCURRENTLY cannot run inside one (SQLSTATE 25001) and would
+    fail the deploy on the merge-to-main path. lock_timeout is the guard here."""
+    sql = _migration_sql()
+    assert "concurrently" not in sql
+    assert "set lock_timeout" in sql
