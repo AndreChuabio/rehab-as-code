@@ -658,6 +658,15 @@
     </div>
   </div>
 
+  <!-- "Updated by Coach Maya" note. Shown when the active protocol was applied
+       live by Coach Maya without a clinician approval gate (auto_applied). An
+       auto-applied row reports review_status="none", so this is its own pill
+       rather than an append to the (hidden) review pill. -->
+  <div class="maya-updated-note" id="mayaUpdatedNote" hidden>
+    <span class="maya-updated-dot" aria-hidden="true"></span>
+    <span class="maya-updated-label">Updated by Coach Maya</span>
+  </div>
+
   <!-- Workout-recap modal. Opens when the patient clicks "View today's
        record" on the workout-complete card. Shows the rows from
        /sessions/today (completed first, skipped grouped at the bottom)

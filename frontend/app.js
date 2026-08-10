@@ -603,6 +603,11 @@ async function refreshPatientState({ openModalIfNeeded = true } = {}) {
   // state -> copy mapping.
   renderReviewPill(patientState?.review_status || null);
 
+  // "Updated by Coach Maya" note: shown when the active protocol was applied
+  // live by Coach Maya (change_tier "auto", no clinician gate). Distinct from
+  // the review pill — an auto-applied row reports review_status="none".
+  renderMayaUpdatedNote(patientState?.auto_applied === true);
+
   // PR-payer: read-only payer mode + payer-aware goals card. The patient
   // sees which payer mode their plan is written for; only the clinician can
   // change it. Idempotent — hides the card when no payer_model is present.
@@ -722,6 +727,19 @@ function renderReviewPill(reviewStatus) {
     btn.setAttribute("aria-expanded", expanded ? "false" : "true");
     panel.hidden = expanded;
   };
+}
+
+// ── "Updated by Coach Maya" note ───────────────────────────────────────────
+//
+// Surfaced when the patient's active protocol was applied live by Coach Maya
+// without a clinician approval gate (change_tier "auto" — e.g. an in-plan,
+// same-region exercise swap). Honest provenance: the patient learns the plan
+// shifted and who shifted it. Idempotent — hidden when not auto-applied so a
+// clinician-approved plan keeps a clean header.
+function renderMayaUpdatedNote(autoApplied) {
+  const note = document.getElementById("mayaUpdatedNote");
+  if (!note) return;
+  note.hidden = !autoApplied;
 }
 
 // ── Patient read-only payer mode + payer-aware goals ───────────────────────

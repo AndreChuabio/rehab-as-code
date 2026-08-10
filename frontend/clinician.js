@@ -155,6 +155,9 @@
     $("patientSearch")?.addEventListener("input", filterRoster);
 
     await loadQueue();
+    // Auto-applied review feed loads alongside the pending queue. Non-blocking
+    // and best-effort — its own catch keeps a feed miss from stalling bootstrap.
+    loadAutoApplied();
     // First-run tour once the dashboard is up. Delay lets the queue render so
     // the spotlight can anchor to it.
     if (window.Tour) setTimeout(() => window.Tour.autoStart(CLINICIAN_TOUR), 600);
@@ -166,7 +169,7 @@
   }
 
   function bindHandlers() {
-    $("queueRefresh")?.addEventListener("click", loadQueue);
+    $("queueRefresh")?.addEventListener("click", () => { loadQueue(); loadAutoApplied(); });
     $("clinicianThemeToggle")?.addEventListener("click", toggleTheme);
     $("clinicianSignout")?.addEventListener("click", async () => {
       try { await window.RehabAuth.signOut(); } catch (_) {}
@@ -285,6 +288,91 @@
       `;
       li.addEventListener("click", () => selectItem(item.id));
       list.appendChild(li);
+    }
+  }
+
+  // ── Auto-applied review feed ──────────────────────────────────────────
+  //
+  // Low-risk drafts Coach Maya applied live without the clinician approval
+  // gate (change_tier "auto"; e.g. an in-plan, same-region exercise swap).
+  // The clinician reviews them after the fact: Revert re-activates the parent
+  // protocol, Acknowledge dismisses the row locally. Strictly additive — a
+  // failed load is swallowed so it never blocks the pending queue. Fed by
+  // GET /protocols/auto-applied (protocol_repo.list_auto_applied_open).
+
+  // The feed row carries no top-level `summary` column today; derive a short
+  // line from the payload, with a stable default. A future backend `summary`
+  // field, if added, takes precedence.
+  function autoAppliedSummary(row) {
+    if (row && typeof row.summary === "string" && row.summary.trim()) {
+      return row.summary.trim();
+    }
+    const p = (row && row.payload) || {};
+    const bits = [];
+    if (p.body_region) bits.push(String(p.body_region).replace(/_/g, " "));
+    if (p.phase) bits.push(String(p.phase));
+    if (p.week != null) bits.push("wk " + p.week);
+    if (bits.length) return "Coach Maya updated the plan — " + bits.join(" · ");
+    return "Coach Maya updated the plan";
+  }
+
+  // Pure string builder so the markup is unit-tested DOM-free (see
+  // frontend/tests/auto_applied_feed.test.js). The summary is escaped before
+  // it ever reaches innerHTML — the payload is model-authored, never trusted.
+  function autoAppliedRowHtml(row) {
+    const summary = escapeHtml(autoAppliedSummary(row));
+    const id = escapeHtml(String(row && row.id != null ? row.id : ""));
+    return `<span class="aa-summary">${summary}</span>`
+      + `<button type="button" class="aa-revert" data-id="${id}">Revert</button>`
+      + `<button type="button" class="aa-ack" data-id="${id}">Acknowledge</button>`;
+  }
+
+  function renderAutoApplied(rows) {
+    const host = $("autoAppliedList");
+    if (!host) return;
+    host.innerHTML = "";
+    const list = Array.isArray(rows) ? rows.filter(Boolean) : [];
+    const section = $("autoAppliedSection");
+    if (section) section.hidden = list.length === 0;
+    list.forEach((r) => {
+      const el = document.createElement("div");
+      el.className = "auto-applied-row";
+      el.innerHTML = autoAppliedRowHtml(r);
+      el.querySelector(".aa-revert")?.addEventListener("click", () => revertAuto(r.id));
+      el.querySelector(".aa-ack")?.addEventListener("click", () => el.remove());
+      host.appendChild(el);
+    });
+  }
+
+  async function loadAutoApplied() {
+    try {
+      const res = await authedFetch(`${API_BASE}/protocols/auto-applied`);
+      if (!res.ok) return;
+      const data = await res.json();
+      renderAutoApplied(data.auto_applied || []);
+    } catch (_) {
+      // Non-fatal: the feed is additive. Never block the pending queue.
+    }
+  }
+
+  async function revertAuto(id) {
+    if (!id) return;
+    try {
+      const res = await authedFetch(
+        `${API_BASE}/protocols/${encodeURIComponent(id)}/revert`,
+        { method: "POST" },
+      );
+      if (!res.ok) {
+        toast(`Couldn't revert: HTTP ${res.status}`, "error");
+        return;
+      }
+      toast("Reverted Coach Maya's change", "ok");
+      // Re-pull both feeds: the row leaves the auto-applied list, and the
+      // re-activated parent may resurface in the pending queue's context.
+      loadAutoApplied();
+      loadQueue();
+    } catch (e) {
+      toast(`Couldn't revert: ${e.message}`, "error");
     }
   }
 

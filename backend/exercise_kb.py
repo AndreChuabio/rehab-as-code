@@ -132,6 +132,14 @@ def resolve_to_library(
     query = " ".join(filter(None, [exercise_id, name])).lower()
     query = query.replace("-", " ").replace("_", " ")
     tokens = {t for t in query.split() if len(t) > 2}  # set: dedup
+    # Drop the body-region word itself. Every exercise in a region shares it
+    # (all ankle ids contain "ankle"), so scoring on it makes the resolver
+    # pick an ARBITRARY same-region exercise whenever the distinctive words
+    # ("pumps", "dorsiflexion") are not in the library. "seated ankle pumps"
+    # is not a library exercise, so it must resolve to None (Maya then flags
+    # it for the therapist) rather than to a wrong video.
+    if body_region:
+        tokens.discard(body_region.strip().lower())
     if not tokens:
         return None
 

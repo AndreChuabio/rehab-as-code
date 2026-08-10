@@ -241,6 +241,16 @@ def test_dispatch_start_intake_tool_forwards_args(monkeypatch):
     monkeypatch.setattr(ia, "capture_intake_from_chat", _fake_capture)
 
     import coach_chat
+    # mode="new" with nothing missing now fires _run_plan_generation, which
+    # spawns a DETACHED daemon thread running the real multi-agent pipeline.
+    # Unstubbed it races the rest of the suite and consumes stubbed sub-agent
+    # verdicts out from under test_plan_generation_orchestration. Stub it and
+    # assert the queue signal instead.
+    queued: dict[str, str] = {}
+    monkeypatch.setattr(
+        coach_chat, "_run_plan_generation",
+        lambda tok: queued.update(token=tok),
+    )
     result, extras = asyncio.run(coach_chat._dispatch_tool(
         name="start_intake_tool",
         arguments={
@@ -271,6 +281,11 @@ def test_dispatch_start_intake_tool_forwards_args(monkeypatch):
     tool_results = [e for e in extras if e.get("type") == "tool_result"]
     assert len(tool_results) == 1
     assert tool_results[0]["name"] == "start_intake_tool"
+
+    # A complete fresh intake queues the gated plan-generation pipeline, and it
+    # is attributed to the JWT-derived token, never a client-supplied one.
+    assert queued == {"token": "patient-uuid"}
+    assert result["plan_generation"] == "queued"
 
 
 def test_dispatch_start_intake_tool_rejects_missing_user_token():

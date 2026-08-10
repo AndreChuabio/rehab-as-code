@@ -630,6 +630,64 @@
   vertical-align: middle;
 }
 
+/* Auto-applied review feed. Sits at the top of the queue rail: low-risk
+   drafts Coach Maya applied live (no approval gate) that the clinician can
+   Revert or Acknowledge after the fact. A warn-tinted band so it reads as
+   "already live, review me" without the danger weight of a safety flag.
+   Hidden entirely when empty so the queue rail stays clean. */
+.auto-applied-section {
+  padding: 10px 16px 12px;
+  background: var(--warn-bg);
+  border-bottom: 1px solid var(--border);
+}
+.auto-applied-section[hidden] { display: none; }
+
+.auto-applied-eyebrow {
+  margin: 0 0 8px;
+  font-family: var(--font-mono, monospace);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--warn);
+}
+
+.auto-applied-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.auto-applied-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.auto-applied-row .aa-summary {
+  flex: 1 1 100%;
+  color: var(--text);
+}
+
+.auto-applied-row .aa-revert,
+.auto-applied-row .aa-ack {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+}
+.auto-applied-row .aa-revert {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.auto-applied-row .aa-revert:hover { background: var(--surface2); }
+.auto-applied-row .aa-ack:hover { background: var(--surface2); }
+
 /* AI-generated diff narration. Sits directly below the safety block so
    the clinician scans flags first, narration second, raw diff third.
    PR-Q: rebound to the dedicated AI tokens (--ai-bg, --ai-accent) so

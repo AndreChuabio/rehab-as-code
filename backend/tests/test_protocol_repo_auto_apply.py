@@ -178,3 +178,81 @@ def test_list_auto_applied_open_excludes_reverted(db):
     assert any(r["id"] == new_id for r in pr.list_auto_applied_open())
     pr.revert(new_id, reverted_by="clin-1")
     assert all(r["id"] != new_id for r in pr.list_auto_applied_open())
+
+
+def test_list_auto_applied_open_returns_auto_applied_flag(db):
+    _seed_active({"body_region": "knee", "exercises": [{"exercise_id": "a"}]})
+    new_id = pr.save_active_auto(
+        TOKEN, {"body_region": "knee", "exercises": [{"exercise_id": "b"}]},
+        created_by_agent="coach_swap")
+    rows = pr.list_auto_applied_open()
+    target = next(r for r in rows if r["id"] == new_id)
+    # Every feed row is guaranteed auto_applied; the column must be present and
+    # coerced to a real bool (sqlite stores 0/1) so callers don't KeyError.
+    assert target["auto_applied"] is True
+    assert target["reverted_at"] is None
+
+
+def test_two_consecutive_auto_apply_only_newest_is_open(db):
+    # A (seed active) -> B (auto) -> C (auto). Only C is the active, open
+    # revert target. B is superseded-but-unreverted and must NOT be offered.
+    a_id = _seed_active({"body_region": "knee", "exercises": [{"exercise_id": "a"}]})
+    b_id = pr.save_active_auto(
+        TOKEN, {"body_region": "knee", "exercises": [{"exercise_id": "b"}]},
+        created_by_agent="coach_swap")
+    c_id = pr.save_active_auto(
+        TOKEN, {"body_region": "knee", "exercises": [{"exercise_id": "c"}]},
+        created_by_agent="coach_swap")
+
+    assert pr.get_active(TOKEN)["id"] == c_id
+    assert pr.get(a_id)["status"] == "superseded"
+    assert pr.get(b_id)["status"] == "superseded"
+
+    open_ids = {r["id"] for r in pr.list_auto_applied_open()}
+    assert c_id in open_ids
+    assert b_id not in open_ids
+
+    # The stale superseded row must not be revertable.
+    with pytest.raises(pr.ProtocolRepoError):
+        pr.revert(b_id, reverted_by="clin-1")
+    # And the active pointer is untouched by the failed revert attempt.
+    assert pr.get_active(TOKEN)["id"] == c_id
+
+    # Reverting the newest (active) auto row re-activates its direct parent B.
+    pr.revert(c_id, reverted_by="clin-1")
+    assert pr.get_active(TOKEN)["id"] == b_id
+
+
+def test_revert_superseded_by_clinician_approval_raises(db):
+    # A (seed) -> B (auto, active). Clinician approves a fresh draft C, which
+    # supersedes B and becomes active. Reverting B must raise and must never
+    # disturb the clinician-approved active protocol C.
+    _seed_active({"body_region": "knee", "exercises": [{"exercise_id": "a"}]})
+    b_id = pr.save_active_auto(
+        TOKEN, {"body_region": "knee", "exercises": [{"exercise_id": "b"}]},
+        created_by_agent="coach_swap")
+    c_pending = pr.save_pending(
+        TOKEN, {"body_region": "knee", "exercises": [{"exercise_id": "c"}]},
+        created_by_agent="planner")
+    c_id = pr.approve(c_pending, reviewed_by="clin-1")["id"]
+
+    assert pr.get_active(TOKEN)["id"] == c_id
+    assert b_id not in {r["id"] for r in pr.list_auto_applied_open()}
+
+    with pytest.raises(pr.ProtocolRepoError):
+        pr.revert(b_id, reverted_by="clin-1")
+    # C remains the active protocol; the failed revert did not kill it.
+    assert pr.get_active(TOKEN)["id"] == c_id
+
+
+def test_revert_missing_row_raises(db):
+    with pytest.raises(pr.ProtocolRepoError):
+        pr.revert("ffffffffffffffffffffffffffffffff", reverted_by="clin-1")
+
+
+def test_revert_non_auto_row_raises(db):
+    # A plain clinician-approved active row is not auto-applied; revert refuses.
+    active_id = _seed_active(
+        {"body_region": "knee", "exercises": [{"exercise_id": "a"}]})
+    with pytest.raises(pr.ProtocolRepoError):
+        pr.revert(active_id, reverted_by="clin-1")

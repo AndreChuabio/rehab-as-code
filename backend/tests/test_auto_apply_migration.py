@@ -86,24 +86,24 @@ def test_protocols_table_has_auto_apply_columns(tmp_path, monkeypatch):
 # `invalid input syntax for type uuid`. These read the migration file directly
 # so the two backends cannot drift apart again unnoticed.
 
-_MIGRATION = (
-    Path(__file__).resolve().parents[2]
-    / "supabase" / "migrations" / "20260628120000_protocol_auto_apply.sql"
-)
+_MIGRATIONS = Path(__file__).resolve().parents[2] / "supabase" / "migrations"
+_MIGRATION = _MIGRATIONS / "20260628120000_protocol_auto_apply.sql"
+_CORRECTIONS = _MIGRATIONS / "20260810230000_protocol_auto_apply_corrections.sql"
 
 
-def _migration_sql() -> str:
-    """The migration's executable SQL, lowercased with -- comments stripped.
+def _sql_of(path: Path) -> str:
+    """A migration's executable SQL, lowercased with -- comments stripped.
 
     Comments are stripped because they discuss the very constructs these tests
     forbid (e.g. the note explaining why CONCURRENTLY is not used).
     """
-    assert _MIGRATION.exists(), f"migration missing at {_MIGRATION}"
-    lines = [
-        line.split("--", 1)[0]
-        for line in _MIGRATION.read_text().splitlines()
-    ]
+    assert path.exists(), f"migration missing at {path}"
+    lines = [line.split("--", 1)[0] for line in path.read_text().splitlines()]
     return "\n".join(lines).lower()
+
+
+def _migration_sql() -> str:
+    return _sql_of(_MIGRATION)
 
 
 def test_reverted_by_is_text_not_uuid():
@@ -130,5 +130,25 @@ def test_no_create_index_concurrently():
     CREATE INDEX CONCURRENTLY cannot run inside one (SQLSTATE 25001) and would
     fail the deploy on the merge-to-main path. lock_timeout is the guard here."""
     sql = _migration_sql()
+    assert "concurrently" not in sql
+    assert "set lock_timeout" in sql
+
+
+def test_corrections_migration_reconciles_prod():
+    """20260628120000 was ghost-applied to prod in its pre-audit form on
+    2026-06-28, so its version is recorded and it can never re-run -- and every
+    statement in it is IF NOT EXISTS-guarded, so even a forced replay no-ops
+    against the existing column and index. The three corrections (reverted_by
+    uuid -> text, feed index reshape, parent_id index) plus the two missing
+    column comments only reach prod through this append-only file. Without this
+    test the guards above pass while describing a file that never runs again."""
+    sql = _sql_of(_CORRECTIONS)
+    assert "alter column reverted_by type text" in sql
+    assert "drop index if exists public.protocols_auto_applied_open_idx" in sql
+    assert "(created_at desc)" in sql
+    assert "(token, created_at desc)" not in sql
+    assert "protocols_parent_id_idx" in sql
+    assert "comment on column public.protocols.reverted_at" in sql
+    assert "comment on column public.protocols.reverted_by" in sql
     assert "concurrently" not in sql
     assert "set lock_timeout" in sql

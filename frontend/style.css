@@ -2174,6 +2174,13 @@ body.pose-active .browse-all-panel,
 body.pose-active .chat-suggestions,
 body.pose-active .chat-header { display: none !important; }
 body.pose-active .agent-panel { display: none; }
+/* During an active form-check set the live pose claims the FULL pane. The
+   reference demo column is a 1fr sibling in .pose-split; at 50/50 it crushed
+   the live overlay (metrics bar, rep hero, framing card, per-rep log) into half
+   the width and overflowed it. Collapse to one column and hide the reference so
+   the patient sees themselves full-width — the clean single-view experience. */
+body.pose-active .pose-split { grid-template-columns: 1fr; }
+body.pose-active .pose-split-ref { display: none; }
 body.pose-active .main { max-width: none; padding: 16px 24px; }
 /* Let the pose-split claim full viewport-driven height. The gallery's
    default overflow: hidden is fine for thumbnails but clips the form-check
@@ -3761,6 +3768,36 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 .review-pill-panel[hidden] { display: none; }
 .review-pill-panel-body { margin: 0; }
+
+/* "Updated by Coach Maya" note — sits just below the review pill. Shown when
+   the active protocol was applied live by Coach Maya (auto_applied). Warm
+   apricot --accent2 (the encouragement tone) so it reads as a friendly
+   heads-up, never an alarm. */
+.maya-updated-note {
+  position: fixed;
+  top: 88px;          /* below the review pill (top: 56px) when both show. */
+  right: 18px;
+  z-index: 8500;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--surface2);
+  border: 1px solid var(--accent2);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--accent);
+  box-shadow: var(--shadow);
+}
+.maya-updated-note[hidden] { display: none; }
+.maya-updated-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: var(--accent2);
+  box-shadow: 0 0 6px rgba(var(--rgb-accent2),  0.55);
+}
 
 /* ─────────────────────────────────────────────────────────────────────────
    Patient-side pending-protocol surface (PR-H replaces the self-approve
