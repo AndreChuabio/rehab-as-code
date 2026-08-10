@@ -385,6 +385,43 @@ def test_dedup_within_session(monkeypatch):
     assert len(classifier_calls) == 1
 
 
+def test_dedup_is_per_patient_not_per_session(monkeypatch):
+    """Two DIFFERENT patients sending the same symptom message must BOTH be
+    classified. Regression: the de-dup keyed on session_id, which the frontend
+    hardcodes to "default" for every browser patient — so on a warm Fluid
+    Compute instance patient A's message suppressed patient B's first report,
+    silently skipping the clinician-attention safety check for B."""
+    _reset_seen_dedup()
+    _patch_openai(monkeypatch)
+
+    classifier_tokens: list[str] = []
+    import agents.symptom_classifier as sc
+
+    def _fake_classify(message, **kwargs):
+        classifier_tokens.append(kwargs.get("token"))
+        return {"severity": "minor", "reasoning": "mild.",
+                "suggested_response": "ok", "regression_exercise_id": None}
+
+    monkeypatch.setattr(sc, "classify", _fake_classify)
+    import coach_chat
+
+    async def _no_executor(*a, **kw):
+        return {}
+
+    msg = "my knee hurts"
+    for token in ("patient-A", "patient-B"):
+        _drain(coach_chat.chat_stream(
+            messages=[{"role": "user", "content": msg}],
+            health={}, protocol={}, trigger_executor=_no_executor,
+            user_token=token, session_id="default",  # both share the FE default
+        ))
+
+    assert classifier_tokens == ["patient-A", "patient-B"], (
+        "both patients must be classified independently, not de-duped on the "
+        "shared session_id"
+    )
+
+
 def test_classifier_error_is_swallowed_no_silent_minor(monkeypatch):
     """When Haiku errors, Maya still answers, but the [SYMPTOM_TRIAGE] block
     is OMITTED. We do NOT silently downgrade to a fake 'minor' verdict."""

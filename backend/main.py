@@ -121,6 +121,13 @@ app.include_router(admin_router)
 from api.tavus_proxy import router as tavus_proxy_router  # noqa: E402
 app.include_router(tavus_proxy_router)
 
+# Tavus LLM-tool delivery.api callback. Read-only Supabase reads (protocol /
+# history / approved exercises) the avatar's tool calls dispatch to; HMAC-signed
+# (X-Tavus-Signature), patient recovered from conversation_id. Mounted under
+# /tavus/tools/*.
+from api.tavus_tools import router as tavus_tools_router  # noqa: E402
+app.include_router(tavus_tools_router)
+
 # Junction (the rebrand of Vital) wearable-connect router. Hosted-Link flow +
 # refresh + status, all Depends(current_user_id); mounted under /api/junction/*.
 from api.junction import router as junction_router  # noqa: E402
@@ -181,11 +188,17 @@ def me_role(user_id: str | None = Depends(optional_user_id)):
     """Return the caller's role for client-side routing.
 
     role=anonymous   no JWT
-    role=patient     authenticated, not in clinicians table
-    role=clinician   authenticated, in clinicians table
+    role=patient     authenticated, not staff
+    role=clinician   authenticated staff (clinician)
+    role=admin       authenticated staff with admin role (superset of clinician)
     """
     if not user_id:
         return {"role": "anonymous", "user_id": None}
+    # admin is a strict superset of clinician — check it FIRST, else an admin
+    # is reported as a plain clinician and the /admin pipeline-debug chrome
+    # (gated on role=='admin' in clinician.js) stays permanently hidden.
+    if is_admin(user_id):
+        return {"role": "admin", "user_id": user_id}
     if is_clinician(user_id):
         return {"role": "clinician", "user_id": user_id}
     return {"role": "patient", "user_id": user_id}
@@ -506,8 +519,24 @@ def get_context(user_id: str | None = Depends(optional_user_id)):
 # Apple Health onboarding — token-based Shortcut magic link
 # -------------------------------------------------------------------------
 
-def _base_url() -> str:
-    return (os.getenv("PUBLIC_BASE_URL") or "http://localhost:8000").rstrip("/")
+def _base_url(request: Request | None = None) -> str:
+    """Resolve the public base URL for onboarding links.
+
+    PUBLIC_BASE_URL wins when set. Otherwise derive it from the incoming
+    request (honoring the x-forwarded-* headers Vercel sets) so prod links
+    never embed http://localhost:8000. Falls back to localhost only when
+    neither is available (a bare unit test).
+    """
+    env = (os.getenv("PUBLIC_BASE_URL") or "").rstrip("/")
+    if env:
+        return env
+    if request is not None:
+        proto = request.headers.get("x-forwarded-proto") or request.url.scheme
+        host = request.headers.get("x-forwarded-host") or request.headers.get("host")
+        if host:
+            return f"{proto}://{host}".rstrip("/")
+        return str(request.base_url).rstrip("/")
+    return "http://localhost:8000"
 
 
 def _qr_svg(url: str) -> str:
@@ -519,13 +548,13 @@ def _qr_svg(url: str) -> str:
 
 
 @app.post("/connect/apple-health")
-def connect_apple_health():
+def connect_apple_health(request: Request):
     """
     Generate a new user token and return the onboarding URL.
     Share the returned onboard_url with the patient via Slack, SMS, or QR code.
     """
     token = create_token()
-    base = _base_url()
+    base = _base_url(request)
     onboard_url = f"{base}/onboard/{token}"
     magic_link = f"shortcuts://import-shortcut?url={quote(f'{base}/shortcut/{token}', safe='')}&name=RehabCoach%20Sync"
     return {
@@ -553,12 +582,12 @@ def connect_status(token: str):
 
 
 @app.get("/onboard/{token}", response_class=HTMLResponse)
-def onboard_page(token: str):
+def onboard_page(token: str, request: Request):
     """Mobile-friendly onboarding page. Patient opens this on iPhone and taps Install."""
     if not token_exists(token):
         raise HTTPException(status_code=404, detail="unknown token")
 
-    base = _base_url()
+    base = _base_url(request)
     magic_link = f"shortcuts://import-shortcut?url={quote(f'{base}/shortcut/{token}', safe='')}&name=RehabCoach%20Sync"
     qr_svg = _qr_svg(magic_link)
 
@@ -835,7 +864,11 @@ def _summarize_pose_set(reps: list[PoseRepRecord]) -> tuple[int, float | None, s
     rep_count = len(reps)
     depths = [r.depth_min for r in reps if r.depth_min is not None]
     best_depth = min(depths) if depths else None
-    rank = {"good": 0, "warn": 1, "fail": 2}
+    # The pose client (frontend/pose.js) emits status good|warn|bad — NOT
+    # "fail". A "bad" key here is load-bearing: without it the worst form a
+    # rep can carry ranks equal to "good" and the whole set launders to
+    # "good", hiding the exact signal the form-check exists to surface.
+    rank = {"good": 0, "warn": 1, "bad": 2}
     worst_status = "good"
     for r in reps:
         if rank.get(r.status or "good", 0) > rank.get(worst_status, 0):
@@ -888,7 +921,7 @@ async def pose_session(
         protocol_id = active["id"] if active else None
 
         import session_repo as _sr
-        _sr.upsert_completed_pose(
+        mirror = _sr.upsert_completed_pose(
             token=user_id,
             exercise_id=req.exercise_id,
             pose_metrics={
@@ -901,11 +934,18 @@ async def pose_session(
             completed_at=req.ended_at,
             protocol_id=protocol_id,
         )
+        session_row_id = (mirror or {}).get("id")
     except Exception as exc:
         logger.warning("sessions mirror failed for pose set: %s", exc)
+        session_row_id = None
 
+    # Return the SESSIONS-row id (not the checkins PK from save_checkin's
+    # payload). The frontend forwards this as `associated_session_id` on the
+    # auto-checkin, and session_repo's LEFT JOIN matches it against s.id — so
+    # the "how it felt" line + pain/RPE only link when we hand back the
+    # sessions id. Fall back to the checkins id only if the mirror failed.
     return {
-        "session_id": payload.get("session_id"),
+        "session_id": session_row_id or payload.get("session_id"),
         "rep_count": rep_count,
         "best_depth": best_depth,
         "worst_status": worst_status,
@@ -960,9 +1000,16 @@ def list_pending_protocols(
         token = row.get("token")
         if token and token not in patient_lookup:
             user = user_store.load_user(token) or {}
-            patient_lookup[token] = user.get("patient_name") or (
-                user.get("intake") or {}
-            ).get("name")
+            name = user.get("patient_name") or (user.get("intake") or {}).get("name")
+            if not name:
+                # Never surface a raw UUID in the queue: fall back to the
+                # canonical resolver (full_name -> email local-part -> "the
+                # patient"), same as the roster endpoint below.
+                try:
+                    name = user_store.get_display_name(token)
+                except Exception:
+                    name = None
+            patient_lookup[token] = name
         out.append({
             "id": row["id"],
             "token": token,
@@ -1526,7 +1573,7 @@ def _serialize_protocol_row(row: dict | None) -> dict | None:
 def approve_protocol(
     protocol_id: str,
     req: ApproveProtocolRequest,
-    user_id: str = Depends(current_user_id),
+    user_id: str = Depends(require_clinician_id),
 ):
     """Promote a pending_review protocol to active. Transactional — supersedes
     the previous active row in the same statement. Idempotency: re-calling
@@ -1570,7 +1617,7 @@ def approve_protocol(
 def reject_protocol(
     protocol_id: str,
     req: RejectProtocolRequest,
-    user_id: str = Depends(current_user_id),
+    user_id: str = Depends(require_clinician_id),
 ):
     """Mark a pending_review protocol as rejected. Active row unchanged.
     Notes required for the audit trail."""

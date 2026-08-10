@@ -471,11 +471,41 @@ def draft_and_save_pending(
     if expected_region and expected_region != "multi":
         payload_to_save["body_region"] = expected_region
 
+    # Route the draft through the SAME library-coverage gate the multi-agent
+    # pipeline uses (plan_generation_agent): an out-of-scope-region draft goes
+    # to needs_clinician_review with a med-severity concern (red banner, top of
+    # queue); an in-scope draft with no exact week file gets a low informational
+    # concern. Chat drafts previously ALL saved as plain pending_review
+    # regardless of region, so a shoulder revision drafted from chat skipped the
+    # escalation the /interact pipeline applies. Fail-open — a gate error must
+    # not block the draft (the clinician review gate still catches everything).
+    save_status = "pending_review"
+    coverage_concerns: list[dict] = []
+    try:
+        from agents.plan_generation_agent import _coverage_concern
+        from agents.researcher import compute_library_match
+
+        _week = payload_to_save.get("week")
+        lib_match = compute_library_match(
+            (intake or {}).get("injury_type"),
+            int(_week) if _week else 1,
+            body_region=expected_region,
+        )
+        if not lib_match.get("in_scope"):
+            save_status = "needs_clinician_review"
+        _cov = _coverage_concern(lib_match)
+        if _cov:
+            coverage_concerns.append(_cov)
+    except Exception:
+        logger.exception("chat drafter coverage gate failed flow=%s", flow)
+
     try:
         protocol_id = protocol_repo.save_pending(
             token=token,
             payload=payload_to_save,
             created_by_agent=f"chat:{flow}",
+            status=save_status,
+            safety_concerns=coverage_concerns or None,
         )
     except Exception as exc:
         logger.exception("save_pending failed for flow=%s", flow)

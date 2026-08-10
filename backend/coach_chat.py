@@ -35,6 +35,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, AsyncIterator, Awaitable, Callable
 
 import exercise_kb
@@ -63,16 +64,37 @@ SYMPTOM_KEYWORD_RE = re.compile(
     re.IGNORECASE,
 )
 
-# In-memory de-dup keyed by (session_id, sha256(message)) so an identical
-# message inside the same session doesn't re-classify on the model's
-# follow-up loop iteration. Vercel function instance lifetime is fine here -
-# this is not a correctness boundary, just a cost-saver. No Redis needed.
-_TRIAGE_SEEN: dict[tuple[str, str], bool] = {}
+# In-memory de-dup so an identical symptom message inside the same turn-loop
+# doesn't re-classify. Keyed on the AUTHENTICATED PATIENT (not the frontend's
+# hardcoded session_id="default") so patient A's symptom can never suppress
+# patient B's first report on a warm Fluid Compute instance. A TTL bounds it so
+# a patient RE-reporting the same symptom later is re-triaged — the classifier
+# gates the clinician-attention safety path, so a permanent skip would silently
+# disable it. Cost-saver, not a correctness boundary, but it must isolate
+# patients and expire. No Redis needed.
+_TRIAGE_TTL_S = 3600.0
+_TRIAGE_SEEN: dict[tuple[str, str], float] = {}   # key -> monotonic expiry
 
 
-def _triage_seen_key(session_id: str, message: str) -> tuple[str, str]:
+def _triage_seen_key(identity: str, message: str) -> tuple[str, str]:
     digest = hashlib.sha256(message.encode("utf-8")).hexdigest()
-    return (session_id, digest)
+    return (identity or "anon", digest)
+
+
+def _triage_recently_seen(identity: str, message: str) -> bool:
+    """True when this (patient, message) was triaged within the TTL; marks it
+    seen otherwise. Prunes expired keys opportunistically so the dict cannot
+    grow unbounded on a long-lived instance."""
+    now = time.monotonic()
+    key = _triage_seen_key(identity, message)
+    exp = _TRIAGE_SEEN.get(key)
+    if exp is not None and exp > now:
+        return True
+    if len(_TRIAGE_SEEN) > 512:
+        for k in [k for k, e in _TRIAGE_SEEN.items() if e <= now]:
+            _TRIAGE_SEEN.pop(k, None)
+    _TRIAGE_SEEN[key] = now + _TRIAGE_TTL_S
+    return False
 
 
 def _first_symptom_keyword(message: str) -> str | None:
@@ -86,6 +108,56 @@ def _first_symptom_keyword(message: str) -> str | None:
         return None
     m = SYMPTOM_KEYWORD_RE.search(message)
     return m.group(1).lower() if m else None
+
+
+# Retrieval verbs that mean "put the exercise video/card on screen". Rule 3 in
+# the system prompt only covers "how to do / start" phrasing, so gpt-4o-mini
+# used to answer these in TEXT with a fabricated markdown link instead of
+# calling recommend_exercise (observed on prod: "pull up my calf raises video"
+# needed a second "ok" before the card appeared). We resolve + emit the card
+# deterministically instead of trusting the model.
+_VIDEO_INTENT_RE = re.compile(
+    r"\b(pull up|bring up|show|see|watch|play|open|the video|a video|demo)\b",
+    re.IGNORECASE,
+)
+
+
+def _route_exercise_video(
+    message: str, protocol: dict[str, Any]
+) -> dict[str, Any] | None:
+    """Resolve a 'pull up my <exercise> video' request to a library exercise
+    dict (ready for exercise_kb.to_card), or None.
+
+    Intent-gated (never fires on non-retrieval messages like 'show my
+    progress') and scoped to the patient's OWN prescribed exercises so a
+    partial reference like 'my calf raises' maps to the prescribed row. Returns
+    None unless a protocol exercise name/id clearly appears in the message —
+    deliberately conservative to avoid forcing a card on an unrelated message.
+
+    The resolved hit routes through the same `_card_gate_reason` the two
+    card-emitting tools use. Being sourced from the patient's own protocol is
+    not sufficient: a drifted/legacy plan row can carry an out-of-scope
+    exercise, and when the protocol has no body_region the resolver keyword-
+    searches all six regions. This is a card-emitting path like any other, so
+    it shares the one gate rather than trusting the protocol as clean.
+    """
+    if not message or not _VIDEO_INTENT_RE.search(message):
+        return None
+    lo = message.lower()
+    region = (protocol or {}).get("body_region")
+    for ex in (protocol or {}).get("exercises", []) or []:
+        name = (ex.get("name") or "").strip().lower()
+        eid = ex.get("id") or ex.get("library_id") or ""
+        eid_words = eid.replace("_", " ").strip().lower()
+        if (name and len(name) >= 4 and name in lo) or (
+            eid_words and len(eid_words) >= 4 and eid_words in lo
+        ):
+            hit = exercise_kb.find_by_id(eid) or exercise_kb.resolve_to_library(
+                exercise_id=eid, name=ex.get("name"), body_region=region
+            )
+            if hit and _card_gate_reason(hit.get("id"), region) is None:
+                return hit
+    return None
 
 
 def _format_triage_block(triage: dict[str, Any]) -> str:
@@ -574,9 +646,16 @@ async def _dispatch_tool(
             _us.delete_intake(user_token)
         except Exception as exc:
             logger.exception("delete_intake failed")
+            # Emit an error-shaped tool_result (not an empty event list) so the
+            # frontend's r.ok===false branch surfaces the failure instead of
+            # the patient silently seeing nothing happen.
             return (
                 {"ok": False, "error": str(exc)},
-                [],
+                [{
+                    "type": "tool_result",
+                    "name": name,
+                    "result": {"ok": False, "error": str(exc)},
+                }],
             )
         reason = arguments.get("reason", "patient requested restart")
         return (
@@ -724,9 +803,9 @@ async def chat_stream(
         "",
     )
     if latest_user_msg and SYMPTOM_KEYWORD_RE.search(latest_user_msg):
-        seen_key = _triage_seen_key(session_id, latest_user_msg)
-        if not _TRIAGE_SEEN.get(seen_key):
-            _TRIAGE_SEEN[seen_key] = True
+        # Key de-dup on the patient, not the frontend session_id (a shared
+        # "default"), so one patient's symptom can't suppress another's.
+        if not _triage_recently_seen(user_token or session_id, latest_user_msg):
             try:
                 # Local import so the OpenAI-only chat path doesn't pay
                 # the anthropic import cost when no symptom is mentioned.
@@ -826,6 +905,25 @@ async def chat_stream(
         {"role": "system", "content": system_prompt},
         *messages,
     ]
+
+    # Deterministic pre-route: a "pull up / show / watch the video" request for
+    # one of the patient's prescribed exercises MUST surface the card, not risk
+    # a text reply with a fabricated link. Emit the card ourselves, then tell
+    # the model it's already shown so it just narrates a short cue (and does not
+    # re-emit or write a link).
+    routed = _route_exercise_video(latest_user_msg, protocol) if latest_user_msg else None
+    if routed:
+        routed_card = exercise_kb.to_card(routed)
+        yield {"type": "card", "card": routed_card}
+        convo.append({
+            "role": "system",
+            "content": (
+                f"The exercise card and video for '{routed_card.get('name')}' "
+                "are ALREADY displayed to the patient. Do NOT call "
+                "recommend_exercise for it and do NOT write any link or URL — "
+                "reply with one short spoken coaching cue for it."
+            ),
+        })
 
     for iteration in range(max_iters):
         try:

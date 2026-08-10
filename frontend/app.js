@@ -608,12 +608,12 @@ async function refreshPatientState({ openModalIfNeeded = true } = {}) {
   // change it. Idempotent — hides the card when no payer_model is present.
   renderPatientPayerGoals(patientState?.payer_model, patientState?.goals);
 
-  // PR-M flow stitching: surface the "Start today's session" CTA when a
-  // protocol was recently approved and the patient hasn't started today
-  // yet. Decoupled from openModalIfNeeded — the CTA is an inline render,
-  // not a blocking modal, so it should refresh on every state poll.
-  // Errors are logged + swallowed; the CTA is a soft affordance and
-  // should never break the rest of refreshPatientState.
+  // PR-M flow stitching: repaint the today's-session hero card above the
+  // chat log (Start / Continue / done-for-today). Decoupled from
+  // openModalIfNeeded — the hero is an inline render, not a blocking
+  // modal, so it should refresh on every state poll. Errors are logged +
+  // swallowed; the hero is a soft affordance and should never break the
+  // rest of refreshPatientState.
   refreshTodaysFlowCTA().catch((e) =>
     console.warn("refreshTodaysFlowCTA failed:", e),
   );
@@ -916,7 +916,7 @@ function formatRelativeAgo(iso) {
 function showIntakeModal() {
   const modal = document.getElementById("intakeModal");
   const log = document.getElementById("intakeLog");
-  const fill = document.getElementById("intakeProgressFill");
+  const fill = document.getElementById("intakeModalProgressFill");
   if (!modal) return;
   // If the legacy demo chat was already running (e.g., the page loaded with
   // #intake before auth resolved), tear it down so the modal isn't competing
@@ -1002,7 +1002,7 @@ async function submitIntakeTurn(userText) {
     }
 
     // Crude progress indicator: bump fill by 1/8 each round.
-    const fill = document.getElementById("intakeProgressFill");
+    const fill = document.getElementById("intakeModalProgressFill");
     if (fill) {
       const turns = intakeHistory.filter((m) => m.role === "user").length;
       fill.style.width = `${Math.min(100, (turns / 7) * 100)}%`;
@@ -1392,9 +1392,14 @@ async function saveSettingsNotifications() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     });
-    if (res.ok && patientState) patientState.notification_prefs = await res.json();
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (patientState) patientState.notification_prefs = await res.json();
   } catch (e) {
     console.warn("settings notifications save failed", e);
+    // Don't leave an unsaved value looking saved: tell the patient + re-seed
+    // the controls from the last known server state.
+    showToast("Couldn't save notification settings — reverted.", "error");
+    loadSettingsNotifications();
   }
 }
 
@@ -1434,9 +1439,14 @@ async function saveSettingsCoachMaya() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ voice, greeting_cadence: cadence, language }),
     });
-    if (res.ok && patientState) patientState.coach_prefs = await res.json();
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (patientState) patientState.coach_prefs = await res.json();
   } catch (e) {
     console.warn("settings coach prefs save failed", e);
+    // Re-seed UI + localStorage mirrors from the last known server state so
+    // the optimistic localStorage writes above don't persist an unsaved value.
+    showToast("Couldn't save Coach Maya settings — reverted.", "error");
+    renderSettingsCoachMaya();
   }
 }
 
@@ -1809,7 +1819,7 @@ function wireSettingsOnce() {
 }
 
 // ---------------------------------------------------------------------------
-// Sidebar: wearable signals + calendar
+// Sidebar: wearable signals + momentum
 // ---------------------------------------------------------------------------
 
 async function loadSidebar() {
@@ -1817,18 +1827,16 @@ async function loadSidebar() {
     // authedFetch on /health-data so a connected patient's Junction row resolves
     // server-side via current_user_id (the single get_health_data seam). Falls
     // back to mock defaults when unauthed or not connected.
-    const [healthRes, calRes] = await Promise.all([
-      authedFetch(`${API_BASE}/health-data`),
-      fetch(`${API_BASE}/calendar`),
-    ]);
+    const healthRes = await authedFetch(`${API_BASE}/health-data`);
     const health = await healthRes.json();
-    const cal = await calRes.json();
     renderHealth(health);
-    renderCalendar(cal.events);
   } catch (e) {
     console.error("Failed to load sidebar data:", e);
-    showToast("Could not connect to backend - is it running?", "error");
+    showToast("Could not load your data. Check your connection and try again.", "error");
   }
+  // Momentum loads independently — its failures render a quiet zero-state,
+  // never a toast, so it must not share the health card's error path.
+  loadMomentum();
 }
 
 // Render the three score values. When `live` is false the values are admittedly
@@ -2002,27 +2010,105 @@ async function handleJunctionReturn() {
   loadSidebar();
 }
 
-function renderCalendar(events) {
-  const list = document.getElementById("eventList");
-  if (!events || events.length === 0) {
-    list.innerHTML = "<li class='loading-text'>No events today</li>";
+// ---------------------------------------------------------------------------
+// Sidebar: momentum (streak + sessions this week)
+//
+// Reads /sessions/recent?days=30 (same self-scoped endpoint as the History
+// pane) and reduces the completed rows to two numbers: a consecutive-day
+// streak (ending today, or yesterday as grace so a morning visit does not
+// zero last night's streak) and completed sessions this calendar week
+// (Monday start), both in local time. Any failure — demo mode 401s here —
+// renders the quiet zero-state, never an error.
+// ---------------------------------------------------------------------------
+
+// Local-time YYYY-MM-DD key. toISOString would shift the day near midnight
+// for non-UTC patients, so build the key from local date parts.
+function _localDayKey(d) {
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
+}
+
+// Pure reducer over /sessions/recent rows -> { streak, weekCount,
+// hasCompleted }. Counts only status === "completed" rows; timestamps come
+// from completed_at with created_at as the fallback for legacy rows.
+function computeMomentum(sessions, now = new Date()) {
+  const completedDays = new Set();
+  let weekCount = 0;
+  let hasCompleted = false;
+
+  // Start of the current Monday-based week, local midnight.
+  const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  weekStart.setDate(weekStart.getDate() - ((weekStart.getDay() + 6) % 7));
+
+  for (const s of sessions || []) {
+    if (!s || s.status !== "completed") continue;
+    const ts = new Date(s.completed_at || s.created_at || "");
+    if (Number.isNaN(ts.getTime())) continue;
+    hasCompleted = true;
+    completedDays.add(_localDayKey(ts));
+    if (ts >= weekStart) weekCount += 1;
+  }
+
+  // Walk backwards from today (or yesterday, grace) while every day has at
+  // least one completed session.
+  let streak = 0;
+  const cursor = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  if (!completedDays.has(_localDayKey(cursor))) {
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  while (completedDays.has(_localDayKey(cursor))) {
+    streak += 1;
+    cursor.setDate(cursor.getDate() - 1);
+  }
+  return { streak, weekCount, hasCompleted };
+}
+
+async function loadMomentum() {
+  const host = document.getElementById("momentumStats");
+  if (!host) return;
+  let sessions = [];
+  try {
+    const res = await authedFetch(`${API_BASE}/sessions/recent?days=30`);
+    if (res.ok) {
+      const data = await res.json();
+      sessions = data?.sessions || [];
+    }
+  } catch (e) {
+    // Quiet by design: momentum is motivational, never an error surface.
+    console.warn("loadMomentum failed:", e);
+  }
+  renderMomentum(computeMomentum(sessions));
+}
+
+function renderMomentum({ streak, weekCount, hasCompleted }) {
+  const host = document.getElementById("momentumStats");
+  if (!host) return;
+  if (!hasCompleted) {
+    host.innerHTML =
+      `<div class="momentum-empty">Complete your first session to start a streak.</div>`;
     return;
   }
-  list.innerHTML = events
-    .map(
-      (e) => `
-    <li class="event-item ${e.type === "high_stakes" ? "high-stakes" : ""}">
-      <span class="event-time">${e.time}</span>
-      <span class="event-title">${e.title}</span>
-    </li>
-  `,
-    )
-    .join("");
+  host.innerHTML = `
+    <div class="stat">
+      <span class="stat-label">Current streak</span>
+      <span class="stat-value">${streak} day${streak === 1 ? "" : "s"}</span>
+    </div>
+    <div class="stat">
+      <span class="stat-label">Sessions this week</span>
+      <span class="stat-value">${weekCount}</span>
+    </div>
+  `;
 }
 
 // ---------------------------------------------------------------------------
 // Protocol panel
 // ---------------------------------------------------------------------------
+
+// Count of exercises on the active protocol, cached by renderProtocol.
+// Feeds the today's-session hero (refreshTodaysFlowCTA) — including demo
+// mode, where patientState is null but /protocol still returns a plan.
+let _activeProtocolExerciseCount = 0;
 
 async function loadProtocol() {
   // PR-V3: drop the localStorage `intakeComplete` gate. Same reasoning as
@@ -2039,6 +2125,12 @@ async function loadProtocol() {
     // Legacy GitHub repo link is gone (PR-bus retired); the existing
     // maybeRedirectToClinician + maybeRenderBackToDashboard helpers
     // surface the dashboard affordance for staff users.
+    // Repaint the today's-session hero now that the exercise count is
+    // fresh. This is the demo-mode entry path too — refreshPatientState
+    // bails without a JWT, but loadProtocol always runs on boot.
+    refreshTodaysFlowCTA().catch((e) =>
+      console.warn("refreshTodaysFlowCTA failed:", e),
+    );
   } catch (e) {
     console.error("Failed to load protocol:", e);
   }
@@ -2051,6 +2143,7 @@ function renderProtocol({ protocol }) {
   const isPendingIntake =
     !exercises.length ||
     protocol.phase === "pending_intake";
+  _activeProtocolExerciseCount = isPendingIntake ? 0 : exercises.length;
 
   if (isPendingIntake) {
     meta.textContent = "no protocol yet";
@@ -2073,11 +2166,12 @@ function renderProtocol({ protocol }) {
       if (ex.sets && ex.reps) parts.push(`${ex.sets}x${ex.reps}`);
       if (ex.duration_min) parts.push(`${ex.duration_min} min`);
       if (ex.ROM_target_deg != null) parts.push(`ROM ${ex.ROM_target_deg} deg`);
-      if (ex.intensity) parts.push(ex.intensity);
+      if (ex.load) parts.push(friendlySpec(ex.load));
+      if (ex.intensity) parts.push(friendlySpec(ex.intensity));
       const spec = parts.length ? parts.join(" - ") : "see protocol";
       return `
     <li class="protocol-exercise">
-      <span class="ex-name">${escapeHtml(ex.name || "unnamed")}</span>
+      <span class="ex-name">${escapeHtml(friendlyExerciseLabel(ex.name))}</span>
       <span class="ex-spec">${escapeHtml(spec)}</span>
     </li>
   `;
@@ -2198,7 +2292,7 @@ async function _showVideoActive(conversationUrl, conversationId) {
   els.active.style.display = "flex";
 
   if (!window.Daily || typeof window.Daily.createCallObject !== "function") {
-    showToast("Video SDK failed to load. Hard-refresh and retry.", "error");
+    showToast("Video could not load. Refresh the page and try again.", "error");
     _showVideoPreSession();
     return;
   }
@@ -2225,6 +2319,9 @@ async function _showVideoActive(conversationUrl, conversationId) {
         }
       } catch (_) {}
     });
+    // Incoming Tavus tool calls (delivery: app_message) ride this same Daily
+    // data channel; route monitor_exercise_form -> the in-call form-check.
+    tavusCall.on("app-message", _onTavusAppMessage);
     await tavusCall.join({ url: conversationUrl });
   } catch (e) {
     console.error("tavus call join failed", e);
@@ -2392,6 +2489,9 @@ const STATIC_DEMO_VIDEO_IDS = new Set([
   "shoulder_prone_y", "shoulder_scapular_retraction", "shoulder_sleeper_stretch",
   "shoulder_wall_slides", "single_leg_squat", "stationary_bike",
   "terminal_knee_extension", "wall_sit",
+  // knee post-ACL week-4 exercises: reuse the ankle clips for the same
+  // physical movement (single-leg balance / heel raises).
+  "single_leg_balance", "heel_raises",
 ]);
 
 // Resolve a reference demo-video URL for an exercise, or "" when none exists.
@@ -2445,6 +2545,11 @@ async function startInCallCalfSet() {
   const ind   = document.getElementById("inCallRepIndicator");
   const stage = document.getElementById("tavusStage");
   if (!mount) return;
+
+  // Idempotent: a duplicate "start" (Maya firing the tool twice, or a
+  // start-over-a-running-set) must NOT re-enter — that resets the state
+  // machine and loses the running set's reps. Drop it while a set is live.
+  if (_inCallSetBtn && _inCallSetBtn.dataset.state === "on") return;
 
   // Promote the in-set layout: the rep hero + self-view PiP become the focal
   // elements, Maya recedes to the coach backdrop.
@@ -2503,6 +2608,54 @@ function stopInCallCalfSet(hurt) {
     showToast("Set stopped. Tell Maya what hurts.", "info");
   }
 }
+
+// Pure discriminate + parse for an inbound Tavus app-message. Returns
+// {action, toolCallId} when the message is a monitor_exercise_form tool_call,
+// or null for anything else (other tools, utterances, our own echo/interrupt,
+// canvas events, malformed). DOM-free + side-effect-free so it unit-tests in
+// node; mirrored byte-for-byte in frontend/tests/form_check_tool.test.js.
+//
+// Defensive on the two pieces the Tavus docs leave as a stub: the inbound
+// `properties` nesting (vs a flat payload) and whether `arguments` is a JSON
+// string or an object. The HMAC delivery.api path sends arguments as a string;
+// the app_message path may pre-parse one - tolerate both.
+function parseTavusToolCall(data) {
+  if (!data || data.message_type !== "conversation"
+      || data.event_type !== "conversation.tool_call") return null;
+  const p = (data.properties && typeof data.properties === "object")
+    ? data.properties : data;
+  const name = p.name || p.tool_name;
+  if (name !== "monitor_exercise_form") return null;
+  let args = p.arguments;
+  if (typeof args === "string") {
+    try { args = JSON.parse(args || "{}"); } catch (_) { args = {}; }
+  }
+  if (!args || typeof args !== "object") args = {};
+  const action = String(args.action || "start").toLowerCase() === "stop"
+    ? "stop" : "start";
+  return { action, toolCallId: p.tool_call_id || null };
+}
+
+// Daily app-message listener for the live Tavus call. Maya's monitor_exercise_form
+// tool (delivery: app_message, on_resolve: fire_and_forget) lands here; we flip
+// the in-call form-check overlay via the same start/stop functions the on-screen
+// buttons use. No tool_result is sent back - fire_and_forget needs none. The
+// first-fire console.log settles the doc-unverified `properties` shape on a live
+// call; it carries no PHI (the only arg is action: start|stop).
+function _onTavusAppMessage(ev) {
+  const data = ev && ev.data;
+  if (!data || data.event_type !== "conversation.tool_call") return;
+  try { console.log("[tavus] tool_call", JSON.stringify(data)); } catch (_) {}
+  const call = parseTavusToolCall(data);
+  if (!call) return;
+  if (call.action === "stop") stopInCallCalfSet(false);
+  else startInCallCalfSet();
+}
+
+// Test hook (same convention as window.__flowHelpers / __greetingHelpers):
+// exposes the pure parser for the node unit test, and the handler so routing
+// can be exercised from the console offline - no live call or credits needed.
+window.__formCheckTool = { parseTavusToolCall, onAppMessage: _onTavusAppMessage };
 
 function toggleTavusMute() {
   if (!tavusCall) return;
@@ -2792,20 +2945,20 @@ const INTAKE_QUESTIONS = [
   { key: "age",      q: "How old are you?",                                  hint: "e.g. 26" },
   { key: "injury",   q: "What was your injury or surgery?",                  hint: "e.g. ACL reconstruction" },
   { key: "timing",   q: "When was your surgery or injury?",                  hint: "e.g. 3 weeks ago" },
-  { key: "pain",     q: "On a scale of 1–10, what's your current pain level?", hint: "no default — type your number" },
+  { key: "pain",     q: "On a scale of 1–10, what's your current pain level?", hint: "tap a number below", kind: "scale", min: 1, max: 10 },
   { key: "symptoms", q: "Any specific symptoms?",                            hint: "e.g. tightness at end-range flexion" },
 ];
 
 const SYMPTOM_QUESTIONS = [
   { key: "location",  q: "Where is the pain or discomfort?",  hint: "e.g. inner knee" },
   { key: "type",      q: "How would you describe it?",         hint: "e.g. sharp, dull, ache, tightness" },
-  { key: "level",     q: "Pain level 1–10?",                   hint: "type your number" },
+  { key: "level",     q: "Pain level 1–10?",                   hint: "tap a number below", kind: "scale", min: 1, max: 10 },
   { key: "trigger",   q: "When does it happen?",               hint: "e.g. during single-leg squats" },
   { key: "duration",  q: "How long has this been going on?",   hint: "e.g. started today" },
 ];
 
 const CHECKIN_QUESTIONS = [
-  { key: "rating",     q: "How did today's session go overall? (1–10)", hint: "your rating" },
+  { key: "rating",     q: "How did today's session go overall? (1–10)", hint: "tap a number below", kind: "scale", min: 1, max: 10 },
   { key: "completed",  q: "Which exercises did you complete?",          hint: "e.g. heel slides, quad sets" },
   { key: "strong",     q: "What felt strong or improved today?",        hint: "e.g. quad set felt stronger" },
   { key: "difficult",  q: "Anything that felt difficult or caused discomfort? (or type \"none\")", hint: "e.g. single-leg balance was shaky, or 'none'" },
@@ -2871,10 +3024,24 @@ function updateFlowUI(active) {
   const cancelBtn = document.getElementById("intakeCancelBtn");
   const suggestions = document.getElementById("chatSuggestions");
   const quickActions = document.querySelector(".quick-actions");
+  const answerChips = document.getElementById("flowAnswerChips");
   if (bar) bar.style.display = active ? "flex" : "none";
-  if (cancelBtn) cancelBtn.style.display = active ? "inline-flex" : "none";
+  if (cancelBtn) {
+    cancelBtn.style.display = active ? "inline-flex" : "none";
+    // Name the flow actually being cancelled — "cancel check-in" during a
+    // check-in, "cancel intake" during intake — derived from FLOW_META,
+    // never hardcoded.
+    const flowLabel = activeFlow ? FLOW_META[activeFlow.type]?.label : null;
+    if (active && flowLabel) {
+      cancelBtn.textContent = `✕ cancel ${flowLabel.toLowerCase()}`;
+    }
+  }
   if (suggestions) suggestions.style.display = active ? "none" : "flex";
   if (quickActions) quickActions.style.display = active ? "none" : "flex";
+  if (answerChips && !active) {
+    answerChips.hidden = true;
+    answerChips.innerHTML = "";
+  }
   if (active) updateFlowProgress();
 }
 
@@ -2887,6 +3054,49 @@ function updateFlowProgress() {
   const fill = document.getElementById("intakeProgressFill");
   if (fill) fill.style.width = `${(activeFlow.step / total) * 100}%`;
   prefillFlowInput();
+  renderFlowAnswerChips();
+}
+
+// Tappable answer chips for guided-flow questions, rendered above the chat
+// input. Scale questions (kind "scale", e.g. pain / rating 1-10) get a
+// numeric chip row; yes/no questions (kind "yesno") get Yes / No; free-text
+// questions get no chips. Tapping a chip routes through the same
+// handleFlowAnswer path as typed input so validation and state stay
+// single-source. Chips are cleared by updateFlowUI(false) when the flow
+// completes or is cancelled.
+function renderFlowAnswerChips() {
+  const row = document.getElementById("flowAnswerChips");
+  if (!row) return;
+  row.innerHTML = "";
+  const meta = activeFlow ? FLOW_META[activeFlow.type] : null;
+  const q = meta ? meta.questions[activeFlow.step] : null;
+  let values = [];
+  if (q && q.kind === "scale") {
+    const min = Number.isFinite(q.min) ? q.min : 1;
+    const max = Number.isFinite(q.max) ? q.max : 10;
+    for (let v = min; v <= max; v++) values.push(String(v));
+  } else if (q && q.kind === "yesno") {
+    values = ["Yes", "No"];
+  }
+  if (!values.length) {
+    row.hidden = true;
+    return;
+  }
+  values.forEach((v) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chat-chip flow-chip";
+    btn.textContent = v;
+    btn.onclick = () => submitFlowChip(v);
+    row.appendChild(btn);
+  });
+  row.hidden = false;
+}
+
+function submitFlowChip(value) {
+  if (!activeFlow) return;
+  appendChatBubble("user", value);
+  handleFlowAnswer(value);
 }
 
 function resetInputPlaceholder() {
@@ -3025,8 +3235,8 @@ async function renderPlanBuilder() {
     rowsEl.innerHTML = exercises.map(ex => `
       <div class="plan-row">
         <div class="plan-row-info">
-          <span class="plan-row-name">${escapeHtml(ex.name)}</span>
-          <span class="plan-row-spec">${escapeHtml(ex.spec || ex.default_dose || "")}</span>
+          <span class="plan-row-name">${escapeHtml(friendlyExerciseLabel(ex.name))}</span>
+          <span class="plan-row-spec">${escapeHtml(friendlySpec(ex.spec || ex.default_dose || ""))}</span>
         </div>
         <button class="plan-add-btn"
                 data-ex-id="${escapeHtml(ex.id || ex.name)}"
@@ -3064,12 +3274,17 @@ function updateFreqSummary() {
   const confirmBtn = document.getElementById("confirmFreqBtn");
   if (!el) return;
   const count = selectedDays.size;
+  // Both a day selection AND at least one exercise are required before the
+  // weekly-plan draft can fire — otherwise the pipeline drafts an empty plan.
+  if (confirmBtn) confirmBtn.disabled = !(count > 0 && _pendingPlan.length > 0);
   if (count === 0) {
     el.textContent = "No days selected";
-    if (confirmBtn) confirmBtn.disabled = true;
     return;
   }
-  if (confirmBtn) confirmBtn.disabled = false;
+  if (_pendingPlan.length === 0) {
+    el.textContent = "Add at least one exercise";
+    return;
+  }
   const ordered = DAYS.filter(d => selectedDays.has(d));
   if (count === 7) {
     el.textContent = "Every day (7 days/week)";
@@ -3083,6 +3298,9 @@ function updateFreqSummary() {
 }
 
 function confirmFrequencyAndGenerate() {
+  // Guard: never fire a weekly-plan draft with no exercises (mirrors the
+  // disabled-button state; protects against a stale onclick).
+  if (!_pendingPlan.length) return;
   const btn = document.getElementById("confirmFreqBtn");
   if (btn) { btn.disabled = true; btn.textContent = "Generating..."; }
 
@@ -3129,8 +3347,8 @@ async function showPlanWithApprove() {
     const rows = exercises.map(ex => `
       <div class="plan-row" id="plan-row-${escapeHtml(ex.id || ex.name)}">
         <div class="plan-row-info">
-          <span class="plan-row-name">${escapeHtml(ex.name)}</span>
-          <span class="plan-row-spec">${escapeHtml(ex.spec || ex.default_dose || "")}</span>
+          <span class="plan-row-name">${escapeHtml(friendlyExerciseLabel(ex.name))}</span>
+          <span class="plan-row-spec">${escapeHtml(friendlySpec(ex.spec || ex.default_dose || ""))}</span>
         </div>
         <button class="plan-add-btn"
                 data-ex-id="${escapeHtml(ex.id || ex.name)}"
@@ -3185,7 +3403,9 @@ function addToPlan(btn) {
 
   const genBtn = document.getElementById("confirmFreqBtn");
   if (genBtn) {
-    genBtn.disabled = false;
+    // Enable only when at least one training day is also selected (days
+    // default to all, so this is normally on after the first add).
+    genBtn.disabled = selectedDays.size === 0;
     genBtn.textContent = `Generate Plan (${_pendingPlan.length} exercise${_pendingPlan.length > 1 ? "s" : ""} selected)`;
   }
 }
@@ -3219,13 +3439,15 @@ async function loadExerciseCards() {
   const log = document.getElementById("chatLog");
 
   const render = (exercises, opts = {}) => {
+    appendBrowseAllAffordance(opts.activeTab || "plan");
     if (!exercises.length) {
       appendChatBubble("coach", "No exercises matched - try Browse all to see the full library.");
     } else {
       renderExerciseGallery(exercises);
     }
-    appendBrowseAllAffordance(opts.activeTab || "plan");
-    scrollChatLog();
+    // Land at the top of the library (segmented control + detail view)
+    // rather than the bottom of the card grid.
+    if (log) log.scrollTop = 0;
   };
 
   if (approvedPlanExercises.length) {
@@ -3242,10 +3464,11 @@ async function loadExerciseCards() {
   }
 }
 
-// "Browse all exercises" affordance below the active gallery. Clicking it
-// fetches /exercises (the full library, no auth) and re-renders the gallery
-// with the entire catalogue. Includes a phase filter so the patient can
-// narrow to acute/subacute/strength.
+// Exercise-library header panel rendered ABOVE the gallery: a mono eyebrow
+// label on its own row (no collision with the controls), a two-segment
+// My plan | Browse all control, and the phase filter (Browse-all only).
+// Clicking Browse all fetches /exercises (the full library, no auth) and
+// re-renders the gallery grouped by body region.
 function appendBrowseAllAffordance(activeTab) {
   const log = document.getElementById("chatLog");
   if (!log) return;
@@ -3257,24 +3480,23 @@ function appendBrowseAllAffordance(activeTab) {
   panel.id = "browseAllPanel";
   panel.className = "chat-bubble coach browse-all-panel";
   panel.innerHTML = `
-    <div class="browse-all-header">
-      <strong>Exercise library</strong>
-      <span class="browse-all-tabs">
-        <button type="button" class="browse-all-tab ${activeTab === "plan" ? "active" : ""}"
-                data-tab="plan">My plan</button>
-        <button type="button" class="browse-all-tab ${activeTab === "all" ? "active" : ""}"
-                data-tab="all">Browse all</button>
-      </span>
+    <div class="browse-all-label">Exercise library</div>
+    <div class="browse-all-tabs" role="tablist">
+      <button type="button" role="tab" aria-selected="${activeTab === "plan"}"
+              class="browse-all-tab ${activeTab === "plan" ? "active" : ""}"
+              data-tab="plan">My plan</button>
+      <button type="button" role="tab" aria-selected="${activeTab === "all"}"
+              class="browse-all-tab ${activeTab === "all" ? "active" : ""}"
+              data-tab="all">Browse all</button>
     </div>
     <div class="browse-all-filters" id="browseAllFilters" style="display:none">
-      <label>Phase
-        <select id="browseAllPhase">
-          <option value="">any</option>
-          <option value="acute">acute</option>
-          <option value="subacute">subacute</option>
-          <option value="strength">strength</option>
-        </select>
-      </label>
+      <label for="browseAllPhase">Phase</label>
+      <select id="browseAllPhase">
+        <option value="">any</option>
+        <option value="acute">acute</option>
+        <option value="subacute">subacute</option>
+        <option value="strength">strength</option>
+      </select>
     </div>
   `;
   log.appendChild(panel);
@@ -3300,9 +3522,10 @@ async function switchExerciseTab(tab) {
 
 async function loadAllExercises(phase) {
   clearChatLog();
-  appendChatBubble("coach", phase
-    ? `Showing all ${escapeHtml(phase)} exercises in the library.`
-    : "Showing the full exercise library.");
+  appendBrowseAllAffordance("all");
+  // Re-set the phase select to its current value after re-render
+  const phaseEl = document.getElementById("browseAllPhase");
+  if (phaseEl && phase) phaseEl.value = phase;
   try {
     const url = phase
       ? `${API_BASE}/exercises?phase=${encodeURIComponent(phase)}`
@@ -3314,27 +3537,36 @@ async function loadAllExercises(phase) {
     if (!exercises.length) {
       appendChatBubble("coach", "No exercises matched that filter.");
     } else {
-      renderExerciseGallery(exercises);
+      renderExerciseGallery(exercises, { groupByRegion: true });
     }
-    appendBrowseAllAffordance("all");
-    // Re-set the phase select to its current value after re-render
-    const phaseEl = document.getElementById("browseAllPhase");
-    if (phaseEl && phase) phaseEl.value = phase;
-    scrollChatLog();
+    const log = document.getElementById("chatLog");
+    if (log) log.scrollTop = 0;
   } catch (e) {
     appendChatBubble("error", `Could not load library: ${e.message}`);
   }
 }
 
-// Single gallery: large main player + thumbnail strip to switch exercises
-function renderExerciseGallery(exercises) {
+// "low_back" -> "Low Back" for grid section headers + placeholder tiles.
+function regionDisplayLabel(region) {
+  if (!region) return "";
+  return String(region).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Exercise library: detail view (main player) on top, responsive card grid
+// below. Browse-all mode (opts.groupByRegion) groups the grid by body_region
+// with section headers; My-plan mode stays a flat grid of the protocol's
+// exercises. The .gallery-thumbs / .gallery-thumb-btn class names are
+// load-bearing: switchGalleryItem toggles .active over them, the
+// togglePoseFormCheck error path queries them, and the pose-active CSS
+// hides .gallery-thumbs while a form-check is running.
+function renderExerciseGallery(exercises, opts = {}) {
   const log = document.getElementById("chatLog");
 
   const wrap = document.createElement("div");
   wrap.className = "exercise-gallery";
 
   // Build per-exercise data (video src + thumb src)
-  const items = exercises.map((ex) => {
+  const buildItem = (ex) => {
     const genUrl   = ex.generated_video_url || "";
     const ytId     = ex.youtube_id || "";
     const watchUrl = ex.youtube_watch_url || "";
@@ -3343,23 +3575,68 @@ function renderExerciseGallery(exercises) {
     // "Wall Squat" rather than "wall_squat" when /sessions/today returns.
     rememberExerciseName(ex.id || ex.name, ex.name || ex.id);
     return { ex, genUrl, ytId, watchUrl, thumb };
-  });
+  };
 
-  const thumbsHtml = items.map((item, i) => {
-    const thumbContent = item.genUrl
-      ? `<video src="${escapeHtml(item.genUrl)}" muted preload="metadata" class="gallery-thumb-video"></video>`
-      : item.thumb
-        ? `<img src="${escapeHtml(item.thumb)}" alt="${escapeHtml(item.ex.name)}" class="gallery-thumb-img" />`
-        : `<div class="gallery-thumb-blank"></div>`;
+  // Group browse-all by body_region (first-appearance order). Items are
+  // flattened in grouped order so each card's data-idx keeps matching
+  // querySelectorAll document order, which switchGalleryItem and the
+  // togglePoseFormCheck error path both rely on.
+  let groups;
+  if (opts.groupByRegion) {
+    const byRegion = new Map();
+    exercises.forEach((ex) => {
+      const key = ex.body_region || "other";
+      if (!byRegion.has(key)) byRegion.set(key, []);
+      byRegion.get(key).push(ex);
+    });
+    groups = [...byRegion.entries()].map(([region, list]) => ({ region, list }));
+  } else {
+    groups = [{ region: null, list: exercises }];
+  }
+
+  const items = [];
+  const cardHtml = (item, i) => {
+    // Never render a raw id: the demo protocol's name field IS the id
+    // (e.g. "stationary_bike"), so a truthy name alone is not enough —
+    // route id-shaped names through the prettifier too.
+    const rawName = item.ex.name || "";
+    const name = (rawName && !/^[a-z0-9_]+$/.test(rawName))
+      ? rawName
+      : exerciseDisplayName(item.ex.library_id || item.ex.id || rawName);
+    const dose = item.ex.default_dose || item.ex.spec || "";
+    const videoSrc = _refVideoSrc(item.ex);
+    const media = item.thumb
+      ? `<img src="${escapeHtml(item.thumb)}" alt="${escapeHtml(name)}" class="gallery-thumb-img" loading="lazy" />`
+      : videoSrc
+        ? `<video src="${escapeHtml(videoSrc)}" muted preload="metadata" class="gallery-thumb-video"></video>`
+        : `<div class="gallery-thumb-blank">${escapeHtml(regionDisplayLabel(item.ex.body_region) || "no preview")}</div>`;
+    const fcBadge = item.ex.form_check_supported === true
+      ? `<span class="gallery-thumb-fc">form check</span>`
+      : "";
     return `
-      <button class="gallery-thumb-btn${i === 0 ? " active" : ""}" data-idx="${i}" onclick="switchGalleryItem(${i})">
-        ${thumbContent}
-        <span class="gallery-thumb-label">${escapeHtml(item.ex.name || item.ex.id || "")}</span>
+      <button class="gallery-thumb-btn${i === 0 ? " active" : ""}" data-idx="${i}" onclick="switchGalleryItem(${i}, true)">
+        ${media}
+        <span class="gallery-thumb-meta">
+          <span class="gallery-thumb-label">${escapeHtml(name)}</span>
+          ${dose ? `<span class="gallery-thumb-dose">${escapeHtml(dose)}</span>` : ""}
+          ${fcBadge}
+        </span>
       </button>`;
+  };
+
+  const gridHtml = groups.map((group) => {
+    const cards = group.list.map((ex) => {
+      const item = buildItem(ex);
+      items.push(item);
+      return cardHtml(item, items.length - 1);
+    }).join("");
+    const head = group.region
+      ? `<div class="gallery-group-head">${escapeHtml(regionDisplayLabel(group.region) || "Other")} (${group.list.length})</div>`
+      : "";
+    return `<div class="gallery-group">${head}<div class="gallery-grid">${cards}</div></div>`;
   }).join("");
 
   wrap.innerHTML = `
-    <div class="gallery-thumbs">${thumbsHtml}</div>
     <div class="gallery-main">
       <div class="gallery-video-wrap" id="galleryVideoWrap"></div>
       <div class="gallery-main-info">
@@ -3369,6 +3646,7 @@ function renderExerciseGallery(exercises) {
       </div>
       <ul class="gallery-cues" id="galleryCues"></ul>
     </div>
+    <div class="gallery-thumbs">${gridHtml}</div>
   `;
   log.appendChild(wrap);
 
@@ -3379,7 +3657,7 @@ function renderExerciseGallery(exercises) {
   switchGalleryItem(0);
 }
 
-function switchGalleryItem(idx) {
+function switchGalleryItem(idx, scrollToDetail = false) {
   const wrap = window._galleryWrap;
   if (!wrap) return;
   const items = wrap._galleryItems;
@@ -3400,6 +3678,10 @@ function switchGalleryItem(idx) {
   const activeBtn = wrap.querySelector(".pose-form-check-btn[data-state='on']");
   if (activeBtn) {
     try { window.PoseFormCheck?.stop?.(); } catch (_) {}
+    // Log the partial set before switching away — same as the manual-Stop
+    // path; the poster self-guards so a natural finish / zero reps is a no-op.
+    try { _activeGuidedPartialPoster?.(); } catch (_) {}
+    _activeGuidedPartialPoster = null;
     try { window.speechSynthesis?.cancel?.(); } catch (_) {}
     document.body.classList.remove("pose-active");
   }
@@ -3436,8 +3718,13 @@ function switchGalleryItem(idx) {
   }
   videoWrap.innerHTML = mediaHtml;
 
-  // Update info strip
-  wrap.querySelector("#galleryTitle").textContent = item.ex.name || item.ex.id || "";
+  // Update info strip. Same raw-id guard as the grid cards: the demo
+  // protocol's name field is the id itself, so prettify id-shaped names.
+  const titleRaw = item.ex.name || "";
+  wrap.querySelector("#galleryTitle").textContent =
+    (titleRaw && !/^[a-z0-9_]+$/.test(titleRaw))
+      ? titleRaw
+      : exerciseDisplayName(item.ex.library_id || item.ex.id || titleRaw);
   wrap.querySelector("#galleryDose").textContent  = item.ex.default_dose || item.ex.spec || "";
   wrap.querySelector("#galleryBadge").innerHTML   = badge;
   const cuesEl = wrap.querySelector("#galleryCues");
@@ -3445,6 +3732,17 @@ function switchGalleryItem(idx) {
 
   // Form Check (feature-flagged): swap demo video for webcam + pose overlay
   maybeAttachFormCheckBtn(wrap, item);
+
+  // Card clicks pass scrollToDetail=true so the detail view (above the grid)
+  // comes back into view; programmatic calls (initial render, form-check
+  // teardown paths) leave the scroll position alone.
+  if (scrollToDetail) {
+    const main = wrap.querySelector(".gallery-main");
+    if (main && typeof main.scrollIntoView === "function") {
+      const reduced = document.documentElement.dataset.reducedMotion === "1";
+      main.scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "nearest" });
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -3768,6 +4066,7 @@ const GUIDED = {
   REST_SECONDS_DEFAULT:       30,
   CORRECTION_BUBBLE_MS:       1500,
   CORRECTION_GAP_MS:          900,   // min gap between two distinct correction utterances
+  START_ANYWAY_DELAY_MS:      5000,  // camera-live time before "Start anyway" reveals
 };
 
 // ── Pose set telemetry (POST /pose/session) ─────────────────────────────────
@@ -3915,11 +4214,28 @@ function renderPoseSession(container, repsHistory, repSummary) {
 // Voice driver: pose.js receives suppressInternalVoice: true so the
 // wrapper owns all spoken cues (counts, corrections, set-complete, rest).
 async function togglePoseFormCheck(wrap, item, btn) {
-  const videoWrap = wrap.querySelector("#galleryVideoWrap");
+  // Find the video container even after the Sora clip has replaced the
+  // placeholder. On a chat card, attachChatCardFormCheckBtn tags the
+  // .exercise-video-placeholder as #galleryVideoWrap, but revealVideoOnCard
+  // later swaps that placeholder for an .exercise-video-wrap holding the
+  // <video> -- dropping the #galleryVideoWrap id. The old lookup then returned
+  // null and "Start exercise" silently no-op'd. Fall back to whichever
+  // container exists and normalize its id so the swap-in / restore logic below
+  // (which reuses this element) works unchanged for every entry point.
+  const videoWrap = wrap.querySelector("#galleryVideoWrap")
+    || wrap.querySelector(".exercise-video-wrap")
+    || wrap.querySelector(".exercise-video-placeholder");
   if (!videoWrap) return;
+  if (videoWrap.id !== "galleryVideoWrap") videoWrap.id = "galleryVideoWrap";
 
   if (btn.dataset.state === "on") {
     window.PoseFormCheck.stop();
+    // Log the partial set from the real detected reps BEFORE clearing the
+    // poster — a manual Stop mid-set otherwise discards them (the in-call
+    // path already logs them). The poster's own guards (guided.submitted /
+    // repsHistoryAll.length) make this a no-op after a natural finish or a
+    // zero-rep stop.
+    try { _activeGuidedPartialPoster?.(); } catch (_) {}
     _activeGuidedPartialPoster = null;
     btn.dataset.state = "off";
     btn.textContent = "Start exercise";
@@ -4000,8 +4316,8 @@ async function togglePoseFormCheck(wrap, item, btn) {
       ${refPanel}
       <div class="pose-root pose-split-live" id="poseRoot">
         <div class="pose-toolbar">
-          <div class="pose-title" title="${escapeHtml(item.ex.name)}">
-            <span class="pose-title-name">${escapeHtml(item.ex.name)}</span>
+          <div class="pose-title" title="${escapeHtml(friendlyExerciseLabel(item.ex.name))}">
+            <span class="pose-title-name">${escapeHtml(friendlyExerciseLabel(item.ex.name))}</span>
             <span class="pose-title-dose">${escapeHtml(effectiveDose)}</span>
             ${prescribed ? `<span class="pose-title-prescribed" title="From your active protocol">prescribed</span>` : ""}
           </div>
@@ -4018,6 +4334,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
           <video id="poseVideo" playsinline muted autoplay></video>
           <canvas id="poseCanvas" class="pose-overlay-canvas"></canvas>
           <div class="pose-frame-guide" aria-hidden="true"></div>
+          <div class="pose-partial-chip" id="posePartialChip" hidden>Partial view - counts may be less accurate</div>
           <div class="pose-overlay" id="poseGuidedOverlay">
             <div class="pose-overlay-set" id="poseSetLabel"></div>
             <div class="pose-overlay-rep" id="poseRepLabel"></div>
@@ -4046,7 +4363,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
             </div>
             <div class="pose-preflight" id="posePreflight">
               <div class="pose-preflight-card">
-                <div class="pose-preflight-title">${escapeHtml(item.ex.name)}</div>
+                <div class="pose-preflight-title">${escapeHtml(friendlyExerciseLabel(item.ex.name))}</div>
                 <div class="pose-preflight-cues">
                   <ul>${(item.ex.cues || []).slice(0, 3).map((c) => `<li>${escapeHtml(c)}</li>`).join("")}</ul>
                 </div>
@@ -4057,7 +4374,13 @@ async function togglePoseFormCheck(wrap, item, btn) {
                   </div>
                 </div>
                 <div class="pose-preflight-status" id="posePreflightStatus">Waiting for camera...</div>
+                <div class="pose-preflight-camera" id="posePreflightCameraRow" hidden>
+                  <label for="posePreflightCamera">Camera</label>
+                  <select id="posePreflightCamera"></select>
+                  <span class="pose-preflight-camera-hint">Zooming in on your face? That camera auto-frames (Center Stage) - switch to another one.</span>
+                </div>
                 <button class="pose-preflight-go" id="posePreflightGoBtn" type="button">Start</button>
+                <button class="pose-preflight-start-anyway" id="posePreflightAnywayBtn" type="button" hidden>Start anyway - tracking may be less accurate</button>
               </div>
             </div>
           </div>
@@ -4089,12 +4412,18 @@ async function togglePoseFormCheck(wrap, item, btn) {
   const preflightEl  = videoWrap.querySelector("#posePreflight");
   const preflightSt  = videoWrap.querySelector("#posePreflightStatus");
   const preflightGo  = videoWrap.querySelector("#posePreflightGoBtn");
+  const preflightAnyway = videoWrap.querySelector("#posePreflightAnywayBtn");
+  const partialChip  = videoWrap.querySelector("#posePartialChip");
   const presenceDone = videoWrap.querySelector("#posePresenceDoneBtn");
   // PR-U2: cache the engaged exercise's mode so the active-phase logic
   // can branch on presence vs rep-tracked without re-reading the
-  // EXERCISES map every frame. Computed once at engage time.
+  // EXERCISES map every frame. Computed once at engage time. Key on
+  // library_id||id — the SAME key PoseFormCheck.start uses — so a
+  // planner-renamed presence exercise doesn't miss its mode and trap the
+  // patient in a set that never ends.
+  const poseKey = item.ex.library_id || item.ex.id;
   const isPresenceMode =
-    window.PoseFormCheck?.EXERCISES?.[item.ex.id]?.mode === "presence";
+    window.PoseFormCheck?.EXERCISES?.[poseKey]?.mode === "presence";
   // Hold duration for presence mode. Library entries don't (yet) carry
   // a duration_min; we default to 60s/set, which lines up with the
   // typical PT cue ("hold for one minute"). When library/protocol
@@ -4135,6 +4464,9 @@ async function togglePoseFormCheck(wrap, item, btn) {
     spokenCorrectionsThisRep: new Set(),
     lastInRep: false,
     detectedSinceTs: null,       // preflight: continuous-detection timer
+    framingReady: false,         // preflight: last known framing gate state
+    cameraLiveTs: null,          // preflight: when the camera stream came up
+    startAnywayTimer: null,      // preflight: one-shot "Start anyway" reveal
     submitted: false,
     restTimer: null,
     correctionFadeTimer: null,
@@ -4160,6 +4492,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
     if (guided.restTimer)           { clearInterval(guided.restTimer); guided.restTimer = null; }
     if (guided.correctionFadeTimer) { clearTimeout(guided.correctionFadeTimer); guided.correctionFadeTimer = null; }
     if (guided.presenceTimer)       { clearInterval(guided.presenceTimer); guided.presenceTimer = null; }
+    if (guided.startAnywayTimer)    { clearTimeout(guided.startAnywayTimer); guided.startAnywayTimer = null; }
   }
 
   function updateSetRepLabels() {
@@ -4217,6 +4550,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
     guided.spokenCorrectionsThisRep.clear();
     guided.lastInRep = false;
     guided.lastSpokenCount = -1;
+    if (guided.startAnywayTimer) { clearTimeout(guided.startAnywayTimer); guided.startAnywayTimer = null; }
     preflightEl.hidden = true;
     stageEl.classList.remove("pose-stage--preflight");
     restOverlay.hidden = true;
@@ -4332,7 +4666,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
         renderAutoCheckinCard({
           sessionId: result.sessionId,
           worstStatus: result.worstStatus,
-          exerciseName: item.ex.name || item.ex.id,
+          exerciseName: friendlyExerciseLabel(item.ex.name || item.ex.id),
         });
       });
     }
@@ -4360,6 +4694,26 @@ async function togglePoseFormCheck(wrap, item, btn) {
   betweenGo.onclick = () => { if (guided.phase === "between") startSet(); };
   doneClose.onclick = () => { btn.click(); };
 
+  // P2 guidance-not-gate: strict fully-in-frame gates are the top barrier
+  // to session starts, so after the camera has been live for
+  // START_ANYWAY_DELAY_MS without framing passing we reveal a subdued
+  // "Start anyway" affordance under the primary Start instead of hard-
+  // blocking. Primary Start still auto-enables the moment framing passes
+  // (unchanged); a degraded start shows the partial-view caveat chip so
+  // the data-quality tradeoff stays visible on the stage.
+  function syncStartAnyway(ready) {
+    guided.framingReady = !!ready;
+    if (!preflightAnyway) return;
+    if (guided.framingReady) {
+      preflightAnyway.hidden = true;
+    } else if (
+      guided.cameraLiveTs != null &&
+      performance.now() - guided.cameraLiveTs >= GUIDED.START_ANYWAY_DELAY_MS
+    ) {
+      preflightAnyway.hidden = false;
+    }
+  }
+
   function handlePreflight(payload) {
     // PR-U5: Start button stays clickable so the patient can step away
     // from the keyboard before the rep loop starts.
@@ -4370,7 +4724,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
     // camera at your ankles" instead of the generic "step into frame"
     // (which is wrong for seated exercises).
     const fs = payload.framingStatus;
-    const exDef = window.PoseFormCheck.EXERCISES?.[item.ex.id];
+    const exDef = window.PoseFormCheck.EXERCISES?.[poseKey];
     const expected = (exDef?.checks || []).length;
     const got = (payload.metrics || []).length;
     const trackingChip = `Tracking ${got}/${expected} ${expected === 1 ? "marker" : "markers"}`;
@@ -4389,6 +4743,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
       } else {
         preflightGo.classList.remove("ready");
       }
+      syncStartAnyway(fs.ready);
       return;
     }
 
@@ -4406,10 +4761,21 @@ async function togglePoseFormCheck(wrap, item, btn) {
     } else {
       preflightGo.classList.remove("ready");
     }
+    syncStartAnyway(got >= 1);
   }
 
   preflightGo.onclick = () => {
     // First user gesture: warm up speechSynthesis (Safari autoplay gate).
+    if (poseVoiceEnabled()) { try { speakNow("Set 1 of " + guided.totalSets); } catch (_) {} }
+    startSet();
+  };
+
+  if (preflightAnyway) preflightAnyway.onclick = () => {
+    // Degraded start: the patient chose to begin before framing passed.
+    // Surface the tradeoff on the stage for the rest of the engagement;
+    // nothing extra is sent to the backend — logged reps are still the
+    // real detected reps.
+    if (partialChip) partialChip.hidden = false;
     if (poseVoiceEnabled()) { try { speakNow("Set 1 of " + guided.totalSets); } catch (_) {} }
     startSet();
   };
@@ -4538,12 +4904,19 @@ async function togglePoseFormCheck(wrap, item, btn) {
     // plain gallery form-check path → pose.js opens its own camera as before.
     const liveStream = _tavusLocalStream();
     const startOpts = {
-      exerciseName:          item.ex.name,
+      // Display/voice only - the pose engine keys on poseExId, never this.
+      exerciseName:          friendlyExerciseLabel(item.ex.name || item.ex.id),
       targetDose:            item.ex.default_dose,
       voice:                 speakCue,
       suppressInternalVoice: true,  // PR-J wrapper drives all voice
     };
     if (liveStream) startOpts.stream = liveStream;
+    // Tear down any engine still running from a previous exercise before
+    // starting this one. pose.js start() silently no-ops when already running,
+    // so launching the next guided exercise over a still-running form-check
+    // would otherwise leave a dead "starting camera..." shell. stop() is
+    // idempotent and safe when nothing is running.
+    try { window.PoseFormCheck.stop(); } catch (_) {}
     await window.PoseFormCheck.start(
       videoEl,
       canvasEl,
@@ -4551,6 +4924,51 @@ async function togglePoseFormCheck(wrap, item, btn) {
       onPosePayload,
       startOpts,
     );
+    // P2 guidance-not-gate: camera is live from here. pose.js publishes no
+    // payloads while nobody is detected in frame, so the frame-driven
+    // syncStartAnyway path alone can never fire for an empty stage — this
+    // one-shot timer covers it. isConnected guards a stale timer from an
+    // engagement whose DOM was already torn down by Stop; a restart builds
+    // a fresh closure (fresh guided + timer), so the delay is
+    // per-engagement by construction.
+    guided.cameraLiveTs = performance.now();
+    guided.startAnywayTimer = setTimeout(() => {
+      guided.startAnywayTimer = null;
+      if (!preflightAnyway || !preflightAnyway.isConnected) return;
+      if (guided.phase !== "preflight" || guided.framingReady) return;
+      preflightAnyway.hidden = false;
+    }, GUIDED.START_ANYWAY_DELAY_MS);
+    // Camera picker: OS auto-framing (macOS Center Stage / Continuity Camera)
+    // zooms the default camera onto the face and the patient can never frame
+    // their whole body — the only web-side fix is switching cameras. Only
+    // offered when pose.js owns the stream (not the in-call Daily-fed one)
+    // and more than one camera exists. Selection persists via pose.js.
+    if (!liveStream) {
+      const camRow = videoWrap.querySelector("#posePreflightCameraRow");
+      const camSel = videoWrap.querySelector("#posePreflightCamera");
+      if (camRow && camSel && window.PoseFormCheck.listCameras) {
+        window.PoseFormCheck.listCameras().then((cams) => {
+          if (!camRow.isConnected || cams.length < 2) return;
+          // Preselect the camera actually feeding the stream (falls back to
+          // the saved preference) so the closed select never reads blank.
+          const active = window.PoseFormCheck.currentCameraId?.() || (() => {
+            try { return localStorage.getItem("rac_pose_camera_id"); } catch (_) { return null; }
+          })();
+          camSel.innerHTML = cams.map((c) =>
+            `<option value="${escapeHtml(c.deviceId)}"${c.deviceId === active ? " selected" : ""}>${escapeHtml(c.label)}</option>`
+          ).join("");
+          camSel.onchange = async () => {
+            const label = camSel.options[camSel.selectedIndex]?.text || "camera";
+            const ok = await window.PoseFormCheck.switchCamera(camSel.value);
+            showToast(
+              ok ? `Switched to ${label}` : "Could not switch camera - it may be in use by another app",
+              ok ? "info" : "error",
+            );
+          };
+          camRow.hidden = false;
+        }).catch(() => {});
+      }
+    }
     btn.disabled = false;
     btn.dataset.state = "on";
     btn.textContent = "Stop";
@@ -4561,6 +4979,17 @@ async function togglePoseFormCheck(wrap, item, btn) {
     showToast(`Camera error: ${e.message}`, "error");
     if (wrap.classList.contains("incall-set-mount")) {
       _resetInCallSetUi();
+    } else if (wrap.classList.contains("exercise-card")) {
+      // Chat-card path: restore the video placeholder so the card doesn't stay
+      // stuck on a dead pose skeleton, and DON'T run switchGalleryItem (which
+      // would reset an unrelated exercise in the gallery). Mirrors the
+      // stop-path restore.
+      if (videoWrap) {
+        videoWrap.innerHTML =
+          '<span class="video-placeholder-text">Add to today to load video</span>';
+        videoWrap.className = "exercise-video-placeholder";
+        videoWrap.id = "galleryVideoWrap";
+      }
     } else {
       const activeIdx = Array.from(wrap.querySelectorAll(".gallery-thumb-btn"))
         .findIndex((b) => b.classList.contains("active"));
@@ -4595,7 +5024,36 @@ function onChatSubmit(event) {
   input.value = "";
   appendChatBubble("user", text);
   if (handleFlowAnswer(text)) return;
+  // "log / do / start an exercise" (no specific one named) -> show the clickable
+  // protocol picker (tap a row -> the MediaPipe form-check) instead of a text
+  // back-and-forth ("which exercise?" ... "how many reps?").
+  if (_wantsExercisePicker(text)) {
+    appendChatBubble("coach", "Here's your plan — tap an exercise to start the form check.");
+    _showExercisePickerFromChat();
+    return;
+  }
   sendChat(text, { skipUserBubble: true });
+}
+
+// Generic "let's log / do / start an exercise" intent, with NO specific
+// exercise named (a named one is handled by the video-card route / Maya). A
+// "check-in" is a different flow and must not trip this.
+function _wantsExercisePicker(text) {
+  const t = (text || "").toLowerCase();
+  if (/check.?in/.test(t)) return false;
+  return /\b(log|do|start|begin|record|track)\b/.test(t)
+      && /\b(exercises?|workout|session|my sets?)\b/.test(t);
+}
+
+// Show the Today's-session exercise picker in the chat (clickable protocol
+// list -> form-check). Re-render it if a session is already active; otherwise
+// bootstrap one.
+function _showExercisePickerFromChat() {
+  if (_todaysSessionState.active && (_todaysSessionState.exercises || []).length) {
+    renderExercisePicker();
+  } else {
+    startTodaysSession();
+  }
 }
 
 function sendChatPreset(text) {
@@ -4717,7 +5175,12 @@ function handleChatEvent(event, coachBubble, appendDelta) {
       if (event.result) {
         const r = event.result;
         const flowLabel = r.flow ? r.flow.replace(/_/g, " ") : "draft";
-        if (r.pending_protocol_id) {
+        if (event.name === "fire_intake_trigger" && r.action === "redirect_intake_ui") {
+          // Intake was wiped server-side — reopen the intake modal NOW rather
+          // than leaving the patient staring at nothing until a manual reload.
+          renderToolResultLine(event);
+          refreshPatientState({ openModalIfNeeded: true }).catch(() => {});
+        } else if (r.pending_protocol_id) {
           renderToolResultLine(event);
           renderPendingProtocolCard(r.pending_protocol_id, r.summary, flowLabel);
           refreshProtocol();
@@ -5135,21 +5598,22 @@ async function postAutoCheckin(payload) {
   });
 }
 
-// ── PR-M: Flow stitching after clinician approval ───────────────────────────
+// ── PR-M: Flow stitching — the today's-session hero ─────────────────────────
 //
-// After a clinician approves a draft protocol, walk the patient through
-// pick → guided → check-in as a single stepped flow rather than three
-// disconnected UI surfaces. Trigger condition:
+// Walk the patient through pick → guided → check-in as a single stepped
+// flow rather than three disconnected UI surfaces. Entry point is the
+// HERO card pinned above the chat log (#todaysSessionHero), shown for any
+// active protocol with exercises:
 //
-//   review_status.state === "recently_approved"
-//   AND no /sessions/today rows have status === "completed"
+//   default   -> "N exercises - ~M min" + Start   (nothing completed today)
+//   continue  -> "Continue - X of N done"         (mid-session)
+//   done      -> calm "Done for today"            (completed rows today)
 //
 // Architecture:
 //   * todaysSessionState holds the session position (in-memory; lost on
 //     reload — acceptable for v1, patient can pick up from the gallery).
-//   * The "Start today's session?" CTA renders both inline at the top of
-//     the chat scroll and inside the sidebar today-session card.
-//   * Click → fetch /protocol/exercises → render an in-chat picker.
+//   * refreshTodaysFlowCTA paints the hero from protocol + session state.
+//   * Start → fetch /protocol/exercises → render an in-chat picker.
 //   * Click an exercise (or "Start with first") → render its library card
 //     in chat AND auto-trigger the form-check button on it. Reuses
 //     renderExerciseCard + togglePoseFormCheck (no fork of the pose flow).
@@ -5171,8 +5635,8 @@ const _todaysSessionState = {
 // Re-entrancy lock for refreshTodaysFlowCTA. Supabase onChange fires multiple
 // times per load (INITIAL_SESSION -> SIGNED_IN/TOKEN_REFRESHED), each firing
 // refreshPatientState -> refreshTodaysFlowCTA. Without this, two invocations
-// both pass the teardown (DOM empty), both await refreshTodaySession, then
-// both append a CTA — rendering two stacked "Your plan is ready" cards.
+// would both repaint the hero across the awaited refreshTodaySession and
+// could double-bind click handlers or paint from stale state.
 let _todaysFlowCtaRendering = false;
 
 // Pure helper. Given the current state, return the next exercise to play
@@ -5199,6 +5663,13 @@ function buildPickerItems(exercises) {
       name: ex.name || ex.id || "exercise",
       default_dose: ex.default_dose || ex.spec || "",
       cues: ex.cues || [],
+      // Carry the fields the guided form-check gate needs: without
+      // form_check_supported + library_id every stepped exercise falls to the
+      // self-paced branch (no camera, no rep counting, no /pose/session write).
+      library_id: ex.library_id || "",
+      form_check_supported: ex.form_check_supported === true,
+      spec: ex.spec || "",
+      video_url: ex.video_url || "",
       generated_video_url: ex.generated_video_url || "",
       youtube_id: ex.youtube_id || "",
       youtube_watch_url: ex.youtube_watch_url || "",
@@ -5452,39 +5923,72 @@ if (typeof window !== "undefined") {
   window.renderStateAwareGreeting = renderStateAwareGreeting;
 }
 
-// Refresh the "Start today's session" CTA. Decides visibility from
-// patientState + today's session list; renders into both the chat scroll
-// and the sidebar today-session card. Idempotent — safe to call on every
-// patient-state poll.
+// Paint one hero state into the mount. Counts only — no PHI reaches the
+// hero markup or the console from here.
+function renderTodaysHero(hero, { title, sub, btnLabel, onClick, done = false }) {
+  if (!hero) return;
+  hero.hidden = false;
+  hero.classList.toggle("done", done);
+  hero.innerHTML = `
+    <div class="todays-hero-copy">
+      <div class="todays-hero-eyebrow">Today's session</div>
+      <div class="todays-hero-title">${escapeHtml(title)}</div>
+      ${sub ? `<div class="todays-hero-sub">${escapeHtml(sub)}</div>` : ""}
+    </div>
+    ${btnLabel ? `<button type="button" class="todays-hero-btn${done ? " subdued" : ""}">${escapeHtml(btnLabel)}</button>` : ""}
+  `;
+  const btn = hero.querySelector("button");
+  if (btn && typeof onClick === "function") btn.addEventListener("click", onClick);
+}
+
+// Refresh the today's-session hero card pinned above the chat log. One
+// render path, three states, decided from _todaysSessionState + the
+// active protocol's exercise count + today's session list. The count is
+// cached by renderProtocol from /protocol, so the hero works in demo
+// mode too (patientState null, /sessions/today would 401). Idempotent —
+// safe to call on every patient-state poll.
 async function refreshTodaysFlowCTA() {
-  // Serialize concurrent invocations (see _todaysFlowCtaRendering above). A
-  // second overlapping call would otherwise append a duplicate CTA across the
-  // `await refreshTodaySession()` below. Skipping it is safe — the in-flight
-  // call renders from current state, and any later state change re-invokes.
+  // Serialize concurrent invocations (see _todaysFlowCtaRendering above).
+  // Skipping the second call is safe — the in-flight call renders from
+  // current state, and any later state change re-invokes.
   if (_todaysFlowCtaRendering) return;
   _todaysFlowCtaRendering = true;
   try {
-    const sidebarSlot = document.getElementById("todaysFlowSidebarCTA");
-    const chatLog = document.getElementById("chatLog");
+    const hero = document.getElementById("todaysSessionHero");
+    if (!hero) return;
 
-    // Tear down stale CTAs first; we always rebuild from current state.
-    if (sidebarSlot) {
-      sidebarSlot.innerHTML = "";
-      sidebarSlot.hidden = true;
+    // Mid-session: the picker owns the chat scroll; the hero offers a
+    // compact Continue affordance that re-opens the picker.
+    if (_todaysSessionState.active) {
+      const total = (_todaysSessionState.exercises || []).length;
+      const done = (_todaysSessionState.completedIds || []).length;
+      if (!total || done >= total) {
+        // Complete (or empty) — renderWorkoutComplete resets the flow
+        // state and re-invokes; stay hidden until then.
+        hero.hidden = true;
+        hero.innerHTML = "";
+        return;
+      }
+      renderTodaysHero(hero, {
+        title: `Continue - ${done} of ${total} done`,
+        sub: "Pick up where you left off",
+        btnLabel: "Continue",
+        onClick: () => renderExercisePicker(),
+      });
+      return;
     }
-    const existingChatCta = document.getElementById("todaysFlowChatCTA");
-    if (existingChatCta) existingChatCta.remove();
 
-    // Don't show the CTA mid-flow — once the patient clicks Start, the picker
-    // owns the chat scroll. The flow itself surfaces the next-exercise CTA.
-    if (_todaysSessionState.active) return;
+    // No active protocol with exercises -> no hero.
+    const total = _activeProtocolExerciseCount;
+    if (!total) {
+      hero.hidden = true;
+      hero.innerHTML = "";
+      return;
+    }
 
-    const reviewState = patientState?.review_status?.state;
-    if (reviewState !== "recently_approved") return;
-
-    // Today's session: refresh if we don't already have a fresh mirror, then
-    // gate on completion count. If any row is completed today, the patient
-    // has already started — don't double-prompt.
+    // Today's session: refresh when authed, then branch on completion
+    // count. Demo mode has no JWT — todaySession stays empty and the
+    // hero degrades to the default Start state.
     if (window.RehabAuth?.getJwt?.()) {
       try {
         await refreshTodaySession();
@@ -5493,59 +5997,37 @@ async function refreshTodaysFlowCTA() {
       }
     }
     const completedToday = todaySession.filter((s) => s.status === "completed").length;
-    if (completedToday > 0) return;
-
-    // Render inline CTA at the top of the chat scroll.
-    if (chatLog) {
-      // Atomic teardown-before-insert: defends against any stale node that
-      // slipped in across the await above (belt-and-suspenders with the lock).
-      const stale = document.getElementById("todaysFlowChatCTA");
-      if (stale) stale.remove();
-      const cta = document.createElement("div");
-      cta.id = "todaysFlowChatCTA";
-      cta.className = "todays-session-cta";
-      cta.innerHTML = `
-        <div class="todays-session-cta-title">Your plan is ready.</div>
-        <div class="todays-session-cta-sub">Start today's session?</div>
-        <button type="button" class="todays-session-cta-btn">Start session →</button>
-      `;
-      cta.querySelector("button").addEventListener("click", startTodaysSession);
-      // Insert right after the chat-empty placeholder if present, else prepend.
-      const empty = document.getElementById("chatEmpty");
-      if (empty && empty.parentElement === chatLog) {
-        empty.insertAdjacentElement("afterend", cta);
-      } else {
-        chatLog.insertBefore(cta, chatLog.firstChild);
-      }
+    if (completedToday > 0) {
+      renderTodaysHero(hero, {
+        done: true,
+        title: "Done for today",
+        sub: "Session logged. Your clinician can see it.",
+        btnLabel: "View history",
+        onClick: () => switchStage("history"),
+      });
+      return;
     }
 
-    // Mirror in the sidebar.
-    if (sidebarSlot) {
-      sidebarSlot.hidden = false;
-      sidebarSlot.innerHTML = `
-        <button type="button" class="todays-session-sidebar-btn">
-          Start today's session →
-        </button>
-      `;
-      sidebarSlot.querySelector("button").addEventListener("click", startTodaysSession);
-    }
+    // Default: one big Start. Duration heuristic: ~3 min per exercise,
+    // floored at 5 so a one-exercise plan doesn't read as trivial.
+    const mins = Math.max(5, 3 * total);
+    renderTodaysHero(hero, {
+      title: `${total} exercise${total === 1 ? "" : "s"} - ~${mins} min`,
+      sub: "Guided form-check, one exercise at a time",
+      btnLabel: "Start",
+      onClick: startTodaysSession,
+    });
   } finally {
     _todaysFlowCtaRendering = false;
   }
 }
 
-// Click handler for both CTAs. Fetches the active protocol's exercises
-// from /protocol/exercises, populates _todaysSessionState, and renders
-// the in-chat picker. Surfaces a friendly toast on failure (no silent
-// fallback — an empty picker would confuse the patient).
+// Click handler for the hero Start button. Fetches the active protocol's
+// exercises from /protocol/exercises, populates _todaysSessionState, and
+// renders the in-chat picker. Surfaces a friendly toast on failure (no
+// silent fallback — an empty picker would confuse the patient).
 async function startTodaysSession() {
   if (_todaysSessionState.active) return;
-  // Tear down the entry CTAs immediately so the picker has a clean slate.
-  const sidebarSlot = document.getElementById("todaysFlowSidebarCTA");
-  if (sidebarSlot) { sidebarSlot.hidden = true; sidebarSlot.innerHTML = ""; }
-  const chatCta = document.getElementById("todaysFlowChatCTA");
-  if (chatCta) chatCta.remove();
-
   showCoachWorkingIndicator();
   try {
     const res = await authedFetch(`${API_BASE}/protocol/exercises`);
@@ -5566,6 +6048,8 @@ async function startTodaysSession() {
     console.info("[flow-m] startTodaysSession exercises=%d", items.length);
     hideCoachWorkingIndicator();
     renderExercisePicker();
+    // Flip the hero to its Continue state now that a session is live.
+    refreshTodaysFlowCTA().catch(() => {});
   } catch (e) {
     hideCoachWorkingIndicator();
     console.warn("startTodaysSession failed:", e);
@@ -5596,18 +6080,23 @@ function renderExercisePicker() {
   const total = items.length;
   const doneCount = items.length - remaining.length;
 
-  const headline = doneCount === 0
+  // Rough session estimate off the exercises still to do: ~3 min each,
+  // floored at 5 so a one-exercise day never reads "~3 min".
+  const estMin = Math.max(5, 3 * remaining.length);
+  const durationNote = remaining.length ? ` · ~${estMin} min` : "";
+  const headline = (doneCount === 0
     ? `Today's plan: ${total} exercise${total === 1 ? "" : "s"}`
-    : `Today's plan: ${doneCount} of ${total} done — ${remaining.length} to go`;
+    : `Today's plan: ${doneCount} of ${total} done — ${remaining.length} to go`)
+    + durationNote;
 
   const rows = items.map((ex) => {
     const isDone = completed.has(ex.id);
-    const dose = ex.default_dose ? `<span class="picker-row-dose">${escapeHtml(ex.default_dose)}</span>` : "";
+    const dose = ex.default_dose ? `<span class="picker-row-dose">${escapeHtml(friendlySpec(ex.default_dose))}</span>` : "";
     const checkGlyph = isDone ? "✓" : "";
     return `
       <button type="button" class="picker-row ${isDone ? "done" : ""}" data-ex-id="${escapeHtml(ex.id)}" ${isDone ? "disabled" : ""}>
         <span class="picker-row-check" aria-hidden="true">${checkGlyph}</span>
-        <span class="picker-row-name">${escapeHtml(ex.name)}</span>
+        <span class="picker-row-name">${escapeHtml(friendlyExerciseLabel(ex.name))}</span>
         ${dose}
       </button>
     `;
@@ -5742,6 +6231,7 @@ function launchCurrentExercise() {
         if (!_todaysSessionState.completedIds.includes(exId)) {
           _todaysSessionState.completedIds.push(exId);
         }
+        refreshTodaysFlowCTA().catch(() => {});
         renderNextExerciseCTA();
       });
       return;
@@ -5769,6 +6259,9 @@ function advanceToNextExercise() {
     "[flow-m] advanceToNextExercise idx=%d done=%d/%d",
     idx, _todaysSessionState.completedIds.length, items.length,
   );
+
+  // Keep the hero's "X of N done" count fresh.
+  refreshTodaysFlowCTA().catch(() => {});
 
   // All done?
   if (_todaysSessionState.completedIds.length >= items.length) {
@@ -5874,8 +6367,8 @@ function renderWorkoutComplete() {
 
   log.appendChild(card);
 
-  // Reset flow state so the entry CTA is suppressed (completedToday > 0
-  // gates it via /sessions/today on next refresh).
+  // Reset flow state so the hero flips to done-for-today (completedToday
+  // > 0 selects it via /sessions/today on next refresh).
   _todaysSessionState.active = false;
   _todaysSessionState.exercises = [];
   _todaysSessionState.currentIdx = -1;
@@ -5884,7 +6377,7 @@ function renderWorkoutComplete() {
   _todaysSessionState.startedAtMs = null;
 
   // Refresh today-session sidebar mirror (status flags should be up to date
-  // from the /pose/session writes during the flow) and the CTA.
+  // from the /pose/session writes during the flow) and the hero.
   refreshTodaySession().catch(() => {});
   refreshTodaysFlowCTA().catch(() => {});
   scrollChatLog();
@@ -5892,7 +6385,7 @@ function renderWorkoutComplete() {
 
 // Patient bails out mid-flow. We keep the completedIds (already persisted
 // via /sessions POSTs / /pose/session writes), drop the active flag so
-// the entry CTA can re-render on next refresh, and clear the in-flight
+// the hero can re-render on next refresh, and clear the in-flight
 // picker / next-CTA. Re-entry from the gallery still works.
 function bailFlow() {
   console.info(
@@ -5908,9 +6401,9 @@ function bailFlow() {
   document.querySelectorAll(".next-exercise-cta").forEach((n) => n.remove());
 
   showToast("Saved your progress. Pick up anytime from the exercise tab.", "info");
-  // Don't re-show the post-approval CTA right away — the patient just
-  // dismissed it. refreshTodaysFlowCTA() gates on completedToday from
-  // /sessions/today; the CTA returns naturally if zero completed today.
+  // Repaint the hero from server truth: done-for-today if any completed
+  // rows landed, otherwise back to the default Start state.
+  refreshTodaysFlowCTA().catch(() => {});
 }
 
 // "Coach Maya is on it" transient. Quick-action buttons + sendChat() both
@@ -6107,12 +6600,46 @@ async function logExerciseFromBtn(btn) {
 
 const _EXERCISE_NAME_LOOKUP = {}; // exercise_id -> friendly name; populated by gallery renders
 
+// True for id-shaped strings (snake_case tokens like "stationary_bike").
+// Demo/planner payloads sometimes carry the id AS the name; storing or
+// returning those defeats the prettifier.
+function _isIdShaped(s) {
+  return typeof s === "string" && /^[a-z0-9_]+$/.test(s) && s.includes("_");
+}
+
 function rememberExerciseName(id, name) {
-  if (id && name) _EXERCISE_NAME_LOOKUP[id] = name;
+  if (id && name && !_isIdShaped(name)) _EXERCISE_NAME_LOOKUP[id] = name;
 }
 
 function exerciseDisplayName(id) {
-  return _EXERCISE_NAME_LOOKUP[id] || id;
+  const hit = _EXERCISE_NAME_LOOKUP[id];
+  if (hit && !_isIdShaped(hit)) return hit;
+  if (!id) return id;
+  // Fallback for a fresh page load before the gallery has populated the
+  // lookup: prettify the snake_case id ("ankle_calf_raises_double_leg" ->
+  // "Ankle Calf Raises Double Leg") so History + the Today's-session sidebar
+  // never render a raw id. Once the gallery loads, the canonical library name
+  // (via rememberExerciseName) takes precedence.
+  return String(id).replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+// Display-only prettifier for protocol payload names that can carry raw
+// machine ids ("stationary_bike"). Curated names ("Terminal Knee Extension")
+// pass through untouched; only snake_case ids take the exerciseDisplayName
+// lookup + prettify path. Never feed the result back into data-ex-* dataset
+// attributes or API payloads — those stay raw ids.
+function friendlyExerciseLabel(raw) {
+  if (!raw) return "unnamed";
+  const s = String(raw);
+  return /^[a-z0-9]+(?:_[a-z0-9]+)*$/.test(s) ? exerciseDisplayName(s) : s;
+}
+
+// Display-only prettifier for dose/spec/intensity strings that can carry raw
+// load tokens ("3×10 yellow_band" -> "3×10 yellow band"). Lowercase on
+// purpose — these are qualifiers, not titles.
+function friendlySpec(raw) {
+  if (raw == null) return "";
+  return String(raw).replace(/_/g, " ");
 }
 
 function renderTodaySession() {

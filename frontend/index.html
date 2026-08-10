@@ -72,23 +72,22 @@
         <section class="card today-session-card" id="todaySessionCard"
                  style="display:none">
           <h3>Today's Session</h3>
-          <!-- PR-M flow-stitching: post-approval "Start today's session" CTA.
-               Mirrors the chat-scroll CTA at #todaysFlowChatCTA. Both fire the
-               same handler (startTodaysSession). Hidden until refreshPatientState
-               sees review_status.state === "recently_approved" AND today has no
-               completed sessions. -->
-          <div class="todays-session-sidebar-cta" id="todaysFlowSidebarCTA" hidden></div>
+          <!-- Session entry lives in the chat hero card (#todaysSessionHero);
+               the old sidebar CTA mirror was removed with it. -->
           <ul class="today-session-list" id="todaySessionList"></ul>
           <p class="today-session-hint">
             Logged to your record. Reviewed by your clinician.
           </p>
         </section>
 
-        <section class="card calendar-card">
-          <h3>Today's Schedule</h3>
-          <ul class="event-list" id="eventList">
-            <li class="loading-text">Loading...</li>
-          </ul>
+        <section class="card momentum-card">
+          <h3>Your Momentum</h3>
+          <!-- Streak + sessions-this-week, computed client-side from
+               /sessions/recent?days=30 by loadMomentum. Quiet zero-state
+               when unauthed or no completed sessions yet. -->
+          <div class="stats momentum-stats" id="momentumStats">
+            <div class="loading-text">Loading...</div>
+          </div>
         </section>
 
       </aside>
@@ -136,7 +135,7 @@
                 </button>
               </div>
               <p class="video-hint" id="videoHint">
-                Video is the visceral surface. The chat tab is where actions happen.
+                Talk with Maya face to face. For plan changes and logging, use Coach Chat.
               </p>
             </div>
             <div class="loading-session" id="loadingSession" style="display:none">
@@ -224,9 +223,11 @@
             <div class="chat-header">
               <h3>Coach Maya</h3>
               <span class="chat-tag">grounded in exercise library</span>
+              <!-- Label is set per-flow by updateFlowUI ("cancel intake" /
+                   "cancel symptom" / "cancel check-in"). -->
               <button class="intake-cancel-btn" id="intakeCancelBtn"
                       style="display:none" onclick="cancelFlow()">
-                ✕ cancel intake
+                ✕ cancel
               </button>
             </div>
             <div class="intake-progress" id="intakeProgressBar" style="display:none">
@@ -235,10 +236,16 @@
                 <div class="intake-progress-fill" id="intakeProgressFill"></div>
               </div>
             </div>
+            <!-- Today's-session hero. The single daily entry point, pinned
+                 above the chat log (sibling, so it never scrolls away and
+                 never pushes the input row off screen). Painted by
+                 refreshTodaysFlowCTA in three states: Start (default),
+                 Continue (mid-session), and a calm done-for-today state. -->
+            <div class="todays-hero" id="todaysSessionHero" hidden></div>
             <div class="chat-log" id="chatLog">
               <div class="chat-empty" id="chatEmpty">
                 Ask Coach Maya to swap an exercise, log a symptom, or plan next week.
-                Every recommendation links to a video. Every command queues a clinician review.
+                Every recommendation links to a video. Plan changes go to your clinician for review.
               </div>
             </div>
             <div class="chat-suggestions" id="chatSuggestions">
@@ -271,6 +278,12 @@
                 Log a check-in
               </button>
             </div>
+
+            <!-- Tappable answer chips for guided flows (pain / rating scales,
+                 yes-no). Painted by renderFlowAnswerChips while the active
+                 flow question expects a fixed-choice answer. -->
+            <div class="flow-answer-chips" id="flowAnswerChips" hidden
+                 role="group" aria-label="Tap an answer"></div>
 
             <form class="chat-input-row" id="chatInputRow" onsubmit="onChatSubmit(event)">
               <input
@@ -529,8 +542,8 @@
         7 quick questions. Coach Maya uses your answers to draft a personalized
         rehab protocol.
       </p>
-      <div class="intake-progress" id="intakeProgress">
-        <div class="intake-progress-fill" id="intakeProgressFill"></div>
+      <div class="intake-progress" id="intakeModalProgress">
+        <div class="intake-progress-fill" id="intakeModalProgressFill"></div>
       </div>
       <div class="intake-log" id="intakeLog"></div>
       <form class="intake-form" id="intakeForm">

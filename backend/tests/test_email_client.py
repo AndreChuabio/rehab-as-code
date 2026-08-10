@@ -320,6 +320,13 @@ def test_approve_hook_survives_send_exception(authed_client, monkeypatch):
 
     monkeypatch.setattr(notifications, "send_plan_updated", _boom)
 
+    # approve is clinician-gated; open the gate for this hook-resilience test.
+    import main
+    from auth import require_clinician_id
+    monkeypatch.setitem(
+        main.app.dependency_overrides, require_clinician_id, lambda: "clinician"
+    )
+
     res = authed_client.post(
         "/protocols/abc-123/approve", json={"notes": "ok"},
     )

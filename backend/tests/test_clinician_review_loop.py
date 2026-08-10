@@ -112,6 +112,14 @@ def test_review_status_pending_then_approved_round_trip(
 
     monkeypatch.setattr(protocol_repo, "approve", _approve)
 
+    # approve is clinician-gated; open the gate so this status round-trip test
+    # can drive the (mocked) approval as the reviewing staff member.
+    import main
+    from auth import require_clinician_id
+    monkeypatch.setitem(
+        main.app.dependency_overrides, require_clinician_id, lambda: fake_user_id
+    )
+
     resp = authed_client.post(
         "/protocols/11111111-1111-1111-1111-aaaaaaaaaaaa/approve",
         json={"notes": "looks reasonable"},
@@ -189,6 +197,13 @@ def test_review_status_pending_then_rejected_round_trip(
         }
 
     monkeypatch.setattr(protocol_repo, "reject", _reject)
+
+    # reject is clinician-gated; open the gate for this status round-trip test.
+    import main
+    from auth import require_clinician_id
+    monkeypatch.setitem(
+        main.app.dependency_overrides, require_clinician_id, lambda: fake_user_id
+    )
 
     long_notes = (
         "Single-leg squat is too aggressive at week 3 post-op. Regress to "

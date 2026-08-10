@@ -46,15 +46,18 @@ def test_every_body_region_is_in_canonical_taxonomy():
 
 
 def test_full_audit_summary_counts_match_expectations():
-    """Sanity check: 48 total, 19 form-check supported, 6 regions x 8."""
+    """Sanity check: 50 total, 19 form-check supported. Knee has 10 (post-ACL
+    week-4 references single_leg_balance + heel_raises, synced from the
+    protocol library); every other region has 8."""
     _, summary = audit.run_audit()
-    assert summary["total_exercises"] == 48
+    assert summary["total_exercises"] == 50
     assert summary["form_check_supported"] == 19
-    # Every canonical region currently has exactly 8 entries. Update this
-    # alongside library growth — the failure mode here is "you added a
-    # new exercise; bump the expected count" not a real regression.
-    for region in ("knee", "ankle", "hamstring", "shoulder", "elbow", "low_back"):
-        assert summary[f"region_{region}"] == 8, (
-            f"expected 8 exercises in region={region}, got "
+    # Update these alongside library growth — the failure mode here is "you
+    # added a new exercise; bump the expected count" not a real regression.
+    expected = {"knee": 10, "ankle": 8, "hamstring": 8,
+                "shoulder": 8, "elbow": 8, "low_back": 8}
+    for region, n in expected.items():
+        assert summary[f"region_{region}"] == n, (
+            f"expected {n} exercises in region={region}, got "
             f"{summary[f'region_{region}']}"
         )

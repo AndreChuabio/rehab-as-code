@@ -4,7 +4,7 @@ session_repo monkeypatched so no DB is touched. Behavior contract:
   * groups completed pose sessions by exercise_id
   * sums rep_count into total_reps per exercise
   * aggregates warnings by warning id, summing counts across sessions
-  * collapses per-session worst_status into the worst seen (fail > warn > good)
+  * collapses per-session worst_status into the worst seen (bad > warn > good)
   * ignores non-completed rows
   * exercises_with_issues is the subset with a non-good status or any warning
   * degrades to an empty, well-formed dict when session_repo is unavailable,
@@ -42,10 +42,10 @@ def _fake_sessions() -> list[dict[str, Any]]:
             "pose_metrics": {
                 "rep_count": 10,
                 "best_depth": 88.0,
-                "worst_status": "fail",
+                "worst_status": "bad",
                 "warnings": [
                     # overlaps the first session -> count should sum to 2
-                    {"id": "knee_valgus", "msg": "knees caving in", "status": "fail"},
+                    {"id": "knee_valgus", "msg": "knees caving in", "status": "bad"},
                 ],
             },
         },
@@ -69,8 +69,8 @@ def _fake_sessions() -> list[dict[str, Any]]:
             "completed_at": None,
             "pose_metrics": {
                 "rep_count": 99,
-                "worst_status": "fail",
-                "warnings": [{"id": "knee_valgus", "msg": "x", "status": "fail"}],
+                "worst_status": "bad",
+                "warnings": [{"id": "knee_valgus", "msg": "x", "status": "bad"}],
             },
         },
     ]
@@ -105,7 +105,7 @@ def test_rollup_groups_sums_and_aggregates(monkeypatch):
     assert squat["n_sessions"] == 2
     assert squat["total_reps"] == 18
     # worst_status collapses to the worst seen across sessions.
-    assert squat["worst_status"] == "fail"
+    assert squat["worst_status"] == "bad"
     # Warnings aggregated by id: knee_valgus seen in both -> count 2;
     # shallow_depth only once -> count 1.
     wcounts = {w["id"]: w["count"] for w in squat["warnings"]}

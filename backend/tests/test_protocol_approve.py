@@ -27,6 +27,15 @@ def test_protocol_approve_happy_path(authed_client, fake_user_id, monkeypatch):
     import protocol_repo
     monkeypatch.setattr(protocol_repo, "approve", _approve)
 
+    # approve is clinician-gated (require_clinician_id). This test exercises the
+    # endpoint's write logic, so open the gate for the JWT-derived patient id;
+    # the non-clinician rejection is covered by its own test below.
+    import main
+    from auth import require_clinician_id
+    monkeypatch.setitem(
+        main.app.dependency_overrides, require_clinician_id, lambda: fake_user_id
+    )
+
     resp = authed_client.post(
         "/protocols/fake-protocol-id/approve",
         json={"notes": "looks reasonable"},
@@ -48,3 +57,24 @@ def test_protocol_approve_rejects_unauthenticated(unauthed_client):
         json={"notes": "noop"},
     )
     assert resp.status_code == 401, resp.text
+
+
+def test_protocol_approve_rejects_non_clinician(authed_client, monkeypatch):
+    """A patient (authenticated, NOT staff) must not self-approve their own
+    AI-drafted protocol — the clinician gate is the product's trust boundary.
+
+    authed_client overrides current_user_id but NOT require_clinician_id, so the
+    real clinician dependency runs and rejects. approve is mocked to a success
+    row: if the gate ever regressed back to Depends(current_user_id) this would
+    return 200 and fail the test."""
+    import protocol_repo
+    monkeypatch.setattr(
+        protocol_repo,
+        "approve",
+        lambda **k: {"id": "x", "token": "t", "status": "active", "reviewed_at": None},
+    )
+    resp = authed_client.post(
+        "/protocols/fake-protocol-id/approve",
+        json={"notes": "sneaky self-approve"},
+    )
+    assert resp.status_code in (401, 403), resp.text

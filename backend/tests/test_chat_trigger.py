@@ -287,6 +287,7 @@ def test_dispatch_list_phase_exercises_out_of_scope_regions_dropped():
     ))
 
     assert result["ok"] is True
+    assert result["count"] > 0, "expected at least one in-scope exercise"
     assert _phase_regions(result["exercises"]) <= IN_SCOPE_REGIONS
 
 

@@ -36,6 +36,10 @@ function buildPickerItems(exercises) {
       name: ex.name || ex.id || "exercise",
       default_dose: ex.default_dose || ex.spec || "",
       cues: ex.cues || [],
+      library_id: ex.library_id || "",
+      form_check_supported: ex.form_check_supported === true,
+      spec: ex.spec || "",
+      video_url: ex.video_url || "",
       generated_video_url: ex.generated_video_url || "",
       youtube_id: ex.youtube_id || "",
       youtube_watch_url: ex.youtube_watch_url || "",
@@ -69,6 +73,18 @@ function buildPickerItems(exercises) {
   // spec is honored when default_dose is missing (matches /protocol/exercises shape).
   const specRow = buildPickerItems([{ id: "stationary_bike", name: "Bike", spec: "8 min" }]);
   assert.equal(specRow[0].default_dose, "8 min", "spec falls through to default_dose");
+
+  // form_check_supported + library_id must carry through so the stepped
+  // Today's-session flow can offer the guided form-check (regression: they
+  // were dropped, forcing every exercise into the self-paced branch).
+  const fc = buildPickerItems([
+    { id: "ankle_calf_raises_double_leg", name: "Calf Raises",
+      library_id: "ankle_calf_raises_double_leg", form_check_supported: true },
+  ]);
+  assert.equal(fc[0].form_check_supported, true, "form_check_supported carries through");
+  assert.equal(fc[0].library_id, "ankle_calf_raises_double_leg", "library_id carries through");
+  // Falsy/absent form_check_supported normalizes to false (not undefined).
+  assert.equal(buildPickerItems([{ id: "x" }])[0].form_check_supported, false);
 }
 
 // ── nextExerciseAfter: empty + done detection ───────────────────────────────

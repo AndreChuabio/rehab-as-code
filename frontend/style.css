@@ -382,7 +382,7 @@ body {
 .protocol-card h3,
 .payer-goals-card h3,
 .today-session-card h3,
-.calendar-card h3,
+.momentum-card h3,
 .recommendations h3 {
   display: block;
   font-family: var(--font-mono);
@@ -397,7 +397,7 @@ body {
 .protocol-card h3::before,
 .payer-goals-card h3::before,
 .today-session-card h3::before,
-.calendar-card h3::before,
+.momentum-card h3::before,
 .recommendations h3::before { content: "// "; }
 
 /* Health Stats */
@@ -428,22 +428,13 @@ body {
 .health-caption.sample { color: var(--muted); }
 .health-caption.live { color: var(--muted); }
 
-/* Calendar */
-.event-list { list-style: none; display: flex; flex-direction: column; gap: 8px; }
-.event-item {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
-  background: var(--surface2);
-  border-radius: 8px;
-  border-left: 3px solid var(--border);
+/* Momentum (streak + sessions this week) — reuses the .stats / .stat rows
+   from the health card; only the zero-state needs its own rule. */
+.momentum-empty {
+  color: var(--muted);
   font-size: 13px;
+  line-height: 1.4;
 }
-.event-item.high-stakes { border-left-color: var(--warn); }
-.event-time { color: var(--muted); font-size: 11px; }
-.event-title { font-weight: 500; }
-.badge { font-size: 10px; color: var(--warn); margin-top: 2px; }
 .loading-text { color: var(--muted); font-size: 13px; }
 
 .source-badge {
@@ -974,6 +965,38 @@ body {
   justify-content: center;
   border-radius: 4px 4px 0 0;
 }
+/* When the chat-card form-check (.pose-split) is mounted inside the
+   video-thumb placeholder, drop the 520px cap and the 16:9 aspect-ratio.
+   Those keep the resting thumbnail small, but they strangle the side-by-side
+   pose panels (520px wide + 857px tall -> floating video + pink letterbox).
+   Removing them lets the placeholder fill the card width and shrink to the
+   pose-split's own height, matching the full-width gallery render. */
+.exercise-video-placeholder:has(.pose-split) {
+  max-width: none;
+  aspect-ratio: auto;
+  height: auto;
+}
+/* Chat-card form-check: the side-by-side otherwise claims the whole viewport
+   (calc(100vh-160px) tall, full card width) and dominates the chat. Cap it to
+   a comfortable size, centered. Scoped to .exercise-card so the full-screen
+   gallery form-check and the in-call PiP are untouched. */
+.exercise-card .exercise-video-placeholder:has(.pose-split) {
+  max-width: 880px;
+  margin: 0 auto;
+}
+.exercise-card .pose-split {
+  min-height: 0;
+  /* Viewport-relative so the whole card (panels + Stop/Add buttons) fits the
+     chat pane without scrolling, even on shorter screens. */
+  height: min(340px, 42vh);
+  max-height: 340px;
+}
+/* During the form-check the exercise title + cues are already shown on the
+   video overlay — hide the duplicated ones below so the card stays compact. */
+.exercise-card:has(.pose-split) .exercise-title-row,
+.exercise-card:has(.pose-split) .exercise-cues {
+  display: none;
+}
 .video-placeholder-text {
   color: #555;
   font-size: 0.8rem;
@@ -1118,6 +1141,23 @@ body {
   color: var(--text);
 }
 .chat-chip:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Tappable answer chips for guided flows (pain / rating scales, yes-no).
+   Rendered by renderFlowAnswerChips above the input row while the active
+   flow question expects a fixed-choice answer. Reuses .chat-chip; the
+   .flow-chip modifier centers short numeric labels. */
+.flow-answer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.flow-answer-chips[hidden] { display: none; }
+.flow-chip {
+  min-width: 34px;
+  text-align: center;
+  font-family: var(--font-mono);
+  color: var(--text);
+}
 
 /* Input row */
 .chat-input-row {
@@ -1354,14 +1394,17 @@ body {
 .stage-chat .chat-card .chat-header,
 .stage-chat .chat-card .intake-progress,
 .stage-chat .chat-card .chat-suggestions,
+.stage-chat .chat-card .flow-answer-chips,
 .stage-chat .chat-card .quick-actions,
 .stage-chat .chat-card .chat-input-row {
   flex: 0 0 auto;
 }
 /* Visual separation between the scrollable message stream and the pinned
    bottom region (chips + quick-actions + input) so the user can see where
-   the conversation ends. */
-.stage-chat .chat-card .chat-suggestions {
+   the conversation ends. The flow-answer chips take the suggestions row's
+   place while a guided flow is active, so they share the treatment. */
+.stage-chat .chat-card .chat-suggestions,
+.stage-chat .chat-card .flow-answer-chips:not([hidden]) {
   border-top: 1px solid var(--border);
   padding-top: 10px;
   margin-top: 4px;
@@ -1567,7 +1610,10 @@ body {
   font-family: var(--font-mono);
 }
 
-/* Exercise gallery (step 3) — thumbnails on top, main player below */
+/* Exercise gallery (step 3) — detail view (main player) on top, responsive
+   card grid below. .gallery-thumbs / .gallery-thumb-btn class names are
+   load-bearing (pose-active hide rule, switchGalleryItem active-toggle,
+   togglePoseFormCheck error path); only the presentation changed. */
 .exercise-gallery {
   width: 100%;
   background: var(--surface);
@@ -1575,36 +1621,82 @@ body {
   border-radius: var(--radius);
   overflow: hidden;
   margin: 8px 0;
+  /* The gallery is a flex child of .chat-log (flex column): without this it
+     shrinks to the leftover space and overflow:hidden CLIPS the card grid
+     entirely. Keep natural height; the chat-log is the scroll container. */
+  flex: 0 0 auto;
 }
-/* Thumbnail strip — top, horizontal */
+/* Card grid — below the detail view */
 .gallery-thumbs {
-  display: flex;
-  border-bottom: 1px solid var(--border);
-  overflow-x: auto;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--border);
+}
+.gallery-group + .gallery-group { margin-top: 16px; }
+.gallery-group-head {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-mono);
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+.gallery-group-head::before { content: "// "; }
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
 }
 .gallery-thumb-btn {
-  flex: 1; min-width: 72px; max-width: 160px;
-  background: none; border: none; border-right: 1px solid var(--border);
+  display: flex; flex-direction: column; align-items: stretch;
+  text-align: left;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xs);
+  overflow: hidden;
   cursor: pointer; padding: 0;
-  display: flex; flex-direction: column; align-items: center;
-  transition: background 0.15s;
+  font-family: inherit;
+  transition: border-color var(--dur-base) var(--ease), background var(--dur-base) var(--ease);
 }
-.gallery-thumb-btn:last-child { border-right: none; }
-.gallery-thumb-btn:hover { background: var(--surface2); }
-.gallery-thumb-btn.active { background: var(--surface2); box-shadow: inset 0 3px 0 var(--accent); }
+.gallery-thumb-btn:hover { background: var(--surface2); border-color: var(--border-strong); }
+.gallery-thumb-btn.active { border-color: var(--accent); box-shadow: var(--shadow-focus); }
 .gallery-thumb-video,
 .gallery-thumb-img,
 .gallery-thumb-blank {
   width: 100%; aspect-ratio: 16/9; object-fit: cover;
   display: block; pointer-events: none;
 }
-.gallery-thumb-blank { background: #111; }
+.gallery-thumb-blank {
+  background: var(--surface2);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: var(--fs-11);
+  text-transform: uppercase; letter-spacing: var(--ls-mono);
+  color: var(--muted);
+}
+.gallery-thumb-meta {
+  display: flex; flex-direction: column; gap: 3px;
+  padding: 8px 10px 10px; width: 100%;
+}
 .gallery-thumb-label {
-  font-size: 10px; color: var(--muted);
-  padding: 3px 4px 4px; text-align: center;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 100%;
+  font-size: var(--fs-13); font-weight: var(--fw-semibold);
+  color: var(--text);
+  overflow: hidden; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical;
 }
 .gallery-thumb-btn.active .gallery-thumb-label { color: var(--accent); }
+.gallery-thumb-dose {
+  font-family: var(--font-mono); font-size: var(--fs-11);
+  color: var(--muted);
+}
+.gallery-thumb-fc {
+  align-self: flex-start;
+  font-size: var(--fs-11); font-weight: var(--fw-medium);
+  color: var(--accent);
+  border: 1px solid rgba(var(--rgb-accent), 0.35);
+  border-radius: var(--radius-pill);
+  padding: 1px 8px;
+  margin-top: 2px;
+}
 
 /* Main player */
 .gallery-main { position: relative; }
@@ -2027,9 +2119,8 @@ body {
   gap: 12px;
   width: 100%;
   align-items: stretch;
-  /* Claim most of the viewport. object-fit: contain on the ref video means
-     we may show letterbox bands when video aspect != column aspect — that's
-     intentional. Patients need to see the whole demo, not a cropped middle. */
+  /* Claim most of the viewport. The reference video uses object-fit: cover
+     so it fills its column without letterbox bands. */
   min-height: 560px;
   height: calc(100vh - 160px);
   max-height: 88vh;
@@ -2076,9 +2167,10 @@ body {
 .incall-set-mount .pose-preflight-cues { display: none; }
 
 /* When form-check is on, hide chat chrome that's competing for space
-   (gallery thumbs strip, Maya header chip, suggestion chips). The chat
-   input at the bottom stays — it's cheap enough to keep. */
+   (gallery card grid, library header panel, Maya header chip, suggestion
+   chips). The chat input at the bottom stays — it's cheap enough to keep. */
 body.pose-active .gallery-thumbs,
+body.pose-active .browse-all-panel,
 body.pose-active .chat-suggestions,
 body.pose-active .chat-header { display: none !important; }
 body.pose-active .agent-panel { display: none; }
@@ -2104,7 +2196,7 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .pose-split-ref video {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;   /* fill the column without letterbox bands */
   display: block;
 }
 .pose-split-ref-label {
@@ -2125,11 +2217,26 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   display: flex;
   flex-direction: column;
   height: 100%;
+  /* Match the ref panel's black fill so the toolbar (white title +
+     light-green status pill) reads on a dark surface instead of bleeding
+     onto the pink placeholder behind it. */
+  background: #000;
+  border-radius: 6px;
 }
 .pose-split-live .pose-toolbar { flex: 0 0 auto; }
 .pose-split-live .pose-warnings { flex: 0 0 auto; }
 .pose-split-live .pose-session-card { flex: 0 0 auto; }
 .pose-split-live #poseStage.pose-stage { flex: 1 1 auto; }
+/* Prevent the preflight card from overflowing the stage in the side-by-side
+   layout. The card is bottom-anchored (align-items: flex-end) and #poseStage
+   has overflow: hidden — without a height cap the card's title is clipped
+   at the top when the stage is shorter than the card. max-height constrains
+   it to the available stage height; overflow-y: auto provides a scroll escape
+   instead of clipping. */
+.pose-split-live #poseStage .pose-preflight-card {
+  max-height: calc(100% - 40px);
+  overflow-y: auto;
+}
 
 .pose-title {
   display: flex;
@@ -3010,42 +3117,62 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 .browse-all-panel {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
-.browse-all-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
+.browse-all-label {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-mono);
+  color: var(--muted);
 }
+.browse-all-label::before { content: "// "; }
+/* Segmented control: two equal-width pill segments in one container */
 .browse-all-tabs {
-  display: inline-flex;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  padding: 4px;
 }
 .browse-all-tab {
   background: transparent;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  padding: 4px 10px;
-  font-size: 12px;
+  border: none;
+  border-radius: var(--radius-pill);
+  padding: 7px 12px;
+  font-size: var(--fs-13);
+  font-weight: var(--fw-semibold);
+  text-align: center;
   cursor: pointer;
   font-family: inherit;
-  color: inherit;
+  color: var(--muted);
+  transition: var(--transition-btn);
 }
+.browse-all-tab:hover { color: var(--text); }
 .browse-all-tab.active {
   background: var(--accent);
-  color: var(--bg);
-  border-color: var(--accent);
+  color: var(--cta-text);
 }
 .browse-all-filters {
   display: flex;
-  gap: 12px;
-  font-size: 12px;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--fs-12);
   color: var(--muted);
 }
 .browse-all-filters select {
-  margin-left: 4px;
   font-family: inherit;
+  font-size: var(--fs-13);
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-xs);
+  padding: 5px 10px;
 }
+.browse-all-filters select:focus { outline: none; box-shadow: var(--shadow-focus); }
 
 .today-session-item.completed { opacity: 0.7; }
 .today-session-item.skipped { opacity: 0.45; text-decoration: line-through; }
@@ -3113,6 +3240,29 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   display: none;
 }
 #poseStage.pose-stage--preflight .pose-frame-guide { display: block; }
+
+/* P2: persistent partial-view caveat chip. JS unhides it only when a set
+   was started via "Start anyway" before framing passed; it stays up for
+   the rest of the engagement (z above the rest/between/preflight scrims)
+   so the counts-accuracy tradeoff remains visible. Bottom-left avoids the
+   set/rep counters (top corners) and the mobile Mark-set-done button
+   (bottom-right). */
+#poseStage .pose-partial-chip {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  z-index: 8;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: rgba(255, 220, 130, 0.95);
+  background: rgba(20, 24, 28, 0.75);
+  border: 1px solid rgba(255, 220, 130, 0.35);
+  border-radius: 999px;
+  pointer-events: none;
+}
+#poseStage .pose-partial-chip[hidden] { display: none; }
 
 /* Set + rep counters. Top corners. Large text. White with shadow so it
    reads against any background. */
@@ -3414,6 +3564,39 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
   color: rgba(255, 220, 130, 0.95);
   min-height: 20px;
 }
+/* Camera picker inside the preflight card. Shown only when >1 camera exists;
+   the escape hatch from OS auto-framing (Center Stage) face-zoom. */
+#poseStage .pose-preflight-camera {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.85);
+}
+#poseStage .pose-preflight-camera label { font-weight: 600; }
+#poseStage .pose-preflight-camera select {
+  flex: 1 1 160px;
+  min-width: 0;
+  /* Native light select with DARK text: macOS Chrome keeps the native light
+     background for closed selects, so white text renders invisible. Do not
+     fight the native appearance - guarantee readability instead. */
+  background: #f4f2f5;
+  color: #1c1320;
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+#poseStage .pose-preflight-camera select option {
+  color: #1c1320;
+  background: #fff;
+}
+#poseStage .pose-preflight-camera-hint {
+  flex-basis: 100%;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+}
 #poseStage .pose-preflight-go {
   margin-top: 6px;
   padding: 12px 18px;
@@ -3437,6 +3620,26 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 #poseStage .pose-preflight-go:not(:disabled):hover {
   background: rgba(100, 235, 195, 1);
 }
+/* P2 guidance-not-gate: subdued secondary Start under the primary. JS
+   reveals it once the camera has been live for START_ANYWAY_DELAY_MS
+   without framing passing, so a strict fully-in-frame gate never hard-
+   blocks the session; the primary keeps the green ready treatment. */
+#poseStage .pose-preflight-start-anyway {
+  margin-top: 2px;
+  padding: 4px 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.55);
+  background: none;
+  border: 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+#poseStage .pose-preflight-start-anyway:hover {
+  color: rgba(255, 255, 255, 0.85);
+}
+#poseStage .pose-preflight-start-anyway[hidden] { display: none; }
 
 /* Mobile tightening at 375px wide. */
 @media (max-width: 480px) {
@@ -3827,67 +4030,84 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
    tokens (var(--surface2), var(--border), var(--accent)).
 */
 
-/* Top-of-chat "Start today's session" CTA. Renders when
-   review_status.state === "recently_approved" AND no completed sessions today.
-   Sits above the chat-empty placeholder, dropped into chatLog.
-   PR-Q: outer tile uses --success rgba (the protocol was approved — that's
-   a "you can start" cue, not a CTA colour). The button inside stays --accent. */
-.todays-session-cta {
-  align-self: stretch;
-  background: linear-gradient(135deg, rgba(var(--rgb-success),  0.14), rgba(var(--rgb-success),  0.04));
-  border: 1px solid rgba(var(--rgb-success),  0.4);
-  border-radius: 10px;
-  padding: 16px 14px;
+/* Today's-session HERO card (#todaysSessionHero). Pinned above the chat
+   log as a sibling inside the flex chat-card, so the log shrinks and the
+   input row never moves below the fold. Single row, compact — well under
+   the 120px ceiling. States: default Start, mid-session Continue, and a
+   calm .done treatment (success tint, subdued button). */
+.todays-hero {
+  flex: 0 0 auto;
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  background: linear-gradient(135deg, rgba(var(--rgb-accent),  0.10), rgba(var(--rgb-accent2),  0.05));
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  padding: 14px 18px;
+  max-height: 120px;
   animation: fadeIn 0.2s ease-out;
 }
-.todays-session-cta-title {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--text);
+.todays-hero[hidden] { display: none; }
+.todays-hero.done {
+  background: rgba(var(--rgb-success),  0.08);
+  border-color: rgba(var(--rgb-success),  0.35);
 }
-.todays-session-cta-sub {
-  font-size: 13px;
+.todays-hero-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.todays-hero-eyebrow {
+  font-family: var(--font-mono);
+  font-size: var(--fs-11);
+  font-weight: var(--fw-semibold);
+  text-transform: uppercase;
+  letter-spacing: var(--ls-mono);
   color: var(--muted);
-  margin-bottom: 4px;
 }
-.todays-session-cta-btn {
-  align-self: flex-start;
+.todays-hero-eyebrow::before { content: "// "; }
+.todays-hero-title {
+  font-family: var(--font-serif);
+  font-size: var(--fs-20);
+  font-weight: var(--fw-semibold);
+  color: var(--text-strong);
+  line-height: 1.2;
+}
+.todays-hero.done .todays-hero-title { color: var(--success); }
+.todays-hero-sub {
+  font-size: var(--fs-13);
+  color: var(--muted);
+}
+.todays-hero-btn {
+  flex-shrink: 0;
   background: var(--accent);
   color: var(--bg);
   border: none;
-  border-radius: 8px;
-  padding: 10px 16px;
-  font-size: 14px;
-  font-weight: 600;
+  border-radius: 10px;
+  padding: 12px 24px;
+  font-size: var(--fs-15);
+  font-weight: var(--fw-semibold);
   cursor: pointer;
-  min-height: 40px;
+  min-height: 44px;
   transition: filter 0.12s ease;
 }
-.todays-session-cta-btn:hover { filter: brightness(1.08); }
-.todays-session-cta-btn:focus-visible {
+.todays-hero-btn:hover { filter: brightness(1.08); }
+.todays-hero-btn:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
-
-/* Sidebar mirror of the same CTA. Lighter footprint — single button. */
-.todays-session-sidebar-cta { margin-bottom: 10px; }
-.todays-session-sidebar-btn {
-  width: 100%;
-  background: var(--accent);
-  color: var(--bg);
-  border: none;
-  border-radius: 8px;
-  padding: 10px 12px;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  min-height: 40px;
+.todays-hero-btn.subdued {
+  background: var(--surface2);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  font-weight: var(--fw-medium);
 }
-.todays-session-sidebar-btn:hover { filter: brightness(1.08); }
+.todays-hero-btn.subdued:hover { background: var(--surface3); filter: none; }
+/* During an in-chat form-check the camera owns the vertical budget; the
+   picker / next-exercise CTAs already carry the flow inside the log. */
+body.pose-active .stage-chat .todays-hero { display: none; }
 
 /* In-chat exercise picker. Shows when the patient clicks the entry CTA.
    Lists every protocol exercise; row click jumps to that exercise. */
@@ -4120,8 +4340,9 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 }
 
 @media (max-width: 480px) {
-  .todays-session-cta { padding: 14px 12px; }
-  .todays-session-cta-btn { width: 100%; }
+  .todays-hero { padding: 12px 14px; gap: 10px; }
+  .todays-hero-title { font-size: var(--fs-16); }
+  .todays-hero-btn { padding: 10px 16px; }
   .exercise-picker-card { padding: 12px; }
   .picker-row { padding: 12px; min-height: 48px; font-size: 13px; }
   .picker-action { width: 100%; }

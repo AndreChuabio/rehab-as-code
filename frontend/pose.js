@@ -1393,10 +1393,9 @@ async function start(_videoEl, _canvasEl, exerciseId, onPayload, opts = {}) {
     stream = opts.stream;
     videoEl.srcObject = stream;
   } else {
-    stream = await navigator.mediaDevices.getUserMedia({
-      video: { width: 640, height: 480, facingMode: "user" },
-      audio: false,
-    });
+    stream = await navigator.mediaDevices.getUserMedia(
+      _cameraConstraints(),
+    );
     videoEl.srcObject = stream;
   }
   await videoEl.play();
@@ -1406,6 +1405,79 @@ async function start(_videoEl, _canvasEl, exerciseId, onPayload, opts = {}) {
 
   running = true;
   loop();
+}
+
+// ── Camera selection ────────────────────────────────────────────────────────
+// Some default cameras auto-frame (macOS Center Stage / iPhone Continuity
+// Camera): the OS zooms onto the face, so the patient can never get their
+// whole body in frame no matter how far they step back. Web apps cannot
+// disable OS auto-framing — the fix is letting the patient switch to a camera
+// without it. The chosen deviceId persists so every later session reuses it.
+const CAMERA_PREF_KEY = "rac_pose_camera_id";
+
+function _cameraConstraints() {
+  // 4:3 on purpose: 16:9 modes crop the sensor's vertical field, and vertical
+  // coverage (head to feet) is exactly what the form-check needs.
+  const video = { width: 640, height: 480, facingMode: "user" };
+  try {
+    const saved = localStorage.getItem(CAMERA_PREF_KEY);
+    if (saved) {
+      video.deviceId = { ideal: saved };
+      delete video.facingMode;
+    }
+  } catch (_) {}
+  return { video, audio: false };
+}
+
+// List available cameras. Labels are only populated after a getUserMedia
+// grant, so call this from the preflight (camera already live). Devices with
+// an empty deviceId (no permission yet) are unusable for switching - drop
+// them rather than rendering options that cannot be selected.
+async function listCameras() {
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    return devices
+      .filter((d) => d.kind === "videoinput" && d.deviceId)
+      .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Camera ${i + 1}` }));
+  } catch (_) {
+    return [];
+  }
+}
+
+// The deviceId of the camera actually feeding the live stream (for
+// preselecting the picker), or null.
+function currentCameraId() {
+  try {
+    const track = stream && stream.getVideoTracks()[0];
+    return (track && track.getSettings().deviceId) || null;
+  } catch (_) {
+    return null;
+  }
+}
+
+// Swap the live stream to another camera without tearing down the session.
+// Only valid when pose.js owns the stream (not a Daily-call-fed one). The
+// video element keeps playing; MediaPipe reads whatever frame is current.
+async function switchCamera(deviceId) {
+  if (!running || !streamOwned || !videoEl) return false;
+  try {
+    const next = await navigator.mediaDevices.getUserMedia({
+      video: { deviceId: { exact: deviceId }, width: 640, height: 480 },
+      audio: false,
+    });
+    const old = stream;
+    stream = next;
+    videoEl.srcObject = next;
+    await videoEl.play();
+    if (old) for (const track of old.getTracks()) track.stop();
+    canvasEl.width  = videoEl.videoWidth  || 640;
+    canvasEl.height = videoEl.videoHeight || 480;
+    try { localStorage.setItem(CAMERA_PREF_KEY, deviceId); } catch (_) {}
+    return true;
+  } catch (e) {
+    console.warn("switchCamera failed", e);
+    return false;
+  }
 }
 
 function stop() {
@@ -1429,7 +1501,10 @@ function stop() {
   targetReps  = null;
 }
 
-window.PoseFormCheck = { init, start, stop, EXERCISES, FRAMING_CONFIG, assessFraming };
+window.PoseFormCheck = {
+  init, start, stop, EXERCISES, FRAMING_CONFIG, assessFraming,
+  listCameras, switchCamera, currentCameraId,
+};
 
 // Expose the pure rise-rep step + thresholds for the DOM-free node test
 // harness (mirrors the __poseGuidedHelpers convention in app.js). Keep the
