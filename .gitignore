@@ -39,6 +39,14 @@ out/
 orchestrator/node_modules
 orchestrator/package-lock.json
 
+# Playwright QA harness
+# .auth holds LIVE Supabase JWTs captured by `npm run qa:login` — never commit.
+playwright/.auth/
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
 # Local app data
 context.json
 health_cache.json

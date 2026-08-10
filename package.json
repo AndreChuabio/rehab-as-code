@@ -1,0 +1,19 @@
+{
+  "name": "rehab-as-code-qa",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Playwright end-to-end QA harness for rehab-as-code. Not part of the Vercel build - vercel.json declares explicit builds (@vercel/python + @vercel/static), so this package.json never triggers framework detection.",
+  "scripts": {
+    "qa": "playwright test",
+    "qa:headed": "playwright test --headed",
+    "qa:ui": "playwright test --ui",
+    "qa:report": "playwright show-report",
+    "qa:login": "node scripts/qa-login.mjs",
+    "qa:codegen": "playwright codegen",
+    "qa:install": "playwright install chromium"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.62.1",
+    "dotenv": "^17.4.2"
+  }
+}

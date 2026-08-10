@@ -12,3 +12,15 @@ users/
 PLAN.md
 AGENTS.md
 .cursorrules
+
+# Playwright QA harness - dev tooling, never part of the deployment.
+# Anchored to the repo root so `/tests/` does not also match backend/tests/.
+node_modules/
+/tests/
+/playwright/
+/playwright.config.ts
+/package.json
+/package-lock.json
+/test-results/
+/playwright-report/
+/.env.qa.local
