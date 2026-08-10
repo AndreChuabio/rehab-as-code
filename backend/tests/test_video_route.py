@@ -70,3 +70,39 @@ def test_empty_and_no_protocol():
     assert coach_chat._route_exercise_video("", _PROTOCOL) is None
     assert coach_chat._route_exercise_video("pull up my calf raises video", {}) is None
     assert coach_chat._route_exercise_video("pull up my calf raises video", None) is None
+
+
+# ---- shared region gate: the pre-route is a card-emitting path like the tools ----
+
+def test_out_of_scope_protocol_row_is_gated():
+    """A drifted/legacy protocol carrying an out-of-scope exercise must not turn
+    into an actionable card just because it is 'the patient's own plan'. The
+    pre-route shares _card_gate_reason with recommend_exercise +
+    list_phase_exercises so no card path can drift out of the knee/ankle scope."""
+    import exercise_kb
+
+    off_scope = [
+        e for e in exercise_kb._EXERCISES
+        if (e.get("body_region") or "").lower() not in {"knee", "ankle"}
+    ]
+    assert off_scope, "fixture expects at least one out-of-scope library exercise"
+    row = off_scope[0]
+
+    protocol = {
+        "body_region": row.get("body_region"),
+        "exercises": [{"id": row["id"], "name": row.get("name")}],
+    }
+    message = f"pull up my {(row.get('name') or '').lower()} video"
+
+    assert coach_chat._route_exercise_video(message, protocol) is None
+
+
+def test_regionless_protocol_cannot_cross_regions():
+    """With no body_region on the protocol, resolve_to_library keyword-searches
+    all six regions. The gate still holds the card to in-scope regions."""
+    protocol = {
+        "exercises": [{"id": "ankle_alphabet", "name": "Ankle Alphabet"}],
+    }
+    hit = coach_chat._route_exercise_video("show me ankle alphabet", protocol)
+    assert hit is not None
+    assert (hit.get("body_region") or "").lower() in {"knee", "ankle"}

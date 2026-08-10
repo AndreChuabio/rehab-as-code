@@ -1876,10 +1876,11 @@ def list_recent_sessions(
     except Exception as exc:
         logger.exception("list_recent failed")
         raise HTTPException(status_code=500, detail=str(exc))
-    # Same defensive wrap as /sessions/today (PR-V): a failure in the
-    # enrichment helpers must never take down the clinician adherence panel
-    # or the patient history pane — rows render unenriched, real exception
-    # lands in Vercel logs.
+    # Mirror the /sessions/today PR-V hotfix: region enrichment reads the
+    # active protocol, which can fail (no DB, transient pool error). Adherence
+    # history must never go down because of an enrichment miss — degrade to
+    # unenriched rows (frontend treats null body_region as "no info") rather
+    # than 500 the clinician adherence panel.
     try:
         rows, active_region = _enrich_sessions_with_region(rows, target)
     except Exception:

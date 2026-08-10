@@ -105,17 +105,146 @@ def test_chat_rejects_unauthenticated(unauthed_client):
 
 
 # ---------------------------------------------------------------------------
-# list_phase_exercises: overview must stay in-scope and NOT flood the chat.
+# recommend_exercise dispatch: actionable-card surfacing on do/start intent
+# ---------------------------------------------------------------------------
+#
+# The launcher infra (card event -> renderExerciseCard -> Start exercise) is
+# fully wired; the do/start fix is that recommend_exercise now ALSO fires on a
+# "let's do X" intent. These tests pin the dispatch contract: a valid id emits
+# a card, and a loosely-named exercise resolves to a real in-library card via
+# the conservative resolver (never invents one).
+
+
+def _noop_executor(*_args, **_kwargs):
+    raise AssertionError("trigger executor must not be called for recommend_exercise")
+
+
+def test_dispatch_recommend_exercise_valid_id_emits_card():
+    import coach_chat
+
+    result, extras = asyncio.run(coach_chat._dispatch_tool(
+        name="recommend_exercise",
+        arguments={"exercise_id": "ankle_alphabet"},
+        trigger_executor=_noop_executor,
+    ))
+
+    assert result["ok"] is True
+    assert result["exercise"]["id"] == "ankle_alphabet"
+    cards = [e for e in extras if e.get("type") == "card"]
+    assert len(cards) == 1
+    assert cards[0]["card"]["id"] == "ankle_alphabet"
+
+
+def test_dispatch_recommend_exercise_resolves_loose_name():
+    """A do/start intent like 'seated ankle pumps' (not a library id) must
+    resolve to a real in-library ankle card via resolve_to_library scoped to
+    the patient's body_region, NOT fall through to an unknown-exercise error."""
+    import coach_chat
+
+    result, extras = asyncio.run(coach_chat._dispatch_tool(
+        name="recommend_exercise",
+        arguments={"exercise_id": "seated ankle pumps"},
+        trigger_executor=_noop_executor,
+        body_region="ankle",
+    ))
+
+    assert result.get("ok") is True
+    assert "error" not in result
+    cards = [e for e in extras if e.get("type") == "card"]
+    assert len(cards) == 1
+    # Resolved to a real ankle library entry, not invented.
+    import exercise_kb
+    assert cards[0]["card"]["id"] in exercise_kb.list_ids()
+    assert (cards[0]["card"].get("body_region") or "").lower() == "ankle"
+
+
+def test_dispatch_recommend_exercise_off_library_returns_no_card():
+    """A true off-library name with no keyword match yields no card (the
+    resolver is conservative). Maya's prompt then offers the closest option;
+    she never invents an exercise."""
+    import coach_chat
+
+    result, extras = asyncio.run(coach_chat._dispatch_tool(
+        name="recommend_exercise",
+        arguments={"exercise_id": "xkcdz vbnmq"},
+        trigger_executor=_noop_executor,
+        body_region="ankle",
+    ))
+
+    assert result == {"error": "unknown exercise_id"}
+    assert [e for e in extras if e.get("type") == "card"] == []
+
+
+def test_dispatch_recommend_exercise_no_region_does_not_cross_regions():
+    """Pre-intake / legacy patient with NO active protocol has body_region=None.
+    A loose do/start name must NOT keyword-search the whole 6-region library and
+    surface an out-of-scope, never-prescribed card. The fuzzy resolver is gated
+    on a known region, so the loose name falls through to no card and Maya
+    offers the closest in-scope option in text instead."""
+    import coach_chat
+
+    result, extras = asyncio.run(coach_chat._dispatch_tool(
+        name="recommend_exercise",
+        arguments={"exercise_id": "seated heel raises"},
+        trigger_executor=_noop_executor,
+        body_region=None,
+    ))
+
+    assert result == {"error": "unknown exercise_id"}
+    assert [e for e in extras if e.get("type") == "card"] == []
+
+
+def test_dispatch_recommend_exercise_out_of_scope_exact_id_dropped():
+    """An exact-match library id from an out-of-scope region (e.g. shoulder)
+    must NOT be surfaced as an actionable card even with no active protocol;
+    only knee + ankle are in scope."""
+    import coach_chat
+    import exercise_kb
+
+    shoulder_ids = [
+        e["id"] for e in exercise_kb._EXERCISES
+        if (e.get("body_region") or "").lower() == "shoulder"
+    ]
+    assert shoulder_ids, "fixture expects at least one shoulder exercise in the library"
+
+    result, extras = asyncio.run(coach_chat._dispatch_tool(
+        name="recommend_exercise",
+        arguments={"exercise_id": shoulder_ids[0]},
+        trigger_executor=_noop_executor,
+        body_region=None,
+    ))
+
+    assert result == {"error": "out_of_scope_exercise"}
+    assert [e for e in extras if e.get("type") == "card"] == []
+
+
+def test_dispatch_recommend_exercise_out_of_region_for_active_protocol_dropped():
+    """An in-scope but cross-region exact id (ankle exercise while the active
+    protocol is a knee plan) must be dropped; the surfaced card has to match the
+    patient's protocol region."""
+    import coach_chat
+
+    result, extras = asyncio.run(coach_chat._dispatch_tool(
+        name="recommend_exercise",
+        arguments={"exercise_id": "ankle_alphabet"},
+        trigger_executor=_noop_executor,
+        body_region="knee",
+    ))
+
+    assert result == {"error": "out_of_region_exercise"}
+    assert [e for e in extras if e.get("type") == "card"] == []
+
+
+# ---------------------------------------------------------------------------
+# list_phase_exercises dispatch: overview must be region-scoped and must NOT
+# flood the chat with a card per exercise.
 # ---------------------------------------------------------------------------
 #
 # Prod bug (2026-08-03): "review specific exercises" called list_phase_exercises
 # with no region filter, returning every exercise in the phase across all six
 # regions AND emitting one actionable card each -- ~31 cards including an
-# out-of-scope "Eccentric Wrist Extension" (elbow) for an ankle/knee patient.
-
-
-def _noop_executor(*_args, **_kwargs):
-    raise AssertionError("trigger executor must not be called for list_phase_exercises")
+# out-of-region "Eccentric Wrist Extension" for an ankle/knee patient. The tool
+# must share recommend_exercise's region gate and stay text-only.
 
 
 def _phase_regions(exercises):
@@ -125,32 +254,54 @@ def _phase_regions(exercises):
     }
 
 
-def test_dispatch_list_phase_exercises_only_in_scope_regions():
-    """find_by_phase spans all six regions; the overview must return only
-    in-scope (knee + ankle) exercises -- never elbow/shoulder/low_back/
-    hamstring entries from the same phase."""
+def test_dispatch_list_phase_exercises_scopes_to_patient_region():
+    """An overview for a patient whose active protocol is ankle must return
+    ONLY ankle exercises -- never a knee/elbow/shoulder entry from the same
+    phase."""
     import coach_chat
 
-    result, _extras = asyncio.run(coach_chat._dispatch_tool(
+    result, extras = asyncio.run(coach_chat._dispatch_tool(
         name="list_phase_exercises",
         arguments={"phase": "subacute"},
         trigger_executor=_noop_executor,
+        body_region="ankle",
+    ))
+
+    assert result["ok"] is True
+    assert result["count"] > 0, "expected at least one in-region ankle exercise"
+    assert _phase_regions(result["exercises"]) == {"ankle"}
+
+
+def test_dispatch_list_phase_exercises_out_of_scope_regions_dropped():
+    """With no active protocol (body_region=None) the overview must still be
+    limited to in-scope regions (knee + ankle) -- never surface elbow,
+    shoulder, low_back, or hamstring exercises."""
+    import coach_chat
+    from change_tier import IN_SCOPE_REGIONS
+
+    result, extras = asyncio.run(coach_chat._dispatch_tool(
+        name="list_phase_exercises",
+        arguments={"phase": "subacute"},
+        trigger_executor=_noop_executor,
+        body_region=None,
     ))
 
     assert result["ok"] is True
     assert result["count"] > 0, "expected at least one in-scope exercise"
-    assert _phase_regions(result["exercises"]) <= {"knee", "ankle"}
+    assert _phase_regions(result["exercises"]) <= IN_SCOPE_REGIONS
 
 
 def test_dispatch_list_phase_exercises_emits_no_card_flood():
     """The overview is informational: it returns exercises as data for Maya to
-    summarize in text, and must NOT emit a card-per-exercise."""
+    summarize in text, and must NOT emit a card-per-exercise. A single
+    actionable card only comes from recommend_exercise on an explicit do/start."""
     import coach_chat
 
     _result, extras = asyncio.run(coach_chat._dispatch_tool(
         name="list_phase_exercises",
         arguments={"phase": "subacute"},
         trigger_executor=_noop_executor,
+        body_region="ankle",
     ))
 
     assert [e for e in extras if e.get("type") == "card"] == []

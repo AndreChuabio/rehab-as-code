@@ -144,6 +144,98 @@ def test_patch_session_404_when_not_found(authed_client, monkeypatch):
     assert "not found" in resp.json()["detail"]
 
 
+def test_log_exercise_completion_does_not_mutate_protocol(
+    authed_client, fake_user_id, monkeypatch,
+):
+    """The "Log exercise" flow (POST /sessions then PATCH status='completed')
+    records a completed session row and must NEVER touch the protocols table.
+    Logging a completion is plain session history; progression stays
+    clinician-gated. We assert the protocol repo is only READ (get_active) and
+    that no write-like method is ever accessed during either request."""
+    captured: dict[str, Any] = {}
+    protocol_writes: list[str] = []
+
+    class _FakeSessionRepoModule:
+        class SessionRepoError(RuntimeError):
+            pass
+
+        @staticmethod
+        def create_planned(token, exercise_id, *, planned_sets=None,
+                           planned_reps=None, protocol_id=None):
+            captured["create"] = {
+                "token": token, "exercise_id": exercise_id,
+                "protocol_id": protocol_id,
+            }
+            return {
+                "id": "sess-log-1", "token": token, "exercise_id": exercise_id,
+                "protocol_id": protocol_id, "status": "planned",
+            }
+
+        @staticmethod
+        def patch(*, session_id, token, status=None, completed_sets=None,
+                  completed_reps=None, pose_metrics=None, started_at=None,
+                  completed_at=None):
+            captured["patch"] = {
+                "session_id": session_id, "token": token, "status": status,
+                "completed_at": completed_at,
+            }
+            return {
+                "id": session_id, "token": token, "exercise_id": "ankle_alphabet",
+                "status": status, "completed_at": completed_at,
+            }
+
+    class _FakeProtocolRepoModule:
+        """Only get_active is a legitimate READ. Any other attribute access
+        (save_pending, save_active, update, set_status, ...) is a protocol
+        WRITE and fails the test loudly."""
+
+        @staticmethod
+        def get_active(token):
+            captured["get_active"] = token
+            return {"id": "active-protocol-id", "token": token}
+
+        def __getattr__(self, name):  # pragma: no cover - guard path
+            # Ignore Python's internal module-protocol lookups (e.g. __spec__,
+            # __path__) that the import machinery performs on a sys.modules
+            # entry; only real repo method access is a protocol-write attempt.
+            if name.startswith("__") and name.endswith("__"):
+                raise AttributeError(name)
+            protocol_writes.append(name)
+            raise AssertionError(
+                f"protocol_repo.{name} must not be called when logging a "
+                "completed exercise"
+            )
+
+    import sys
+    monkeypatch.setitem(sys.modules, "session_repo", _FakeSessionRepoModule)
+    monkeypatch.setitem(sys.modules, "protocol_repo", _FakeProtocolRepoModule())
+    monkeypatch.setattr("main.ensure_user", lambda t, slack_user_id=None: t)
+
+    # 1. POST /sessions stages the exercise (reads active protocol_id only).
+    post = authed_client.post("/sessions", json={"exercise_id": "ankle_alphabet"})
+    assert post.status_code == 200, post.text
+    row = post.json()
+    assert row["id"] == "sess-log-1"
+    assert row["status"] == "planned"
+
+    # 2. PATCH to completed - this is the completion record.
+    patch = authed_client.patch(
+        f"/sessions/{row['id']}",
+        json={"status": "completed", "completed_at": "2026-06-24T12:00:00Z"},
+    )
+    assert patch.status_code == 200, patch.text
+    assert patch.json()["status"] == "completed"
+
+    # The session row was written; the protocol was only READ, never written.
+    assert captured["patch"]["status"] == "completed"
+    assert captured["create"]["token"] == fake_user_id
+    assert captured["patch"]["token"] == fake_user_id
+    assert captured.get("get_active") == fake_user_id
+    assert protocol_writes == [], (
+        f"protocol write attempted during logging: {protocol_writes}"
+    )
+
+
 def test_today_sessions_happy_path(authed_client, fake_user_id, monkeypatch):
     captured: dict[str, Any] = {}
 

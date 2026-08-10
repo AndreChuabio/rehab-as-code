@@ -291,6 +291,23 @@ CREATE TABLE IF NOT EXISTS checkins (
 
 CREATE INDEX IF NOT EXISTS idx_checkins_token_time ON checkins(token, recorded_at);
 CREATE INDEX IF NOT EXISTS idx_users_slack ON users(slack_user_id);
+
+CREATE TABLE IF NOT EXISTS protocols (
+    id TEXT PRIMARY KEY,
+    token TEXT NOT NULL,
+    parent_id TEXT,
+    payload TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending_review',
+    created_by_agent TEXT,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+    reviewed_by TEXT,
+    reviewed_at TEXT,
+    review_notes TEXT,
+    safety_concerns TEXT,
+    auto_applied INTEGER NOT NULL DEFAULT 0,
+    reverted_at TEXT,
+    reverted_by TEXT
+);
 """
 
 
