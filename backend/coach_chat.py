@@ -30,15 +30,18 @@ Event protocol yielded by chat_stream():
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import logging
 import os
 import re
+import threading
 import time
 from typing import Any, AsyncIterator, Awaitable, Callable
 
 import exercise_kb
+import protocol_repo
 from change_tier import IN_SCOPE_REGIONS
 
 logger = logging.getLogger(__name__)
@@ -273,6 +276,32 @@ TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "swap_exercise",
+            "description": (
+                "Swap one exercise in the patient's CURRENT plan for another the "
+                "patient prefers, when both are appropriate for their injury. Use "
+                "when the patient says they would rather do a different movement "
+                "than one already in their plan. Pass the library id of the "
+                "exercise being replaced (from_exercise_id), the library id of the "
+                "replacement (to_exercise_id), and the patient's reason. An "
+                "in-plan, same-region, non-progression swap applies live; anything "
+                "riskier is queued for clinician review automatically. Never invent "
+                "an exercise id - both must be in the library."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "from_exercise_id": {"type": "string"},
+                    "to_exercise_id": {"type": "string"},
+                    "reason": {"type": "string"},
+                },
+                "required": ["from_exercise_id", "to_exercise_id", "reason"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "fire_intake_trigger",
             "description": (
                 "Force a full re-intake. ONLY call when the patient explicitly says they want "
@@ -378,7 +407,43 @@ TOOLS: list[dict[str, Any]] = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_protocol_history",
+            "description": (
+                "Return the patient's recent protocol versions (active + past) so "
+                "you can reference what was tried before. Read-only. Use when the "
+                "patient asks what changed, or to ground a swap or regression in "
+                "their history."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
 ]
+
+
+# ---------------------------------------------------------------------------
+# Tool profile filter
+# ---------------------------------------------------------------------------
+
+# Tools excluded from voice (Tavus CVI) calls. fire_intake_trigger deletes the
+# patient's intake record - a destructive operation that must not be triggered
+# mid-conversation by voice intent. All other tools (including swap_exercise
+# and recommend_exercise) are safe on voice.
+_VOICE_EXCLUDED: frozenset[str] = frozenset({"fire_intake_trigger"})
+
+
+def tools_for_profile(profile: str) -> list[dict]:
+    """Filter the tool surface by call profile.
+
+    'text' = full tool list.
+    'voice' and any unrecognized profile = TOOLS minus destructive tools.
+    Unknown profiles default to the voice-safe set (fail-safe).
+    """
+    if profile == "text":
+        return TOOLS
+    return [t for t in TOOLS if t["function"]["name"] not in _VOICE_EXCLUDED]
 
 
 # ---------------------------------------------------------------------------
@@ -538,6 +603,63 @@ def _card_gate_reason(exercise_id: str | None, body_region: str | None) -> str |
     return None
 
 
+def _capture_intake(token: str, fields: dict[str, Any], mode: str) -> dict[str, Any]:
+    """Thin wrapper over agents.intake_agent.capture_intake_from_chat.
+
+    Isolated so the start_intake_tool dispatch branch (and tests) can stub
+    the capture without reaching Supabase. Validates, persists, and returns
+    fields_captured + fields_missing + mode. Raises IntakeCaptureError (or an
+    unexpected exception) on failure - the caller surfaces it to the model.
+    """
+    from agents.intake_agent import capture_intake_from_chat
+
+    return capture_intake_from_chat(token, fields, mode)
+
+
+def _run_plan_generation(token: str) -> None:
+    """Fire the gated plan-generation pipeline for a fresh conversational intake.
+
+    Best-effort and detached. The intake row is already persisted, so a
+    pipeline failure must NOT fake-fail the intake tool or break the SSE
+    stream. The multi-agent pipeline (researcher -> evaluator -> planner ->
+    safety_reviewer) saves its OWN gated row (pending_review /
+    needs_clinician_review) and never auto-applies - the first plan always
+    waits for a clinician. Runs in a background thread with its own event
+    loop because the dispatch path is already inside a running loop; matches
+    the real runner used by the structured intake path in main.py
+    (get_patient_agent("plan_generation").handle(PatientRequest(...))).
+    PHI hygiene: log token + outcome only, never intake values.
+    """
+
+    def _worker() -> None:
+        try:
+            from agents import PatientRequest, get_patient_agent
+
+            agent = get_patient_agent("plan_generation")
+            request = PatientRequest(
+                user_token=token,
+                message="Generate my rehab plan.",
+                slack_user_id=None,
+                metadata={"source": "conversational_intake"},
+            )
+            asyncio.run(agent.handle(request))
+            logger.info("intake auto plan-gen completed token=%s", token)
+        except Exception:
+            logger.exception("intake auto plan-gen failed token=%s", token)
+
+    try:
+        threading.Thread(
+            target=_worker, name="intake-auto-plangen", daemon=True
+        ).start()
+    except Exception:
+        # Thread creation itself can fail (e.g. OS thread-limit exhaustion
+        # raising RuntimeError). That must stay best-effort too: swallow it
+        # so the failure never escapes into _dispatch_tool / the SSE stream.
+        logger.exception(
+            "intake auto plan-gen thread start failed token=%s", token
+        )
+
+
 async def _dispatch_tool(
     name: str,
     arguments: dict[str, Any],
@@ -632,6 +754,29 @@ async def _dispatch_tool(
             [{"type": "tool_result", "name": name, "result": result}],
         )
 
+    if name == "swap_exercise":
+        # Deterministic 1-for-1 exercise swap routed through the same trigger
+        # executor the fire_* tools use, with flow="swap". The executor calls
+        # chat_protocol_drafter.apply_swap, which classifies the change tier
+        # and either applies live or queues for clinician review.
+        try:
+            result = await trigger_executor(
+                "swap",
+                {
+                    "from_exercise_id": arguments.get("from_exercise_id", ""),
+                    "to_exercise_id": arguments.get("to_exercise_id", ""),
+                    "reason": arguments.get("reason", ""),
+                },
+            )
+        except Exception as exc:
+            logger.exception("swap_exercise executor failed")
+            err = {"ok": False, "error": str(exc), "flow": "swap"}
+            return (err, [{"type": "tool_result", "name": name, "result": err}])
+        return (
+            {"ok": True, **result},
+            [{"type": "tool_result", "name": name, "result": result}],
+        )
+
     if name == "fire_intake_trigger":
         # Admin escape hatch: patient explicitly asked to restart intake.
         # Wipe their intake row so the next /patient/me/intake-status returns
@@ -716,11 +861,7 @@ async def _dispatch_tool(
         fields = {k: v for k, v in arguments.items() if k != "mode"}
 
         try:
-            from agents.intake_agent import (
-                IntakeCaptureError,
-                capture_intake_from_chat,
-            )
-            result = capture_intake_from_chat(user_token, fields, mode)
+            result = _capture_intake(user_token, fields, mode)
         except Exception as exc:
             # Surface the error back to the model + frontend rather than
             # pretending the capture succeeded. Both IntakeCaptureError
@@ -745,10 +886,47 @@ async def _dispatch_tool(
             err = {"ok": False, "error": str(exc)}
             return (err, [{"type": "tool_result", "name": name, "result": err}])
 
+        # Task 7: a complete fresh intake (mode="new" with nothing missing)
+        # kicks the gated plan-generation pipeline so the patient lands on a
+        # draft awaiting clinician review instead of an empty plan. An update,
+        # or a capture still missing a required field, skips it (Maya asks the
+        # missing question next turn). _run_plan_generation is best-effort and
+        # detached; the result row stays gated and is never auto-applied.
+        plan_generation = "skipped"
+        if mode == "new" and not result.get("fields_missing"):
+            _run_plan_generation(user_token)
+            plan_generation = "queued"
+        result = {**result, "plan_generation": plan_generation}
+
         return (
             {"ok": True, **result},
             [{"type": "tool_result", "name": name, "result": result}],
         )
+
+    if name == "get_protocol_history":
+        # Read-only. No executor. PHI hygiene: log token + result count only.
+        if not user_token:
+            err = {"ok": False, "error": "no authenticated patient"}
+            return (err, [{"type": "tool_result", "name": name, "result": err}])
+        rows = protocol_repo.list_by_token(user_token)[:8]
+        logger.debug(
+            "get_protocol_history token=%s rows=%d", user_token, len(rows)
+        )
+        versions = [
+            {
+                "version": i + 1,
+                "status": r.get("status"),
+                "date": r.get("created_at"),
+                "exercises": [
+                    e.get("name")
+                    for e in (r.get("payload") or {}).get("exercises", [])
+                ],
+                "why": r.get("created_by_agent"),
+            }
+            for i, r in enumerate(rows)
+        ]
+        result = {"versions": versions}
+        return (result, [{"type": "tool_result", "name": name, "result": result}])
 
     return ({"error": f"unknown tool {name}"}, [])
 
@@ -769,6 +947,7 @@ async def chat_stream(
     session_id: str = "default",
     last_pose_metrics: dict[str, Any] | None = None,
     clinician_attention_writer: ClinicianAttentionWriter | None = None,
+    tool_profile: str = "text",
 ) -> AsyncIterator[dict[str, Any]]:
     """
     Drive a tool-using OpenAI chat completion. Yields the event protocol
@@ -930,7 +1109,7 @@ async def chat_stream(
             stream = client.chat.completions.create(
                 model=_model(),
                 messages=convo,
-                tools=TOOLS,
+                tools=tools_for_profile(tool_profile),
                 tool_choice="auto",
                 stream=True,
                 max_tokens=350,

@@ -275,6 +275,7 @@ async def chat_completions(
                 session_id=session_id,
                 last_pose_metrics=last_pose_metrics,
                 clinician_attention_writer=clinician_attention_writer,
+                tool_profile="voice",
             ):
                 etype = event.get("type")
                 if etype == "token":

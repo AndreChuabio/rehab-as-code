@@ -14,9 +14,11 @@ no-silent-fallback rule that landed with PR #62).
 
 Public surface:
     draft_and_save_pending(token, flow, payload, *, prior_protocol)
-        Run the LLM, validate, persist. Returns:
+        Run the LLM, validate, classify by change tier, persist. Returns:
             {
-                "pending_protocol_id": str,
+                "pending_protocol_id": str,        # alias of protocol_id
+                "protocol_id":         str,
+                "auto_applied":        bool,       # True -> saved live
                 "summary":             str,   # one-line patient-facing summary
                 "phase":               str | None,
                 "week":                int | None,
@@ -30,6 +32,7 @@ import logging
 import os
 from typing import Any
 
+import change_tier
 import clinical_taxonomy
 import exercise_kb
 import protocol_repo
@@ -332,37 +335,38 @@ def _validate_region(
         )
 
 
-def draft_and_save_pending(
+def _run_safety(
+    payload: dict[str, Any],
+    region: str | None,
+) -> list[dict[str, Any]]:
+    """Deterministic safety pass over a drafted payload.
+
+    Runs the cross-region validator (which raises CrossRegionExerciseError on
+    any exercise outside `region`; we never auto-substitute) and returns the
+    list of graded safety concerns. The chat drafter has no LLM safety
+    reviewer, so the graded list is currently empty - the return type is the
+    contract that change_tier.classify and the clinician gate consume, and the
+    swap path reuses this same entry point. Extracted to module level so the
+    routing tests can monkeypatch it.
+    """
+    _validate_region(payload, region)
+    return []
+
+
+def _draft_payload(
     token: str,
     flow: str,
     payload: dict[str, Any],
-    prior_protocol: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    """Draft a protocol revision via Anthropic, persist as pending_review.
+    prior_protocol: dict[str, Any] | None,
+) -> tuple[str, dict[str, Any], str | None, int | None]:
+    """Run the Anthropic draft call and return the validated payload.
 
-    Parameters
-    ----------
-    token : str
-        Patient identifier (Supabase auth.uid()). Becomes the `token` column
-        on the `protocols` row, scoped by RLS to this user.
-    flow : str
-        One of: symptom_adjustment, checkin, weekly_plan. Drives the
-        flow-specific instruction injected into the LLM prompt.
-    payload : dict
-        Tool arguments from the chat call (symptom_text / checkin_text).
-    prior_protocol : dict | None
-        The patient's currently-active protocol payload, or None on first
-        contact. Anchors the model so it edits-in-place rather than
-        regenerating from scratch.
-
-    Returns
-    -------
-    dict with keys: pending_protocol_id, summary, phase, week.
-
-    Raises
-    ------
-    ProtocolDraftError on any failure (no Anthropic key, model error, invalid
-    JSON, save failure). /chat catches and surfaces as a clear error toast.
+    Pure extraction of the LLM-draft half of draft_and_save_pending so the
+    tier-routing tail (and the swap path) can call it in isolation and the
+    tests can monkeypatch it. Returns (summary, payload_to_save, phase, week).
+    The resolved body_region is stamped on payload_to_save (in-scope only),
+    and the canonical patient name is pinned, exactly as before. Raises
+    ProtocolDraftError on any failure.
     """
     api_key = os.getenv("ANTHROPIC_API_KEY", "").strip()
     if not api_key:
@@ -456,18 +460,11 @@ def draft_and_save_pending(
     if canonical_name:
         payload_to_save["patient"] = canonical_name
 
-    # Deterministic body-region validator. Raises CrossRegionExerciseError
-    # if the model emitted any cross-region exercise. The error propagates
-    # up to /chat and surfaces as a clinician-readable toast; we NEVER
-    # auto-substitute - the clinician (or a fresh draft attempt) is the
-    # recovery path.
-    _validate_region(payload_to_save, expected_region)
-
     # Persist the resolved body_region on the payload so the canonical taxonomy
     # field is stored — not just inferred from exercise-name coincidence.
-    # Downstream readers (the cross-region validator, the /sessions/today
-    # out-of-region dimming) key on payload.body_region; it was null on every
-    # row until now.
+    # Downstream readers (the cross-region validator in _run_safety, the
+    # /sessions/today out-of-region dimming, and change_tier.classify) key on
+    # payload.body_region; it was null on every row until now.
     if expected_region and expected_region != "multi":
         payload_to_save["body_region"] = expected_region
 
@@ -479,7 +476,12 @@ def draft_and_save_pending(
     # regardless of region, so a shoulder revision drafted from chat skipped the
     # escalation the /interact pipeline applies. Fail-open — a gate error must
     # not block the draft (the clinician review gate still catches everything).
-    save_status = "pending_review"
+    #
+    # Computed here (not in the tier-routing tail) because `intake` and
+    # `expected_region` are resolved in this function. `in_scope` is returned
+    # separately because it is load-bearing twice downstream: it forces
+    # needs_clinician_review AND it vetoes auto-apply outright.
+    in_scope = True
     coverage_concerns: list[dict] = []
     try:
         from agents.plan_generation_agent import _coverage_concern
@@ -491,29 +493,276 @@ def draft_and_save_pending(
             int(_week) if _week else 1,
             body_region=expected_region,
         )
-        if not lib_match.get("in_scope"):
-            save_status = "needs_clinician_review"
+        in_scope = bool(lib_match.get("in_scope"))
         _cov = _coverage_concern(lib_match)
         if _cov:
             coverage_concerns.append(_cov)
     except Exception:
         logger.exception("chat drafter coverage gate failed flow=%s", flow)
 
-    try:
-        protocol_id = protocol_repo.save_pending(
-            token=token,
-            payload=payload_to_save,
-            created_by_agent=f"chat:{flow}",
-            status=save_status,
-            safety_concerns=coverage_concerns or None,
+    return (
+        summary,
+        payload_to_save,
+        payload_to_save.get("phase"),
+        payload_to_save.get("week"),
+        in_scope,
+        coverage_concerns,
+    )
+
+
+def draft_and_save_pending(
+    token: str,
+    flow: str,
+    payload: dict[str, Any],
+    prior_protocol: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Draft a protocol revision via Anthropic, then route it by change tier.
+
+    Drafts the revision (`_draft_payload`), runs the deterministic safety pass
+    (`_run_safety`, which also enforces the body-region net), then asks
+    change_tier.classify whether the change is low-risk enough to apply live:
+
+      - "auto" -> protocol_repo.save_active_auto (live, revertible by clinician)
+      - "gate" -> protocol_repo.save_pending (clinician review queue)
+
+    Routing is deterministic; the fail-safe default is gate. The first plan of
+    care (no prior_protocol) and any high-severity safety concern always gate.
+
+    Parameters
+    ----------
+    token : str
+        Patient identifier (Supabase auth.uid()). Becomes the `token` column
+        on the `protocols` row, scoped by RLS to this user.
+    flow : str
+        One of: symptom_adjustment, checkin, weekly_plan. Drives the
+        flow-specific instruction injected into the LLM prompt.
+    payload : dict
+        Tool arguments from the chat call (symptom_text / checkin_text).
+    prior_protocol : dict | None
+        The patient's currently-active protocol payload, or None on first
+        contact. Anchors the model so it edits-in-place rather than
+        regenerating from scratch, and is the diff baseline for the tier
+        classifier.
+
+    Returns
+    -------
+    dict with keys: pending_protocol_id, protocol_id, auto_applied, summary,
+    phase, week. `pending_protocol_id` is kept as an alias of `protocol_id`
+    for back-compat with existing callers.
+
+    Raises
+    ------
+    ProtocolDraftError on any failure (no Anthropic key, model error, invalid
+    JSON, save failure). /chat catches and surfaces as a clear error toast.
+    """
+    summary, payload_to_save, phase, week, in_scope, coverage_concerns = (
+        _draft_payload(token, flow, payload, prior_protocol)
+    )
+
+    # Deterministic safety pass. Raises CrossRegionExerciseError (502 toast on
+    # /chat) on any cross-region exercise; we never auto-substitute. The
+    # graded concern list feeds the tier classifier and the clinician gate.
+    region = payload_to_save.get("body_region")
+    safety_concerns = _run_safety(payload_to_save, region)
+
+    # Library-coverage concerns ride along with the safety concerns so the
+    # clinician sees both sets on one row, and so the classifier sees the
+    # coverage severity too.
+    if coverage_concerns:
+        safety_concerns = list(safety_concerns or []) + coverage_concerns
+
+    tier = change_tier.classify(prior_protocol, payload_to_save, safety_concerns)
+
+    # An out-of-scope-region draft can NEVER auto-apply, whatever the classifier
+    # says. classify() reasons about the shape of the change (regression, swap,
+    # load-down) and is blind to whether we hold a protocol library for this
+    # region at all. Without this veto a shoulder revision drafted from chat
+    # could go live with no clinician ever seeing it, in a region the safety
+    # reviewer has no reference material for. Fail-safe direction only: this can
+    # turn auto into gate, never gate into auto.
+    if not in_scope and tier == "auto":
+        logger.info(
+            "drafter vetoed auto-apply: out-of-scope region token=%s flow=%s",
+            token, flow,
         )
-    except Exception as exc:
-        logger.exception("save_pending failed for flow=%s", flow)
-        raise ProtocolDraftError(f"could not save draft protocol: {exc}") from exc
+        tier = "gate"
+
+    if tier == "auto":
+        try:
+            protocol_id = protocol_repo.save_active_auto(
+                token=token,
+                payload=payload_to_save,
+                created_by_agent=f"chat:{flow}",
+                safety_concerns=safety_concerns or None,
+            )
+        except Exception as exc:
+            logger.exception("save_active_auto failed for flow=%s", flow)
+            raise ProtocolDraftError(
+                f"could not auto-apply draft protocol: {exc}"
+            ) from exc
+        auto_applied = True
+    else:
+        # High-severity concerns push the row to the top of the clinician
+        # queue with the red banner. Pass status / safety_concerns only when
+        # they diverge from the defaults so the call stays signature-compatible
+        # with callers that monkeypatch the minimal save_pending shape.
+        high_severity = any(
+            str(c.get("severity", "")).strip().lower() == "high"
+            for c in (safety_concerns or [])
+        )
+        save_kwargs: dict[str, Any] = {}
+        # Out-of-scope region escalates the same way a high-severity concern
+        # does: red banner, top of the clinician queue. Matches what
+        # plan_generation_agent does for the /interact pipeline.
+        if high_severity or not in_scope:
+            save_kwargs["status"] = "needs_clinician_review"
+        if safety_concerns:
+            save_kwargs["safety_concerns"] = safety_concerns
+        try:
+            protocol_id = protocol_repo.save_pending(
+                token=token,
+                payload=payload_to_save,
+                created_by_agent=f"chat:{flow}",
+                **save_kwargs,
+            )
+        except Exception as exc:
+            logger.exception("save_pending failed for flow=%s", flow)
+            raise ProtocolDraftError(
+                f"could not save draft protocol: {exc}"
+            ) from exc
+        auto_applied = False
+
+    # PHI-safe: token + flow + tier + result id only; never payload or names.
+    logger.info(
+        "drafter routed token=%s flow=%s tier=%s auto_applied=%s protocol_id=%s",
+        token, flow, tier, auto_applied, protocol_id,
+    )
 
     return {
-        "pending_protocol_id": protocol_id,
+        "pending_protocol_id": protocol_id,  # back-compat alias of protocol_id
+        "protocol_id": protocol_id,
+        "auto_applied": auto_applied,
         "summary": summary,
-        "phase": payload_to_save.get("phase"),
-        "week": payload_to_save.get("week"),
+        "phase": phase,
+        "week": week,
+    }
+
+
+def _in_library_and_region(exercise_id: str, region: str) -> bool:
+    """True if exercise_id exists in the library and matches the region.
+
+    Gate condition for swap_exercise: a target the patient names must be a
+    real, in-scope library exercise for their own body region. An unknown id
+    or a region mismatch forces the swap to clinician review (never applied
+    live). Defaults to False on any lookup error - fail-safe to the gate.
+    """
+    if exercise_id not in set(exercise_kb.list_ids()):
+        return False
+    try:
+        return exercise_kb.body_region_for(exercise_id) == region
+    except Exception:
+        return False
+
+
+def apply_swap(
+    token: str,
+    from_id: str,
+    to_id: str,
+    reason: str,
+    prior_protocol: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Swap one exercise for another within the active protocol.
+
+    Deterministic payload edit (no LLM): replace the exercise whose
+    `exercise_id` matches `from_id` with `to_id`, keeping every other field
+    untouched. Runs the same deterministic safety pass (`_run_safety`) and
+    tier classifier (`change_tier.classify`) the drafter uses:
+
+      - "auto" -> protocol_repo.save_active_auto (live, revertible by clinician)
+      - "gate" -> protocol_repo.save_pending (clinician review queue)
+
+    A swap whose target is out of the library or out of the patient's body
+    region is forced to gate regardless of the diff shape - we never apply a
+    cross-region or fabricated exercise live. High-severity safety concerns
+    push the gated row to needs_clinician_review.
+
+    Parameters mirror the chat tool args (`from_exercise_id`,
+    `to_exercise_id`, `reason`) plus the JWT-derived token and the patient's
+    currently-active protocol payload (the diff baseline).
+
+    Returns
+    -------
+    dict with keys: protocol_id, auto_applied, summary.
+    """
+    prior = prior_protocol or {}
+    region = (prior.get("body_region") or "").strip().lower()
+    exs = [dict(e) for e in prior.get("exercises", [])]
+    # Did from_id actually match a live exercise? If Maya hallucinates an id
+    # that is not in the current plan, the comprehension below is a no-op and
+    # the payload is byte-identical to prior. change_tier.classify would then
+    # see a zero diff and return "auto", writing an unchanged protocol as a
+    # new active row with a phantom "coach_swap" audit entry. Force the gate.
+    replaced = any(e.get("exercise_id") == from_id for e in exs)
+    payload = dict(prior)
+    payload["exercises"] = [
+        {**e, "exercise_id": to_id, "name": to_id}
+        if e.get("exercise_id") == from_id
+        else e
+        for e in exs
+    ]
+    # Drop the internal live-set sentinel so it never lands on a persisted row.
+    payload.pop("_recent_set", None)
+
+    # Gate decision first, BEFORE the safety pass. _run_safety -> _validate_region
+    # raises CrossRegionExerciseError on a real in-library exercise that belongs
+    # to a different body region; calling it ahead of the library/region guard
+    # would surface a tool error to Maya instead of routing the swap to clinician
+    # review. An out-of-library / out-of-region target, or a from_id that is not
+    # actually in the plan, is forced to gate without grading (nothing applies
+    # live, so there is nothing to grade).
+    target_ok = _in_library_and_region(to_id, region)
+    if not target_ok or not replaced:
+        safety: list[dict[str, Any]] = []
+        tier = "gate"
+    else:
+        safety = _run_safety(payload, region)
+        tier = change_tier.classify(prior, payload, safety)
+
+    summary = f"Swapped {from_id} -> {to_id} ({reason})."
+
+    if tier == "auto":
+        protocol_id = protocol_repo.save_active_auto(
+            token,
+            payload,
+            created_by_agent="coach_swap",
+            safety_concerns=safety or None,
+        )
+        logger.info(
+            "swap routed token=%s tier=auto protocol_id=%s", token, protocol_id,
+        )
+        return {
+            "protocol_id": protocol_id,
+            "auto_applied": True,
+            "summary": summary,
+        }
+
+    high_severity = any(
+        str(c.get("severity", "")).strip().lower() == "high" for c in safety
+    )
+    status = "needs_clinician_review" if high_severity else "pending_review"
+    protocol_id = protocol_repo.save_pending(
+        token,
+        payload,
+        created_by_agent="coach_swap",
+        status=status,
+        safety_concerns=safety or None,
+    )
+    logger.info(
+        "swap routed token=%s tier=gate status=%s protocol_id=%s",
+        token, status, protocol_id,
+    )
+    return {
+        "protocol_id": protocol_id,
+        "auto_applied": False,
+        "summary": summary,
     }
