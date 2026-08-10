@@ -73,4 +73,18 @@ test.describe("smoke @public", () => {
     const res = await request.get("/docs");
     expect(res.status()).toBe(200);
   });
+
+  // PR #123/#125 wired Coach Maya's auto-apply tier. These routes cross
+  // patients, so they must reject anonymous callers outright.
+  test("auto-apply routes reject anonymous callers", async ({ request }) => {
+    const feed = await request.get("/protocols/auto-applied");
+    expect(feed.status(), "/protocols/auto-applied must not be public").toBe(401);
+
+    // A nonexistent id: auth is checked before the row is looked up, so this
+    // cannot revert anything even if the guard were broken.
+    const revert = await request.post(
+      "/protocols/00000000-0000-0000-0000-000000000000/revert",
+    );
+    expect(revert.status(), "revert must not be public").toBe(401);
+  });
 });

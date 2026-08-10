@@ -54,6 +54,34 @@ With neither, `@authed` specs skip and the `@public` smoke suite still runs.
 > `playwright/.auth/` holds **live Supabase JWTs** and `.env.qa.local` holds a
 > plaintext password. Both are gitignored. Never commit or paste them.
 
+## "local" is NOT a safe place to write
+
+Read this before setting `QA_ALLOW_MUTATION=1`.
+
+The repo's `.env` sets `STORAGE_BACKEND=postgres` with `DATABASE_URL` pointing
+at the **live** Supabase project (`cljqfgpivrxeupnhfmrp`). `backend/main.py`
+calls a bare `load_dotenv()`, which walks *up* from the process cwd — so even a
+git worktree (which has no `.env` of its own) still finds the main checkout's
+`.env`. A locally-served backend therefore writes to **production**
+patient-state tables. Serving the app on `127.0.0.1` protects nothing.
+
+This is not hypothetical: a local run from an unmerged branch on 2026-06-29
+wrote two `auto_applied=true` protocol rows to prod, one of which was still a
+patient's active plan six weeks later.
+
+`playwright.config.ts` enforces this. With `QA_ALLOW_MUTATION=1` it resolves the
+DATABASE_URL the backend will actually use (mirroring the upward `.env` walk)
+and **refuses to start** if that is Supabase — or if it cannot prove otherwise.
+It fails closed:
+
+```bash
+DATABASE_URL=postgresql://…/scratch QA_TARGET=local QA_ALLOW_MUTATION=1 npm run qa
+```
+
+`QA_ALLOW_PROD_WRITES=1` overrides the guard. Prod is small enough that damage
+shows up fast (6 users / 4 patients with protocols / 30 protocols / 23 sessions),
+which is a reason for care, not comfort.
+
 ## Safety rules this suite follows
 
 The default target is **production**, so:
@@ -67,6 +95,24 @@ The default target is **production**, so:
 - **Test-data accounts only.** The plan pipeline sends un-redacted intake JSON
   to Anthropic and notification email egresses to Resend — both BAA-gated. See
   CLAUDE.md "Things that bite".
+
+## Auto-apply changes what "a revision appears" means
+
+As of PR #123/#125 (main `3c0715a`), Coach Maya can promote low-risk in-plan
+changes **straight to active** with no clinician gate (`auto_applied=true`).
+Before that, every revision queued as `pending_review`.
+
+So a spec asserting "a draft appears in the clinician queue after a symptom
+report" may now find nothing queued — the change went live instead, and the
+outcome depends on `change_tier.classify`. Assert against
+`/protocols/auto-applied` as well as `/protocols/pending`, or the test is
+checking a path the change no longer takes.
+
+Covered here (all read-only — nothing calls revert):
+- `/protocols/auto-applied` and `POST /protocols/{id}/revert` reject anonymous callers
+- the feed is served rather than captured by `/protocols/{protocol_id}` (declaration
+  order, `main.py:1032` vs `1303`)
+- every row offered for revert is genuinely `auto_applied`, `active`, and un-reverted
 
 ## Two app behaviours that will bite you when writing specs
 

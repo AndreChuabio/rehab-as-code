@@ -91,6 +91,46 @@ test.describe("clinician console @authed @clinician", () => {
     await expect(page.locator("#rejectBtn")).toBeEnabled();
   });
 
+  // ── Auto-apply tier (PR #123/#125) ───────────────────────────────────────
+  // Coach Maya can now promote low-risk changes straight to active with no
+  // clinician gate. The revert feed is the clinician's only view of that, so
+  // its invariants matter. Read-only: nothing here calls revert.
+
+  test("auto-applied feed is served, not swallowed by the id path param", async ({ page }) => {
+    const res = await authedRequest(page, "/protocols/auto-applied");
+
+    // /protocols/auto-applied is declared before /protocols/{protocol_id}
+    // (main.py:1032 vs 1303). If that order ever flips, the literal is parsed
+    // as a protocol_id and this returns 404/422 instead of the feed.
+    expect(
+      res.status(),
+      "literal path captured as {protocol_id} - check route declaration order",
+    ).toBe(200);
+
+    const body = await res.json();
+    expect(Array.isArray(body.auto_applied), "expected an `auto_applied` array").toBe(true);
+  });
+
+  test("every row offered for revert is genuinely open and auto-applied", async ({ page }) => {
+    const res = await authedRequest(page, "/protocols/auto-applied");
+    expect(res.status()).toBe(200);
+
+    const rows: Array<{ id?: string; auto_applied?: boolean; status?: string; reverted_at?: string | null }> =
+      (await res.json()).auto_applied ?? [];
+
+    // protocol_repo.list_auto_applied_open filters on
+    // auto_applied AND reverted_at IS NULL AND status='active'. Offering a
+    // stale row would re-activate a two-versions-old parent on revert and
+    // silently corrupt the active pointer.
+    for (const row of rows) {
+      expect(row.auto_applied, `row ${row.id} is in the revert feed but not auto_applied`).toBe(
+        true,
+      );
+      expect(row.status, `row ${row.id} is offered for revert but is not active`).toBe("active");
+      expect(row.reverted_at ?? null, `row ${row.id} was already reverted`).toBeNull();
+    }
+  });
+
   test("pending drafts are never already active", async ({ page }) => {
     const res = await authedRequest(page, "/protocols/pending");
     expect(res.status()).toBe(200);

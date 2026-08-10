@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 import dotenv from "dotenv";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 // Local QA credentials + default target. Gitignored; absent in CI, where the
 // same variables come from the environment instead.
@@ -45,6 +46,102 @@ const pythonBin =
   (existsSync(".venv/bin/python") ? ".venv/bin/python" : "python3");
 
 export const STORAGE_STATE = "playwright/.auth/patient.json";
+
+/**
+ * Refuse to run write-tests against the production database.
+ *
+ * "local" is NOT a safe place to mutate. The repo's .env sets
+ * STORAGE_BACKEND=postgres with DATABASE_URL pointing at the live Supabase
+ * project, so a locally-served backend writes to PROD patient-state tables.
+ * This has already caused real damage: a local run from an unmerged branch on
+ * 2026-06-29 wrote two auto_applied protocol rows to prod, one of which was
+ * still a patient's active plan six weeks later.
+ *
+ * So the guard keys off the resolved DATABASE_URL, never off the target name.
+ */
+const PROD_SUPABASE_REF = "cljqfgpivrxeupnhfmrp";
+
+/**
+ * Resolve the DATABASE_URL the local backend will actually use.
+ *
+ * backend/main.py calls a bare `load_dotenv()`, which walks UP from the process
+ * cwd until it finds a .env. Run from a git worktree (which has no .env of its
+ * own, since .env is gitignored) that search still reaches the main checkout's
+ * .env and picks up prod credentials. Mirror that walk instead of only looking
+ * in cwd, or the guard reports "safe" from a worktree and is useless exactly
+ * where isolation made it feel safest.
+ */
+function resolveLocalDatabaseUrl(): { url: string; source: string } | null {
+  if (process.env.DATABASE_URL) return { url: process.env.DATABASE_URL, source: "environment" };
+
+  let dir = process.cwd();
+  for (let depth = 0; depth < 8; depth++) {
+    const candidate = join(dir, ".env");
+    if (existsSync(candidate)) {
+      try {
+        const parsed = dotenv.parse(readFileSync(candidate, "utf8"));
+        if (parsed.DATABASE_URL) return { url: parsed.DATABASE_URL, source: candidate };
+      } catch {
+        return null; // unreadable -> treat as unknown, and fail closed below
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+function assertMutationSafety(): void {
+  if (process.env.QA_ALLOW_MUTATION !== "1") return;
+  if (process.env.QA_ALLOW_PROD_WRITES === "1") return;
+
+  const refuse = (why: string[]): never => {
+    throw new Error(
+      [
+        "",
+        "  REFUSING TO RUN: QA_ALLOW_MUTATION=1 may write to the PRODUCTION database.",
+        "",
+        ...why.map((l) => `  ${l}`),
+        "",
+        "  Point DATABASE_URL at a scratch database first:",
+        "    DATABASE_URL=postgresql://…/scratch QA_TARGET=local QA_ALLOW_MUTATION=1 npm run qa",
+        "",
+        "  If you genuinely intend production writes, set QA_ALLOW_PROD_WRITES=1.",
+        "",
+      ].join("\n"),
+    );
+  };
+
+  if (!isLocal) {
+    refuse([`Target is ${baseURL} (production).`]);
+  }
+
+  // Local target: safe only if we can PROVE the backend is not pointed at prod.
+  const resolved = resolveLocalDatabaseUrl();
+  if (!resolved) {
+    refuse([
+      "Target is local, but the backend's DATABASE_URL could not be determined,",
+      "so it cannot be shown to be a scratch database. Failing closed.",
+      "Set DATABASE_URL explicitly for this run.",
+    ]);
+  }
+
+  if (/supabase\.(com|co)/i.test(resolved.url) || resolved.url.includes(PROD_SUPABASE_REF)) {
+    refuse([
+      "Target is local, but the backend resolves DATABASE_URL to the live",
+      `Supabase project (${PROD_SUPABASE_REF}) from ${resolved.source},`,
+      "so a locally-served backend still writes to PROD patient-state tables.",
+      "",
+      "Precedent: a local run from an unmerged branch on 2026-06-29 wrote two",
+      "auto_applied protocol rows to prod; one was still a patient's active",
+      "plan six weeks later.",
+    ]);
+  }
+}
+
+// Fails the run at config load, before a single browser or write can start.
+assertMutationSafety();
 
 export default defineConfig({
   testDir: "./tests/e2e",
