@@ -150,7 +150,11 @@ export default defineConfig({
   fullyParallel: true,
   workers: process.env.CI ? 2 : 3,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
+  // One local retry: the suite drives PROD over the network with 3 workers, so
+  // an occasional action timeout is contention, not a defect (the tests that
+  // flake pass 3/3 in isolation). Playwright reports a retried-then-passed test
+  // as "flaky" rather than "passed", so this suppresses noise without hiding it.
+  retries: process.env.CI ? 2 : 1,
   timeout: 45_000,
   expect: { timeout: 10_000 },
 

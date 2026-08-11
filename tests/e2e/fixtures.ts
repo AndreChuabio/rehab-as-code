@@ -1,5 +1,5 @@
 import { test as base, expect, type Page } from "@playwright/test";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { STORAGE_STATE } from "../../playwright.config";
 
 /**
@@ -53,6 +53,32 @@ export function hasSavedSession(): boolean {
 }
 
 /**
+ * Read the Supabase JWT straight out of the saved storage state.
+ *
+ * Lets a spec check a JWT-gated endpoint without first navigating a page to
+ * establish an origin. That matters: navigating in beforeEach and again in the
+ * test body means two navigations in flight at once, and the app's own async
+ * redirects can interrupt the second ("interrupted by another navigation").
+ * Prefer this + the `request` fixture for gate checks, and let each test
+ * navigate exactly once.
+ */
+export function jwtFromStorageState(): string | null {
+  if (!existsSync(STORAGE_STATE)) return null;
+  try {
+    const state = JSON.parse(readFileSync(STORAGE_STATE, "utf8")) as {
+      origins?: Array<{ localStorage?: Array<{ name: string; value: string }> }>;
+    };
+    for (const origin of state.origins ?? []) {
+      const entry = origin.localStorage?.find((e) => e.name === "supabaseJwt");
+      if (entry?.value) return entry.value;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
  * Dismiss the sign-in overlay by taking the app's built-in demo path.
  *
  * The button is painted before app.js attaches its click listener (that wiring
@@ -86,6 +112,33 @@ export async function usePatientView(page: Page): Promise<void> {
       sessionStorage.setItem("asPatient", "1");
     } catch {
       /* storage disabled; the redirect assertion will surface it */
+    }
+  });
+}
+
+/**
+ * Suppress the onboarding tour before it can cover the page.
+ *
+ * `.tour-overlay` is `position: fixed; inset: 0; z-index: 8950`, so while a
+ * tour is running it sits on top of everything and clicks hit the overlay
+ * instead of the control underneath. It auto-starts on a timer -
+ * 600ms on /clinician (clinician.js:163), 800ms on the patient app
+ * (app.js:650) - which makes it a genuine flake source: a spec that clicks
+ * fast passes, and the same spec on a slower run fails with the element
+ * "resolved" but not actionable.
+ *
+ * Tour.autoStart() no-ops when its versioned localStorage flag is set, so set
+ * both flags before any page script runs. Call BEFORE page.goto(). Specs that
+ * actually want to test the tour should simply not call this.
+ */
+export async function suppressTour(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    try {
+      // FLAG_PREFIX + key, from tour.js:18 and the two tour configs.
+      window.localStorage.setItem("rehab_tour_clinician_v1", "1");
+      window.localStorage.setItem("rehab_tour_patient_v1", "1");
+    } catch {
+      /* storage disabled; the tour will run and clicks may hit the overlay */
     }
   });
 }

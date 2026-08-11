@@ -1,4 +1,11 @@
-import { test, expect, STORAGE_STATE, hasSavedSession, authedRequest } from "./fixtures";
+import {
+  test,
+  expect,
+  STORAGE_STATE,
+  hasSavedSession,
+  authedRequest,
+  suppressTour,
+} from "./fixtures";
 
 /**
  * Clinician review console.
@@ -19,6 +26,11 @@ test.beforeEach(async ({ page }) => {
     !hasSavedSession(),
     "No authenticated session. Run `npm run qa:login` or set E2E_EMAIL/E2E_PASSWORD.",
   );
+
+  // The tour auto-starts 600ms after load and its full-screen overlay swallows
+  // clicks. Without this, specs that click a queue item pass only when they
+  // beat that timer.
+  await suppressTour(page);
 
   await page.goto("/clinician");
 
