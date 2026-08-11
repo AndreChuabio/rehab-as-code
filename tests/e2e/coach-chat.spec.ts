@@ -32,9 +32,47 @@ test.use({ storageState: STORAGE_STATE });
 
 const allowMutation = process.env.QA_ALLOW_MUTATION === "1";
 
-/** Send a message and wait for Maya's turn to finish streaming. */
+/**
+ * Wait for the chat log to stop mutating before interacting with it.
+ *
+ * The state-aware greeting is appended after an async state fetch, so it can
+ * land AFTER a reply that was sent quickly - which makes .last() the greeting
+ * rather than the answer. Settle the baseline first and that whole class of
+ * confusion disappears.
+ */
+async function settleChat(page: Page): Promise<void> {
+  const bubbles = page.locator("#chatLog .chat-bubble.coach");
+  let prev = -1;
+  await expect
+    .poll(
+      async () => {
+        const now = await bubbles.count();
+        const stable = now > 0 && now === prev;
+        prev = now;
+        return stable;
+      },
+      { timeout: 30_000, intervals: [400] },
+    )
+    .toBe(true);
+}
+
+/**
+ * Send a message and wait for Maya's turn to actually finish.
+ *
+ * Two traps, both of which produced confidently green but meaningless results
+ * on the first run of this file:
+ *
+ *  1. Do NOT index the bubble with nth(countBefore). The state-aware greeting
+ *     is appended asynchronously, so it can land between the count and the
+ *     send and shift every index by one - the elbow case then asserted against
+ *     the GREETING text and passed.
+ *  2. Clearing the .thinking class is not the end of the turn. Text streams in
+ *     afterwards, so reading immediately returned "I". Poll until the text
+ *     stops changing.
+ */
 async function ask(page: Page, message: string): Promise<string> {
-  const before = await page.locator("#chatLog .chat-bubble.coach").count();
+  const bubbles = page.locator("#chatLog .chat-bubble.coach");
+  const before = await bubbles.count();
 
   await page.locator("#chatInput").fill(message);
   const responded = page.waitForResponse(
@@ -44,12 +82,37 @@ async function ask(page: Page, message: string): Promise<string> {
   await page.locator("#chatSendBtn").click();
   await responded;
 
-  // sendChat() paints a .thinking coach bubble immediately and clears the
-  // class when the turn resolves, so that is the settle signal.
-  const bubble = page.locator("#chatLog .chat-bubble.coach").nth(before);
-  await expect(bubble).toBeVisible({ timeout: 90_000 });
+  await expect
+    .poll(() => bubbles.count(), { timeout: 90_000 })
+    .toBeGreaterThan(before);
+
+  const bubble = bubbles.last();
   await expect(bubble).not.toHaveClass(/thinking/, { timeout: 90_000 });
-  return (await bubble.innerText()).trim();
+
+  // Settle on stable, non-empty text across two consecutive samples.
+  let prev = "";
+  await expect
+    .poll(
+      async () => {
+        const now = (await bubble.innerText()).trim();
+        const stable = now.length > 0 && now === prev;
+        prev = now;
+        return stable;
+      },
+      { timeout: 60_000, intervals: [400] },
+    )
+    .toBe(true);
+
+  const text = (await bubble.innerText()).trim();
+
+  // Catch the class of bug above rather than silently asserting on the wrong
+  // node: the greeting is not an answer to anything we asked.
+  expect(
+    text.startsWith("Hi, I'm Coach Maya"),
+    "captured the onboarding greeting instead of Maya's reply - wrong bubble",
+  ).toBe(false);
+
+  return text;
 }
 
 test.beforeEach(async ({ page }) => {
@@ -62,6 +125,7 @@ test.beforeEach(async ({ page }) => {
   await suppressTour(page);
   await page.goto("/");
   await expect(page.locator("#chatInput")).toBeVisible();
+  await settleChat(page);
 });
 
 test.describe("Coach Maya @authed @mutating", () => {
