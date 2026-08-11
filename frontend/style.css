@@ -880,7 +880,10 @@ body {
   font-size: 14px;
   line-height: 1.45;
   white-space: pre-wrap;
-  word-wrap: break-word;
+  /* word-wrap: break-word only breaks a word as a LAST resort and will not
+     break one that is already on its own line, so a pasted URL still forced
+     the bubble wider than the viewport. anywhere breaks it wherever it must. */
+  overflow-wrap: anywhere;
   flex-shrink: 0;
   animation: fadeIn 0.18s ease-out;
 }
@@ -1367,12 +1370,22 @@ body {
    keeping suggestion chips, quick-actions, and the input row fixed at the
    bottom of the right column. Without these min-height: 0 declarations
    on every flex parent, chat-log's overflow-y: auto silently fails and
-   the whole page grows as content streams in. */
+   the whole page grows as content streams in.
+
+   min-width: 0 is the horizontal half of the same rule, and it is just as
+   load-bearing. A flex item defaults to min-width: auto, which refuses to
+   shrink below its content's intrinsic width, so a single unbroken token in
+   one message (a pasted URL, a long identifier) widened this whole column and
+   made the entire page scroll sideways on a phone. Because chat-log is a
+   SHARED container, that also stretched every other message in the thread.
+   Measured before the fix at 390px: one 194-char token produced a 1323px
+   bubble. Keep both axes zeroed on every parent. */
 .stage-chat {
   display: flex;
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 .stage-chat .chat-card {
@@ -1381,12 +1394,14 @@ body {
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
+  min-width: 0;
   overflow: hidden;
 }
 .stage-chat .chat-card .chat-log {
   flex: 1 1 auto;
   max-height: none;
   min-height: 0;
+  min-width: 0;
   overflow-y: auto;
 }
 /* Top + bottom regions: header, intake-progress, chips, quick-actions,
@@ -1906,6 +1921,19 @@ body {
   .main { flex-direction: column; padding: 16px; }
   .sidebar { width: 100%; }
   .rec-card { min-width: 140px; }
+
+  /* .header is a non-wrapping flex row with 32px of side padding. At 390px the
+     logo, tagline, tour trigger and account controls cannot fit in the
+     remaining 326px, and min-width: auto stops them shrinking, so .header-right
+     was pushed 17-20px past the right edge and EVERY mobile page view scrolled
+     sideways - before the patient touched anything. Let the row wrap and give
+     it back the horizontal space. */
+  .header { flex-wrap: wrap; gap: 8px 12px; padding: 12px 16px; }
+  .header-right { flex-wrap: wrap; min-width: 0; gap: 10px; }
+  .logo { min-width: 0; }
+  /* margin-right: auto on the tour trigger forces the account controls to the
+     far edge; on a wrapped row that is what pushes them out of view. */
+  .header > .tour-trigger { margin-left: 0; margin-right: 0; }
 }
 
 /* ── Intake guided flow ─────────────────────────────────────────────── */
