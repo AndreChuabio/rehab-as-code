@@ -378,24 +378,99 @@ function checkElbowAngle(side, lms) {
 // resetCalfRaiseTracker(). Rep counting for this lives in
 // CalfRaiseRepTracker (separate from the angle-based RepTracker because
 // the kinematic signal is hip-displacement, not joint-angle).
-const calfRaiseState = { baselineY: null, samples: [], peakRise: 0 };
+const calfRaiseState = {
+  baselineY: null, baselineX: null, baselineSpan: null, samples: [], peakRise: 0,
+};
 function resetCalfRaiseTracker() {
   calfRaiseState.baselineY = null;
+  calfRaiseState.baselineX = null;
+  calfRaiseState.baselineSpan = null;
   calfRaiseState.samples = [];
   calfRaiseState.peakRise = 0;
 }
+
+// ── Calf-rise sampling core (pure; mirrored in pose_guided.test.js) ─────────
+//
+// Rise used to be measured as a fraction of FRAME height ("5% of frame =
+// strong"). Live validation 2026-08-10 proved that wrong both ways at once:
+// at the head-to-feet distance the framing gate REQUIRES, a genuine 6-8cm
+// heel raise is only ~2% of frame (below every threshold, real reps did not
+// count), while WALKING to and from the computer swings hip-y by far more
+// than 5% through perspective alone (every step counted as a rep). The
+// patient's steps out-scored their exercise.
+//
+// Two changes, both in this pure step:
+//   1. Rise is normalized by the patient's own on-screen body span
+//      (shoulders->ankles), so distance from the camera cancels out. A calf
+//      raise lifts you by a roughly fixed fraction of your own height no
+//      matter where you stand; 5% of body span == pct 100 keeps the existing
+//      RISE_* thresholds meaningful.
+//   2. Locomotion suppression: lateral hip drift or a change in apparent body
+//      size means the patient is WALKING, not exercising. Counting pauses and
+//      the baseline resets, so reps resume only after they plant and stand
+//      still again at the new spot.
+const CALF_BASELINE_FRAMES  = 30;
+const CALF_RISE_STRONG_FRAC = 0.05;  // rise of 5% of body span == pct 100
+const CALF_MOVE_X_FRAC      = 0.12;  // lateral hip drift beyond 12% of span = walking
+const CALF_MOVE_SCALE_FRAC  = 0.10;  // apparent size change beyond 10% = toward/away
+
+function calfRiseSampleStep(st, sample) {
+  if (!sample || !(sample.span > 0)) return { phase: "baselining", pct: null };
+  if (st.baselineY == null) {
+    st.samples.push(sample);
+    if (st.samples.length >= CALF_BASELINE_FRAMES) {
+      // Median so a momentary tip-toe or step during settling doesn't
+      // pollute the baseline.
+      const med = (key) => {
+        const a = st.samples.map((s) => s[key]).sort((x, y) => x - y);
+        return a[Math.floor(a.length / 2)];
+      };
+      st.baselineY = med("hipY");
+      st.baselineX = med("hipX");
+      st.baselineSpan = med("span");
+    }
+    return { phase: "baselining", pct: null };
+  }
+  const lateral = Math.abs(sample.hipX - st.baselineX) / st.baselineSpan;
+  const scale = Math.abs(sample.span / st.baselineSpan - 1);
+  if (lateral > CALF_MOVE_X_FRAC || scale > CALF_MOVE_SCALE_FRAC) {
+    // Walking. Drop the baseline entirely: the old floor is meaningless at
+    // the new stance, and resuming against it is how steps became reps.
+    st.baselineY = null;
+    st.baselineX = null;
+    st.baselineSpan = null;
+    st.samples = [];
+    return { phase: "moving", pct: null };
+  }
+  // Lower y = higher in frame. Rise = baseline - current (positive when up).
+  const riseFrac = (st.baselineY - sample.hipY) / st.baselineSpan;
+  const pct = Math.max(0, Math.min(100, Math.round((riseFrac / CALF_RISE_STRONG_FRAC) * 100)));
+  return { phase: "tracking", pct };
+}
+
 function checkCalfRaiseRise(lms) {
   const lh = lms[L.LEFT_HIP], rh = lms[L.RIGHT_HIP];
   if (!visibleEnough(lh, rh)) return null;
   const hipY = (lh.y + rh.y) / 2;
-  if (calfRaiseState.baselineY == null) {
-    calfRaiseState.samples.push(hipY);
-    if (calfRaiseState.samples.length >= 30) {
-      // Use median of samples so a momentary tip-toe at start doesn't
-      // pollute the baseline.
-      const sorted = [...calfRaiseState.samples].sort((a, b) => a - b);
-      calfRaiseState.baselineY = sorted[Math.floor(sorted.length / 2)];
-    }
+  const hipX = (lh.x + rh.x) / 2;
+
+  // Body span for normalization: shoulders -> ankles when visible (they are,
+  // at the head-to-feet distance the framing gate enforces). Fallback when
+  // ankles drop out mid-set: scale the shoulder->hip torso length up by the
+  // anthropometric torso:span ratio (~0.37) rather than losing the rep.
+  const ls = lms[L.LEFT_SHOULDER], rs = lms[L.RIGHT_SHOULDER];
+  const la = lms[L.LEFT_ANKLE], ra = lms[L.RIGHT_ANKLE];
+  if (!visibleEnough(ls, rs)) return null;
+  const shoulderY = (ls.y + rs.y) / 2;
+  let span;
+  if (visibleEnough(la, ra)) {
+    span = (la.y + ra.y) / 2 - shoulderY;
+  } else {
+    span = (hipY - shoulderY) / 0.37;
+  }
+
+  const step = calfRiseSampleStep(calfRaiseState, { hipY, hipX, span });
+  if (step.phase === "baselining") {
     return {
       id: "calf_rise",
       label: "rise",
@@ -405,10 +480,17 @@ function checkCalfRaiseRise(lms) {
       msg: "stand still to set baseline",
     };
   }
-  // Lower y = higher in frame. Rise = baseline - current (positive when up).
-  const riseFrac = calfRaiseState.baselineY - hipY;
-  // ~5% of frame height is a strong calf raise; ~2% is mild.
-  const pct = Math.max(0, Math.min(100, Math.round((riseFrac / 0.05) * 100)));
+  if (step.phase === "moving") {
+    return {
+      id: "calf_rise",
+      label: "rise",
+      value: 0,
+      unit: "%h",
+      status: "idle",
+      msg: "hold still — reps count once you're planted",
+    };
+  }
+  const pct = step.pct;
   if (pct > calfRaiseState.peakRise) calfRaiseState.peakRise = pct;
   // After the baseline is set, never emit "idle" for a low reading — standing
   // flat (pct near 0) is a valid resting state, and the rep state machine
@@ -850,7 +932,15 @@ const RISE_GOOD  = 70;   // peak pct at/above this counts as good depth
 // `frameWorst` is the worst non-rise alignment status seen this frame. Returns
 // a rep event object when a rep completes this step, else null.
 function calfRaiseStep(state, pct, isIdle, frameWorst) {
-  if (isIdle || pct == null) return null;
+  if (isIdle || pct == null) {
+    // Baseline-pending or locomotion: abandon any in-flight rise rather than
+    // banking it. Without this, the hip-rise phase of a WALK (before the
+    // locomotion gate trips) survives the reset and completes as a phantom
+    // rep on the first low reading after the patient re-plants.
+    state.state = "idle";
+    state.peak = 0;
+    return null;
+  }
   if (state.state === "idle") {
     if (pct >= RISE_ENTER) {
       state.state = "rising";
@@ -1594,8 +1684,13 @@ window.PoseFormCheck = {
 if (typeof window !== "undefined") {
   window.__poseCalfRaiseHelpers = {
     calfRaiseStep,
+    calfRiseSampleStep,
     RISE_ENTER,
     RISE_EXIT,
     RISE_GOOD,
+    CALF_BASELINE_FRAMES,
+    CALF_RISE_STRONG_FRAC,
+    CALF_MOVE_X_FRAC,
+    CALF_MOVE_SCALE_FRAC,
   };
 }

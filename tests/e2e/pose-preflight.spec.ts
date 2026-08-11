@@ -85,7 +85,9 @@ test.describe("guided form-check preflight @authed @pose", () => {
     // Status must leave its "Waiting for camera..." placeholder - the engine
     // is processing frames and publishing framing state.
     const status = page.locator("#posePreflightStatus");
-    await expect(status).not.toHaveText(/waiting for camera/i, { timeout: 20_000 });
+    // 60s not 20: on a cold profile the landmark loop can lag the stream by
+    // tens of seconds, and this raced it into a flake.
+    await expect(status).not.toHaveText(/waiting for camera/i, { timeout: 60_000 });
 
     // The gate itself: a frame with no human in it must never read as ready.
     // full_body requires 8 landmarks at >=75% visibility; grey pixels give 0.

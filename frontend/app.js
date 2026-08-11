@@ -4732,6 +4732,48 @@ async function togglePoseFormCheck(wrap, item, btn) {
     }
   }
 
+  // Behavior-based Center Stage detection. The label heuristic in pose.js
+  // catches iPhone/Continuity cameras, but the latest MacBooks ship Center
+  // Stage ON BY DEFAULT on the BUILT-IN camera ("MacBook Pro Camera"), which
+  // a label list can never keep up with - and older MacBooks share similar
+  // labels without the feature, so matching the label would cry wolf. The
+  // reliable signature is behavioral: the patient is clearly present
+  // (landmarks visible) yet framing never passes, because the OS crop is
+  // following their face and the lower body cannot enter the frame no matter
+  // how far they step back. Verified live on Andre's machine 2026-08-10:
+  // stuck at 2-4/8 with the camera visibly tracking him.
+  //
+  // Fires once per preflight after AUTO_FRAMING_FLAG_MS of continuous
+  // partial-but-never-ready framing; resets whenever framing passes or the
+  // frame is empty (an empty room is a stepped-away patient, not a crop).
+  const AUTO_FRAMING_FLAG_MS = 8000;
+  function maybeFlagAutoFraming(fs) {
+    if (fs.ready || fs.visible === 0) {
+      guided.partialFramingSinceTs = null;
+      return;
+    }
+    if (guided.autoFramingFlagged) return;
+    if (guided.partialFramingSinceTs == null) {
+      guided.partialFramingSinceTs = performance.now();
+      return;
+    }
+    if (performance.now() - guided.partialFramingSinceTs < AUTO_FRAMING_FLAG_MS) return;
+
+    guided.autoFramingFlagged = true;
+    const camRow = videoWrap.querySelector("#posePreflightCameraRow");
+    const hint = camRow?.querySelector(".pose-preflight-camera-hint");
+    if (!camRow || !hint) return;
+    const label = window.PoseFormCheck.currentCameraLabel?.() || "Your camera";
+    hint.textContent =
+      `Still can't fit your whole body? ${label} likely auto-frames `
+      + "(Center Stage) - the zoom follows your face at the system level, and "
+      + "the newest MacBooks ship with it ON. One-time fix that sticks: click "
+      + "the green camera icon in the macOS menu bar right now, open Video "
+      + "Effects, and switch Center Stage off. If you don't see that icon, "
+      + "pick a different camera below.";
+    camRow.hidden = false;
+  }
+
   function handlePreflight(payload) {
     // PR-U5: Start button stays clickable so the patient can step away
     // from the keyboard before the rep loop starts.
@@ -4762,6 +4804,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
         preflightGo.classList.remove("ready");
       }
       syncStartAnyway(fs.ready);
+      maybeFlagAutoFraming(fs);
       return;
     }
 

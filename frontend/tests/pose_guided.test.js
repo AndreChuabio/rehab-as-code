@@ -69,7 +69,15 @@ const RISE_ENTER = 60;
 const RISE_EXIT  = 25;
 const RISE_GOOD  = 70;
 function calfRaiseStep(state, pct, isIdle, frameWorst) {
-  if (isIdle || pct == null) return null;
+  if (isIdle || pct == null) {
+    // Baseline-pending or locomotion: abandon any in-flight rise rather than
+    // banking it. Without this, the hip-rise phase of a WALK (before the
+    // locomotion gate trips) survives the reset and completes as a phantom
+    // rep on the first low reading after the patient re-plants.
+    state.state = "idle";
+    state.peak = 0;
+    return null;
+  }
   if (state.state === "idle") {
     if (pct >= RISE_ENTER) {
       state.state = "rising";
@@ -335,5 +343,141 @@ function runRise(pcts, opts = {}) {
   assert.equal(events[0].repNumber, 1);
 }
 
+
+// ── Calf-rise sampling core (mirror of pose.js calfRiseSampleStep) ──────────
+//
+// Live-validation regression, 2026-08-10: rise was frame-normalized, so at
+// the head-to-feet distance the framing gate REQUIRES a real 6-8cm heel raise
+// was ~2% of frame (never counted), while WALKING swung hip-y by far more
+// through perspective (every trip to the computer counted as reps). The core
+// below normalizes by the patient's own body span and suppresses counting
+// during locomotion. Keep byte-equivalent to pose.js.
+
+const CALF_BASELINE_FRAMES  = 30;
+const CALF_RISE_STRONG_FRAC = 0.05;
+const CALF_MOVE_X_FRAC      = 0.12;
+const CALF_MOVE_SCALE_FRAC  = 0.10;
+
+function calfRiseSampleStep(st, sample) {
+  if (!sample || !(sample.span > 0)) return { phase: "baselining", pct: null };
+  if (st.baselineY == null) {
+    st.samples.push(sample);
+    if (st.samples.length >= CALF_BASELINE_FRAMES) {
+      const med = (key) => {
+        const a = st.samples.map((s) => s[key]).sort((x, y) => x - y);
+        return a[Math.floor(a.length / 2)];
+      };
+      st.baselineY = med("hipY");
+      st.baselineX = med("hipX");
+      st.baselineSpan = med("span");
+    }
+    return { phase: "baselining", pct: null };
+  }
+  const lateral = Math.abs(sample.hipX - st.baselineX) / st.baselineSpan;
+  const scale = Math.abs(sample.span / st.baselineSpan - 1);
+  if (lateral > CALF_MOVE_X_FRAC || scale > CALF_MOVE_SCALE_FRAC) {
+    st.baselineY = null;
+    st.baselineX = null;
+    st.baselineSpan = null;
+    st.samples = [];
+    return { phase: "moving", pct: null };
+  }
+  const riseFrac = (st.baselineY - sample.hipY) / st.baselineSpan;
+  const pct = Math.max(0, Math.min(100, Math.round((riseFrac / CALF_RISE_STRONG_FRAC) * 100)));
+  return { phase: "tracking", pct };
+}
+
+// Drive samples through the sampling core chained into the rep machine,
+// exactly as checkCalfRaiseRise -> CalfRaiseRepTracker does in pose.js:
+// baselining/moving phases surface as isIdle, which calfRaiseStep ignores.
+function runPipeline(samples) {
+  const sampleSt = { baselineY: null, baselineX: null, baselineSpan: null, samples: [] };
+  const repSt = { state: "idle", peak: 0, repCount: 0, worst: "good" };
+  const events = [];
+  const phases = [];
+  for (const s of samples) {
+    const step = calfRiseSampleStep(sampleSt, s);
+    phases.push(step.phase);
+    const ev = calfRaiseStep(repSt, step.pct, step.phase !== "tracking", "good");
+    if (ev) events.push(ev);
+  }
+  return { events, phases, repSt };
+}
+
+const still = (n, hipY, span, hipX = 0.5) =>
+  Array.from({ length: n }, () => ({ hipY, hipX, span }));
+
+// ─── Walking must count ZERO reps (the bug that fired tonight) ─────────────
+{
+  // Approach the camera (span grows, hips slide down the frame), pause,
+  // then walk back (span shrinks, hips slide up past the old baseline).
+  // Under frame-normalized math this hip-y swing dwarfs a real calf raise:
+  // (0.55 - 0.38) / 0.05 * 100 = 340 "percent" - a guaranteed fake rep cycle.
+  const walk = [
+    ...still(30, 0.45, 0.50),                    // settle: baseline at far stance
+    ...Array.from({ length: 12 }, (_, i) => ({   // approach: size + hip-y change
+      hipY: 0.45 + i * 0.012, hipX: 0.5, span: 0.50 + i * 0.02 })),
+    ...still(6, 0.55, 0.74),                     // stand at the computer briefly
+    ...Array.from({ length: 12 }, (_, i) => ({   // walk back out
+      hipY: 0.55 - i * 0.014, hipX: 0.5, span: 0.74 - i * 0.02 })),
+  ];
+  const { events } = runPipeline(walk);
+  assert.equal(events.length, 0,
+    "walking toward/away from the camera must never count as calf-raise reps");
+
+  // Document the prior bug: the OLD frame-normalized math over this same
+  // path crosses RISE_ENTER and falls back below RISE_EXIT - a counted rep.
+  const oldPct = (base, hipY) =>
+    Math.max(0, Math.min(100, Math.round(((base - hipY) / 0.05) * 100)));
+  assert.ok(oldPct(0.55, 0.38) >= RISE_ENTER,
+    "sanity: old frame-normalized math read the walk as a strong rise");
+}
+
+// ─── A real raise at full-body distance MUST count (the miss tonight) ──────
+{
+  // Far enough back that head-to-feet fits: span 0.5 of frame. A genuine
+  // heel raise lifts the hips ~4.4% of the patient's own span = 0.022 of
+  // frame - under OLD math that is pct 44, below RISE_ENTER, silently lost.
+  const raise = [
+    ...still(30, 0.45, 0.50),
+    ...still(4, 0.428, 0.50),   // up: 0.022/0.5 = 4.4% of span -> pct 88
+    ...still(4, 0.448, 0.50),   // down: pct 4 -> completes the rep
+  ];
+  const { events } = runPipeline(raise);
+  assert.equal(events.length, 1, "a real calf raise at full-body distance must count");
+  assert.equal(events[0].status, "good", "peak 88 >= RISE_GOOD is a good rep");
+
+  const oldPct = Math.round(((0.45 - 0.428) / 0.05) * 100);
+  assert.ok(oldPct < RISE_ENTER,
+    "sanity: old frame-normalized math dropped this genuine rep");
+}
+
+// ─── Walk away, re-plant, and the counter resumes at the new stance ────────
+{
+  const seq = [
+    ...still(30, 0.45, 0.50),                    // baseline at spot A
+    ...Array.from({ length: 10 }, (_, i) => ({   // walk to spot B (size shrinks)
+      hipY: 0.45 - i * 0.008, hipX: 0.5 + i * 0.01, span: 0.50 - i * 0.012 })),
+    ...still(30, 0.37, 0.38),                    // settle at B: fresh baseline
+    ...still(4, 0.353, 0.38),                    // raise: 0.017/0.38 = 4.5% span
+    ...still(4, 0.368, 0.38),                    // lower: completes
+  ];
+  const { events, phases } = runPipeline(seq);
+  assert.equal(events.length, 1, "exactly the one genuine rep at the new stance");
+  assert.ok(phases.includes("moving"), "the walk itself must register as locomotion");
+}
+
+// ─── Degenerate samples never crash or count ───────────────────────────────
+{
+  const { events } = runPipeline([
+    { hipY: 0.5, hipX: 0.5, span: 0 },
+    { hipY: 0.5, hipX: 0.5, span: -1 },
+    null,
+    ...still(3, 0.5, 0.5),
+  ]);
+  assert.equal(events.length, 0);
+}
+
 console.log("PR-J guided-mode pure helpers: all assertions passed.");
 console.log("Calf-raise rise-rep gate: all assertions passed.");
+console.log("Calf-rise normalization + locomotion gate: all assertions passed.");
