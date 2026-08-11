@@ -4966,7 +4966,29 @@ async function togglePoseFormCheck(wrap, item, btn) {
       const camSel = videoWrap.querySelector("#posePreflightCamera");
       if (camRow && camSel && window.PoseFormCheck.listCameras) {
         window.PoseFormCheck.listCameras().then((cams) => {
-          if (!camRow.isConnected || cams.length < 2) return;
+          if (!camRow.isConnected) return;
+
+          // Center Stage callout. pose.js already tries to auto-switch off an
+          // auto-framing default; if we are STILL on one here, either it is
+          // the only camera or a saved preference chose it - both cases where
+          // the patient needs to be told the zoom is the OS, not the app, and
+          // exactly where to turn it off. Shown even with a single camera
+          // (the picker is pointless then, but the hint is the fix).
+          const activeLabel = window.PoseFormCheck.currentCameraLabel?.() || "";
+          if (window.PoseFormCheck.cameraLooksAutoFraming?.(activeLabel)) {
+            const hint = camRow.querySelector(".pose-preflight-camera-hint");
+            if (hint) {
+              hint.textContent =
+                `"${activeLabel}" auto-frames (Center Stage), so it zooms onto `
+                + "your face and we can never see your whole body. Pick another "
+                + "camera below, or turn it off: click the green camera icon in "
+                + "the macOS menu bar during this session, then Video Effects, "
+                + "then switch Center Stage off.";
+            }
+            camRow.hidden = false;
+          }
+
+          if (cams.length < 2) return;
           // Preselect the camera actually feeding the stream (falls back to
           // the saved preference) so the closed select never reads blank.
           const active = window.PoseFormCheck.currentCameraId?.() || (() => {

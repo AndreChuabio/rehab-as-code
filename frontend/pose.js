@@ -1397,6 +1397,10 @@ async function start(_videoEl, _canvasEl, exerciseId, onPayload, opts = {}) {
       _cameraConstraints(),
     );
     videoEl.srcObject = stream;
+    // If the OS handed us an auto-framing camera (Center Stage) and the
+    // patient never chose one, swap to a camera the framing gate can actually
+    // work with. Must run after the grant (labels are empty before it).
+    await _avoidAutoFramingCamera();
   }
   await videoEl.play();
 
@@ -1414,6 +1418,83 @@ async function start(_videoEl, _canvasEl, exerciseId, onPayload, opts = {}) {
 // disable OS auto-framing — the fix is letting the patient switch to a camera
 // without it. The chosen deviceId persists so every later session reuses it.
 const CAMERA_PREF_KEY = "rac_pose_camera_id";
+
+// ── Auto-framing camera avoidance ───────────────────────────────────────────
+// macOS Center Stage (iPhone Continuity Camera, Studio Display) zooms and pans
+// onto the FACE at the OS level. A web page cannot disable it - there is no
+// getUserMedia constraint for it - so on those cameras the patient can never
+// get head-to-feet in frame and the full_body preflight gate can never open:
+// the app says "step back" while the OS zooms back in. The only real fixes are
+// using a camera without auto-framing, or the user turning Center Stage off in
+// the menu bar. macOS often promotes a nearby iPhone to DEFAULT camera, so
+// without intervention patients start on the worst possible device.
+
+const AUTO_FRAMING_CAMERA_RE = /iphone|continuity|desk view|studio display/i;
+const BUILTIN_CAMERA_RE = /facetime|built-in|integrated|internal/i;
+
+function cameraLooksAutoFraming(label) {
+  return AUTO_FRAMING_CAMERA_RE.test(label || "");
+}
+
+// Pure chooser: given the active camera's label and the available cameras,
+// return the camera to switch to, or null to keep the current one. Only ever
+// proposes a switch AWAY from an auto-framing camera; a deliberate or benign
+// default is left alone.
+function pickPreferredCamera(activeLabel, cameras) {
+  if (!cameraLooksAutoFraming(activeLabel)) return null;
+  const list = Array.isArray(cameras) ? cameras : [];
+  const builtin = list.find((c) => BUILTIN_CAMERA_RE.test(c.label || ""));
+  if (builtin) return builtin;
+  const nonAuto = list.find(
+    (c) => (c.label || "") !== activeLabel && !cameraLooksAutoFraming(c.label),
+  );
+  return nonAuto || null;
+}
+
+// Runs once per start(), only when the patient has never chosen a camera.
+// A saved preference - including explicitly choosing the iPhone - always wins;
+// this exists to fix the DEFAULT, not to fight the user. Fail-open: any error
+// leaves the already-working stream untouched.
+async function _avoidAutoFramingCamera() {
+  try {
+    if (localStorage.getItem(CAMERA_PREF_KEY)) return;
+  } catch (_) { /* storage disabled -> still try to improve the default */ }
+  try {
+    const track = stream && stream.getVideoTracks()[0];
+    const activeLabel = (track && track.label) || "";
+    if (!cameraLooksAutoFraming(activeLabel)) return;
+
+    const cams = await listCameras();
+    const better = pickPreferredCamera(activeLabel, cams);
+    if (!better) return;
+
+    const next = await navigator.mediaDevices.getUserMedia({
+      video: { deviceId: { exact: better.deviceId }, width: 640, height: 480 },
+      audio: false,
+    });
+    const old = stream;
+    stream = next;
+    videoEl.srcObject = next;
+    await videoEl.play();
+    if (old) for (const t of old.getTracks()) t.stop();
+    try { localStorage.setItem(CAMERA_PREF_KEY, better.deviceId); } catch (_) {}
+    console.info(
+      `pose: default camera "${activeLabel}" auto-frames (Center Stage); ` +
+      `switched to "${better.label}"`,
+    );
+  } catch (e) {
+    console.warn("pose: auto-framing camera avoidance failed, keeping default", e);
+  }
+}
+
+function currentCameraLabel() {
+  try {
+    const track = stream && stream.getVideoTracks()[0];
+    return (track && track.label) || "";
+  } catch (_) {
+    return "";
+  }
+}
 
 function _cameraConstraints() {
   // 4:3 on purpose: 16:9 modes crop the sensor's vertical field, and vertical
@@ -1504,6 +1585,7 @@ function stop() {
 window.PoseFormCheck = {
   init, start, stop, EXERCISES, FRAMING_CONFIG, assessFraming,
   listCameras, switchCamera, currentCameraId,
+  currentCameraLabel, cameraLooksAutoFraming, pickPreferredCamera,
 };
 
 // Expose the pure rise-rep step + thresholds for the DOM-free node test
