@@ -69,6 +69,40 @@ export function hasSavedSession(): boolean {
 }
 
 /**
+ * Navigate to /clinician, tolerating the app's bounce back to the patient app.
+ *
+ * clinician.js `bootstrap()` calls redirectToPatient() when the auth library is
+ * missing, `RehabAuth.init()` throws, no JWT is present, or the `/me/role` call
+ * fails (clinician.js:89-124). init() does an ESM import of supabase-js from a
+ * CDN and the role check is a network round-trip, so under parallel workers
+ * either can lose a race and bounce a legitimate staff session onto the patient
+ * dashboard. The symptom is confusing: assertions fail against patient markup
+ * with no hint that a redirect happened.
+ *
+ * A genuine non-staff account bounces every time, so retrying a bounded number
+ * of times separates the transient case from the real one without hiding it.
+ */
+export async function gotoClinician(page: Page, attempts = 3): Promise<void> {
+  let landedOn = "";
+  for (let i = 0; i < attempts; i++) {
+    await page.goto("/clinician");
+    try {
+      await page
+        .locator("#clinicianHeaderTitle")
+        .waitFor({ state: "visible", timeout: 8_000 });
+      return;
+    } catch {
+      landedOn = page.url();
+    }
+  }
+  throw new Error(
+    `/clinician bounced to ${landedOn} on all ${attempts} attempts. ` +
+      "Either the account is not staff, or clinician.js bootstrap() failed its " +
+      "auth/role check - check the console for 'redirecting to /'.",
+  );
+}
+
+/**
  * Stop the onboarding tour before it can cover the page.
  *
  * `.tour-overlay` is a fixed, full-viewport modal, so while a tour is running

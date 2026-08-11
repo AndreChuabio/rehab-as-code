@@ -5,6 +5,7 @@ import {
   hasSavedSession,
   authedRequest,
   suppressTour,
+  gotoClinician,
 } from "./fixtures";
 
 /**
@@ -29,7 +30,7 @@ test.beforeEach(async ({ page }) => {
 
   // Before goto: the tour overlay would otherwise intercept clicks on the queue.
   await suppressTour(page);
-  await page.goto("/clinician");
+  await gotoClinician(page);
 
   // /protocols/pending is clinician-only; 403 means this account is not staff,
   // which is a skip rather than a failure. Must go through authedRequest - a
@@ -177,7 +178,7 @@ test.describe("clinician console @authed @clinician", () => {
     );
 
     // The beforeEach already navigated, so re-navigate now the route is armed.
-    await page.goto("/clinician");
+    await gotoClinician(page);
 
     await expect(page.locator("#autoAppliedSection")).toBeVisible();
     const err = page.locator(".auto-applied-error");
@@ -195,9 +196,8 @@ test.describe("clinician console @authed @clinician", () => {
       }),
     );
 
-    await page.goto("/clinician");
+    await gotoClinician(page);
 
-    await expect(page.locator("#clinicianHeaderTitle")).toBeVisible();
     await expect(page.locator("#autoAppliedSection")).toBeHidden();
     await expect(page.locator(".auto-applied-error")).toHaveCount(0);
   });
