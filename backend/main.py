@@ -1088,6 +1088,42 @@ def revert_protocol(
     }
 
 
+@app.post("/protocols/{protocol_id}/acknowledge")
+def acknowledge_protocol(
+    protocol_id: str,
+    user_id: str = Depends(require_clinician_id),
+):
+    """Acknowledge an open auto-applied protocol, dropping it from the feed.
+
+    Clinician-only (mirrors /protocols/{id}/revert). This is the "seen it, it
+    can stand" action: it records who looked and when, and does NOT change
+    status or the active pointer, so the patient's plan is untouched.
+
+    409 when the target is missing, is no longer an open auto-applied row, or
+    was already acknowledged - protocol_repo.acknowledge raises
+    ProtocolRepoError in those cases.
+    """
+    import protocol_repo
+
+    try:
+        result = protocol_repo.acknowledge(protocol_id, acknowledged_by=user_id)
+    except protocol_repo.ProtocolRepoError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+    except Exception as exc:
+        logger.exception("acknowledge_protocol failed")
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    acknowledged_at = result.get("acknowledged_at")
+    return {
+        "ok": True,
+        "acknowledged_at": (
+            acknowledged_at.isoformat()
+            if hasattr(acknowledged_at, "isoformat")
+            else acknowledged_at
+        ),
+    }
+
+
 def _name_initials(name: str | None) -> str | None:
     """First+last initial from a display name. None when unresolved."""
     if not name:

@@ -131,6 +131,8 @@ def _normalize_row(row: dict) -> dict:
     # defensive no-op so callers can rely on the type regardless of driver.
     if row.get("reverted_by") is not None:
         row["reverted_by"] = str(row["reverted_by"])
+    if row.get("acknowledged_by") is not None:
+        row["acknowledged_by"] = str(row["acknowledged_by"])
     return row
 
 
@@ -591,12 +593,24 @@ def list_auto_applied_open(limit: int = 50) -> list[dict]:
     _normalize_row coerces them and callers get the same shape as
     get()/get_active() (which use SELECT *).
     """
+    # Tolerate the migration window. Vercel redeploys and Supabase applies
+    # migrations from the same push to main, so for a few seconds the new code
+    # can be live against the pre-migration schema. Referencing a column that
+    # does not exist yet would 500 the whole clinician feed; degrading to the
+    # old projection keeps the dashboard working and merely shows acknowledged
+    # rows (of which there are none before the migration) until it lands.
+    has_ack = "acknowledged_at" in _column_names("protocols")
+    ack_cols = ", acknowledged_at, acknowledged_by" if has_ack else ""
+    ack_filter = "  AND acknowledged_at IS NULL " if has_ack else ""
+
     with _conn() as c, c.cursor() as cur:
         cur.execute(
             "SELECT id, token, parent_id, payload, status, created_by_agent, "
-            "safety_concerns, created_at, auto_applied, reverted_at, reverted_by "
+            "safety_concerns, created_at, auto_applied, reverted_at, reverted_by"
+            f"{ack_cols} "
             "FROM protocols "
             "WHERE auto_applied = true AND reverted_at IS NULL "
+            f"{ack_filter}"
             "  AND status = 'active' "
             "ORDER BY created_at DESC LIMIT %s",
             (limit,),
@@ -647,6 +661,59 @@ def revert(protocol_id: str, reverted_by: str) -> dict:
             "UPDATE protocols SET reverted_at = NOW(), reverted_by = %s "
             "WHERE id = %s RETURNING id, token, reverted_at",
             (reverted_by, protocol_id),
+        )
+        out = cur.fetchone()
+        c.commit()
+    out["id"] = str(out["id"])
+    return out
+
+
+def acknowledge(protocol_id: str, acknowledged_by: str) -> dict:
+    """Stamp a clinician acknowledgement on an open auto-applied row.
+
+    Acknowledging says "I have seen this change and I am letting it stand". It
+    drops the row from the revert feed WITHOUT touching status or the active
+    pointer - the opposite of revert(), which swaps the active protocol back to
+    the parent. Nothing about the patient's plan changes here.
+
+    Guarded identically to revert(): the row must still be the CURRENTLY-active
+    auto-applied row. Acknowledging a superseded row would write an audit stamp
+    implying a clinician reviewed the live plan when the live plan has since
+    moved on. Already-acknowledged rows are rejected rather than silently
+    re-stamped, so the timestamp keeps meaning "when it was FIRST seen".
+    """
+    # Same migration window as list_auto_applied_open, but here the column is
+    # load-bearing rather than cosmetic: with nowhere to write the stamp, fail
+    # with a clear 409 instead of a psycopg UndefinedColumn 500.
+    if "acknowledged_at" not in _column_names("protocols"):
+        raise ProtocolRepoError(
+            "acknowledgement is not available yet - migration "
+            "20260811010000_protocol_auto_apply_acknowledge has not been applied"
+        )
+
+    with _conn() as c, c.cursor() as cur:
+        cur.execute(
+            "SELECT auto_applied, reverted_at, acknowledged_at, status "
+            "FROM protocols WHERE id = %s FOR UPDATE",
+            (protocol_id,),
+        )
+        row = cur.fetchone()
+        if not row:
+            raise ProtocolRepoError(f"protocol {protocol_id} not found")
+        if (
+            not row["auto_applied"]
+            or row["reverted_at"] is not None
+            or row["status"] != "active"
+        ):
+            raise ProtocolRepoError(
+                f"protocol {protocol_id} is not an open auto-applied row")
+        if row["acknowledged_at"] is not None:
+            raise ProtocolRepoError(
+                f"protocol {protocol_id} was already acknowledged")
+        cur.execute(
+            "UPDATE protocols SET acknowledged_at = NOW(), acknowledged_by = %s "
+            "WHERE id = %s RETURNING id, token, acknowledged_at",
+            (acknowledged_by, protocol_id),
         )
         out = cur.fetchone()
         c.commit()

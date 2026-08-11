@@ -187,6 +187,73 @@ test.describe("clinician console @authed @clinician", () => {
     await expect(err.locator(".aa-retry")).toBeVisible();
   });
 
+  /**
+   * Acknowledgement has to reach the server.
+   *
+   * The handler used to be `() => el.remove()`, so the dismissal never left the
+   * browser: the row returned on reload, and acknowledging on one device
+   * recorded nothing anywhere. Since auto-applied changes reach a patient with
+   * no approval gate, that stamp is the only evidence a human saw one.
+   *
+   * The feed mock is stateful - it serves the row until POST .../acknowledge is
+   * seen, then serves empty. So the row may only disappear because the SERVER
+   * now omits it, which is exactly what a client-side-only remove() cannot do.
+   */
+  test("acknowledging a row persists across a reload", async ({ page }) => {
+    let acknowledged = false;
+    const row = {
+      id: "11111111-1111-1111-1111-111111111111",
+      token: "22222222-2222-2222-2222-222222222222",
+      parent_id: "33333333-3333-3333-3333-333333333333",
+      status: "active",
+      auto_applied: true,
+      reverted_at: null,
+      created_by_agent: "chat:checkin",
+      created_at: "2026-08-10T12:00:00Z",
+      safety_concerns: [],
+      payload: { body_region: "knee", phase: "subacute", week: 5, exercises: [] },
+    };
+
+    await page.route("**/protocols/*/acknowledge", (route) => {
+      acknowledged = true;
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, acknowledged_at: "2026-08-11T01:00:00Z" }),
+      });
+    });
+
+    await page.route("**/protocols/auto-applied", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ auto_applied: acknowledged ? [] : [row] }),
+      }),
+    );
+
+    await gotoClinician(page);
+    await expect(page.locator(".auto-applied-row")).toHaveCount(1);
+
+    await page.locator(".aa-ack").click();
+    await expect(page.locator(".auto-applied-row")).toHaveCount(0);
+    expect(acknowledged, "Acknowledge never called the server").toBe(true);
+
+    // Wait for the reloaded page's feed response before asserting absence.
+    // A bare toHaveCount(0) right after reload passes trivially - it is true in
+    // the instant before the feed renders - and would green-light the very bug
+    // this guards.
+    const feedReloaded = page.waitForResponse((r) =>
+      r.url().includes("/protocols/auto-applied"),
+    );
+    await page.reload();
+    await feedReloaded;
+
+    await expect(
+      page.locator(".auto-applied-row"),
+      "the acknowledged row came back after a reload",
+    ).toHaveCount(0);
+  });
+
   test("an empty auto-applied feed stays hidden", async ({ page }) => {
     await page.route("**/protocols/auto-applied", (route) =>
       route.fulfill({

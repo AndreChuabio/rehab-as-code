@@ -339,7 +339,7 @@
       el.className = "auto-applied-row";
       el.innerHTML = autoAppliedRowHtml(r);
       el.querySelector(".aa-revert")?.addEventListener("click", () => revertAuto(r.id));
-      el.querySelector(".aa-ack")?.addEventListener("click", () => el.remove());
+      el.querySelector(".aa-ack")?.addEventListener("click", () => acknowledgeAuto(r.id));
       host.appendChild(el);
     });
   }
@@ -415,6 +415,37 @@
     } catch (e) {
       console.error("auto-applied feed parse failed", e);
       renderAutoAppliedError("malformed response");
+    }
+  }
+
+  /**
+   * Acknowledge an auto-applied change: "I have seen this, it can stand".
+   *
+   * Previously this handler was `() => el.remove()` - the dismissal never left
+   * the browser, so the row came back on reload and a clinician who
+   * acknowledged on one device recorded nothing anywhere. Since auto-applied
+   * changes reach a patient with no approval gate, this stamp is the only
+   * evidence a human ever saw one, so it has to reach the server.
+   *
+   * The row is removed by re-pulling the feed on success, never optimistically:
+   * a failed acknowledge that still cleared the row from the screen would
+   * recreate exactly the bug this replaced.
+   */
+  async function acknowledgeAuto(id) {
+    if (!id) return;
+    try {
+      const res = await authedFetch(
+        `${API_BASE}/protocols/${encodeURIComponent(id)}/acknowledge`,
+        { method: "POST" },
+      );
+      if (!res.ok) {
+        toast(`Couldn't acknowledge: HTTP ${res.status}`, "error");
+        return;
+      }
+      toast("Acknowledged", "ok");
+      loadAutoApplied();
+    } catch (e) {
+      toast(`Couldn't acknowledge: ${e.message}`, "error");
     }
   }
 

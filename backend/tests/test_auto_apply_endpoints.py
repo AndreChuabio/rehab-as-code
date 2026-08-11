@@ -105,3 +105,73 @@ def test_revert_succeeds_when_parent_lookup_fails(authed_clinician_client, monke
     body = resp.json()
     assert body["ok"] is True
     assert body["reverted_to"] is None
+
+
+# ── POST /protocols/{id}/acknowledge ──────────────────────────────────────────
+# "Seen it, it can stand." Records who looked and when WITHOUT touching status
+# or the active pointer, which is what separates it from revert.
+
+
+def test_acknowledge_requires_clinician(unauthed_client):
+    resp = unauthed_client.post("/protocols/fake-id/acknowledge")
+    assert resp.status_code in (401, 403), resp.text
+
+
+def test_acknowledge_round_trip(authed_clinician_client, fake_clinician_id, monkeypatch):
+    captured: dict = {}
+
+    def _acknowledge(protocol_id, acknowledged_by):
+        captured["protocol_id"] = protocol_id
+        captured["acknowledged_by"] = acknowledged_by
+        return {
+            "id": protocol_id,
+            "token": "patient-abc",
+            "acknowledged_at": "2026-08-11T01:00:00+00:00",
+        }
+
+    import protocol_repo
+
+    monkeypatch.setattr(protocol_repo, "acknowledge", _acknowledge)
+
+    resp = authed_clinician_client.post("/protocols/auto-7/acknowledge")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["ok"] is True
+    assert body["acknowledged_at"] == "2026-08-11T01:00:00+00:00"
+    assert captured["protocol_id"] == "auto-7"
+    # Actor must be the JWT-derived clinician id, never client-supplied.
+    assert captured["acknowledged_by"] == fake_clinician_id
+
+
+def test_acknowledge_serializes_datetime(authed_clinician_client, monkeypatch):
+    """psycopg returns a real datetime; the response must be JSON-serializable."""
+    from datetime import datetime, timezone
+
+    import protocol_repo
+
+    monkeypatch.setattr(
+        protocol_repo,
+        "acknowledge",
+        lambda protocol_id, acknowledged_by: {
+            "id": protocol_id,
+            "token": "patient-abc",
+            "acknowledged_at": datetime(2026, 8, 11, 1, 0, tzinfo=timezone.utc),
+        },
+    )
+
+    resp = authed_clinician_client.post("/protocols/auto-8/acknowledge")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["acknowledged_at"].startswith("2026-08-11T01:00:00")
+
+
+def test_acknowledge_conflict_returns_409(authed_clinician_client, monkeypatch):
+    """Stale, reverted, or already-acknowledged rows are a 409, not a 500."""
+    import protocol_repo
+
+    def _acknowledge(protocol_id, acknowledged_by):
+        raise protocol_repo.ProtocolRepoError("already acknowledged")
+
+    monkeypatch.setattr(protocol_repo, "acknowledge", _acknowledge)
+
+    resp = authed_clinician_client.post("/protocols/auto-9/acknowledge")
+    assert resp.status_code == 409, resp.text

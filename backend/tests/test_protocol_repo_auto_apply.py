@@ -44,7 +44,9 @@ CREATE TABLE IF NOT EXISTS protocols (
     safety_concerns TEXT,
     auto_applied  INTEGER NOT NULL DEFAULT 0,
     reverted_at   TEXT,
-    reverted_by   TEXT
+    reverted_by   TEXT,
+    acknowledged_at TEXT,
+    acknowledged_by TEXT
 )
 """
 
@@ -256,3 +258,82 @@ def test_revert_non_auto_row_raises(db):
         {"body_region": "knee", "exercises": [{"exercise_id": "a"}]})
     with pytest.raises(pr.ProtocolRepoError):
         pr.revert(active_id, reverted_by="clin-1")
+
+
+# ── acknowledge ───────────────────────────────────────────────────────────────
+
+
+def test_acknowledge_drops_row_from_feed(db):
+    _seed_active({"body_region": "knee", "exercises": [{"exercise_id": "a"}]})
+    new_id = pr.save_active_auto(
+        TOKEN, {"body_region": "knee", "exercises": [{"exercise_id": "b"}]},
+        created_by_agent="coach_swap")
+    assert any(r["id"] == new_id for r in pr.list_auto_applied_open())
+
+    pr.acknowledge(new_id, acknowledged_by="clin-1")
+
+    # The whole point: acknowledgement survives a fresh read of the feed.
+    assert all(r["id"] != new_id for r in pr.list_auto_applied_open())
+    row = pr.get(new_id)
+    assert row["acknowledged_at"] is not None
+    assert row["acknowledged_by"] == "clin-1"
+
+
+def test_acknowledge_leaves_the_patient_plan_untouched(db):
+    """Unlike revert, acknowledging must not move the active pointer."""
+    _seed_active({"body_region": "knee", "exercises": [{"exercise_id": "a"}]})
+    new_id = pr.save_active_auto(
+        TOKEN, {"body_region": "knee", "exercises": [{"exercise_id": "b"}]},
+        created_by_agent="coach_swap")
+
+    pr.acknowledge(new_id, acknowledged_by="clin-1")
+
+    active = pr.get_active(TOKEN)
+    assert active["id"] == new_id, "acknowledge must not change which plan is active"
+    assert pr.get(new_id)["status"] == "active"
+    assert pr.get(new_id)["reverted_at"] is None
+
+
+def test_acknowledge_twice_raises(db):
+    """The timestamp must keep meaning 'when it was FIRST seen'."""
+    _seed_active({"body_region": "knee", "exercises": [{"exercise_id": "a"}]})
+    new_id = pr.save_active_auto(
+        TOKEN, {"body_region": "knee", "exercises": [{"exercise_id": "b"}]},
+        created_by_agent="coach_swap")
+    pr.acknowledge(new_id, acknowledged_by="clin-1")
+
+    with pytest.raises(pr.ProtocolRepoError):
+        pr.acknowledge(new_id, acknowledged_by="clin-2")
+
+    assert pr.get(new_id)["acknowledged_by"] == "clin-1"
+
+
+def test_acknowledge_reverted_row_raises(db):
+    _seed_active({"body_region": "knee", "exercises": [{"exercise_id": "a"}]})
+    new_id = pr.save_active_auto(
+        TOKEN, {"body_region": "knee", "exercises": [{"exercise_id": "b"}]},
+        created_by_agent="coach_swap")
+    pr.revert(new_id, reverted_by="clin-1")
+
+    with pytest.raises(pr.ProtocolRepoError):
+        pr.acknowledge(new_id, acknowledged_by="clin-2")
+
+
+def test_acknowledge_superseded_row_raises(db):
+    """A row that is no longer active must not get an audit stamp implying a
+    clinician reviewed the live plan - the live plan has moved on."""
+    _seed_active({"body_region": "knee", "exercises": [{"exercise_id": "a"}]})
+    b_id = pr.save_active_auto(
+        TOKEN, {"body_region": "knee", "exercises": [{"exercise_id": "b"}]},
+        created_by_agent="coach_swap")
+    pr.save_active_auto(
+        TOKEN, {"body_region": "knee", "exercises": [{"exercise_id": "c"}]},
+        created_by_agent="coach_swap")
+
+    with pytest.raises(pr.ProtocolRepoError):
+        pr.acknowledge(b_id, acknowledged_by="clin-1")
+
+
+def test_acknowledge_missing_row_raises(db):
+    with pytest.raises(pr.ProtocolRepoError):
+        pr.acknowledge("does-not-exist", acknowledged_by="clin-1")

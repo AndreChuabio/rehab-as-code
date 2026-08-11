@@ -306,7 +306,9 @@ CREATE TABLE IF NOT EXISTS protocols (
     safety_concerns TEXT,
     auto_applied INTEGER NOT NULL DEFAULT 0,
     reverted_at TEXT,
-    reverted_by TEXT
+    reverted_by TEXT,
+    acknowledged_at TEXT,
+    acknowledged_by TEXT
 );
 """
 
