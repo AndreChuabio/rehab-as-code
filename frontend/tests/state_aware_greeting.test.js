@@ -56,7 +56,7 @@ function selectGreetingCopy(status, opts) {
       "Hi, I'm Coach Maya — your AI rehab partner. To build your plan, "
       + "I'll ask a few quick questions about your injury. Tap Start "
       + "intake below, or just tell me about your injury here in chat. "
-      + "I work with knee, ankle, hip, low-back, shoulder, and elbow rehab."
+      + "Right now I work with knee and ankle rehab."
     );
   } else if (state === "needs_plan") {
     if (
@@ -301,6 +301,20 @@ function selectGreetingCopy(status, opts) {
   });
   assert.doesNotMatch(wsName, /Welcome back, /);
   assert.doesNotMatch(wsName, /, \./);
+}
+
+// The advertised regions must match IN_SCOPE_REGIONS (knee + ankle). Promising
+// hip / low-back / shoulder / elbow sent patients down paths the scope gate
+// vetoes, and hip has no exercises or protocol-library entry at all.
+{
+  const greeting = selectGreetingCopy({ state: "needs_intake" }, {});
+  for (const region of ["hip", "low-back", "shoulder", "elbow"]) {
+    assert.ok(
+      !greeting.toLowerCase().includes(region),
+      `greeting advertises out-of-scope region "${region}"`,
+    );
+  }
+  assert.match(greeting, /knee and ankle/i, "greeting should name the in-scope regions");
 }
 
 console.log("OK: state_aware_greeting helpers — all assertions passed");

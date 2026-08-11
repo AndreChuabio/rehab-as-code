@@ -5800,7 +5800,12 @@ function selectGreetingCopy(status, opts) {
       "Hi, I'm Coach Maya — your AI rehab partner. To build your plan, "
       + "I'll ask a few quick questions about your injury. Tap Start "
       + "intake below, or just tell me about your injury here in chat. "
-      + "I work with knee, ankle, hip, low-back, shoulder, and elbow rehab."
+      // Must match IN_SCOPE_REGIONS (change_tier.py / researcher.py). This
+      // previously promised hip, low-back, shoulder and elbow: hip has no
+      // exercises and no protocol-library entry at all, and the other three
+      // are vetoed by the scope gate, so every one of them was a dead end
+      // advertised in the first sentence a patient reads.
+      + "Right now I work with knee and ankle rehab."
     );
   } else if (state === "needs_plan") {
     if (
