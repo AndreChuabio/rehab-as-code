@@ -1,6 +1,7 @@
 import { test as setup, expect } from "@playwright/test";
-import { existsSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import { STORAGE_STATE } from "../../playwright.config";
+import { hasSavedSession } from "./fixtures";
 
 /**
  * Produces the authenticated storage state consumed by @authed specs.
@@ -20,7 +21,9 @@ setup("authenticate", async ({ page }) => {
   const password = process.env.E2E_PASSWORD;
 
   if (!email || !password) {
-    const hasState = existsSync(STORAGE_STATE);
+    // Content-aware: playwright.config.ts pre-creates an empty placeholder, so
+    // existsSync() here would report "reusing a session" that does not exist.
+    const hasState = hasSavedSession();
     if (hasState) {
       const ageMs = Date.now() - statSync(STORAGE_STATE).mtimeMs;
       if (ageMs > MAX_STATE_AGE_MS) {

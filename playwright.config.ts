@@ -1,6 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 import dotenv from "dotenv";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 // Local QA credentials + default target. Gitignored; absent in CI, where the
@@ -46,6 +46,29 @@ const pythonBin =
   (existsSync(".venv/bin/python") ? ".venv/bin/python" : "python3");
 
 export const STORAGE_STATE = "playwright/.auth/patient.json";
+
+/**
+ * Guarantee the storage-state file exists before any test context is built.
+ *
+ * Playwright resolves `storageState` when it creates the browser context, which
+ * happens BEFORE any beforeEach hook. So the `test.skip(!hasSavedSession())`
+ * guard the @authed specs already carry is too late to help: with no captured
+ * session those specs died with
+ *   `Error reading storage state from playwright/.auth/patient.json: ENOENT`
+ * instead of skipping — breaking `npm run qa` on a fresh clone and any CI run
+ * without E2E credentials, contrary to what tests/e2e/README.md promised.
+ *
+ * Writing an empty-but-valid state makes the context anonymous rather than
+ * fatal, which lets the in-test skips do their job. `hasSavedSession()` in
+ * fixtures.ts therefore tests for real session CONTENT, never mere existence.
+ */
+function ensureStorageStateFile(): void {
+  if (existsSync(STORAGE_STATE)) return;
+  mkdirSync(dirname(STORAGE_STATE), { recursive: true });
+  writeFileSync(STORAGE_STATE, JSON.stringify({ cookies: [], origins: [] }));
+}
+
+ensureStorageStateFile();
 
 /**
  * Refuse to run write-tests against the production database.

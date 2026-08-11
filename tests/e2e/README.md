@@ -51,6 +51,17 @@ Two ways to get a signed-in session, in priority order:
 
 With neither, `@authed` specs skip and the `@public` smoke suite still runs.
 
+That skip needs help to work. Playwright resolves `storageState` when it builds
+the browser context, which happens **before** any `beforeEach`, so the
+`test.skip(!hasSavedSession())` guard the specs carry is too late — with no
+captured session the run used to die with `Error reading storage state ...
+ENOENT` instead of skipping. `playwright.config.ts` therefore writes an
+empty-but-valid state file at config load, making the context anonymous rather
+than fatal, and `hasSavedSession()` checks session **content** rather than mere
+file existence so the placeholder is never mistaken for a live session. Fixed
+2026-08-10 after the `prod-smoke` CI job caught it; before that, `npm run qa` on
+a fresh clone could not work at all.
+
 > `playwright/.auth/` holds **live Supabase JWTs** and `.env.qa.local` holds a
 > plaintext password. Both are gitignored. Never commit or paste them.
 

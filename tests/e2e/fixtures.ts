@@ -1,5 +1,5 @@
 import { test as base, expect, type Page } from "@playwright/test";
-import { existsSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { STORAGE_STATE } from "../../playwright.config";
 
 /**
@@ -47,9 +47,25 @@ export const test = base.extend<{ pageErrors: PageErrors }>({
 
 export { expect };
 
-/** True when a saved authenticated session exists on disk. */
+/**
+ * True when a real authenticated session is on disk.
+ *
+ * Deliberately checks CONTENT, not existence. playwright.config.ts writes an
+ * empty-but-valid state file up front so that a missing session produces an
+ * anonymous context instead of an ENOENT crash at context-creation time (which
+ * is before any beforeEach skip can run). An existence check here would read
+ * that placeholder as a live session and the @authed specs would run signed-out.
+ */
 export function hasSavedSession(): boolean {
-  return existsSync(STORAGE_STATE);
+  try {
+    const state = JSON.parse(readFileSync(STORAGE_STATE, "utf8"));
+    return (
+      (Array.isArray(state.origins) && state.origins.length > 0) ||
+      (Array.isArray(state.cookies) && state.cookies.length > 0)
+    );
+  } catch {
+    return false;
+  }
 }
 
 /**
