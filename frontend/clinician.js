@@ -344,14 +344,77 @@
     });
   }
 
+  /**
+   * Render an explicit failure state for the auto-applied feed.
+   *
+   * This section is the ONLY place a clinician sees protocol changes Coach Maya
+   * put live without an approval gate. Leaving it hidden on error made a broken
+   * feed indistinguishable from a healthy empty one, so a clinician read
+   * "nothing to review" while un-reviewed changes sat active. An unknown feed
+   * is a safety question, not a cosmetic one - say so on screen.
+   *
+   * Deliberately not a toast: a toast is transient, and whoever looks at this
+   * page ten seconds later would be back to a silent blank. The state has to
+   * persist as long as the failure does.
+   */
+  function renderAutoAppliedError(detail) {
+    const host = $("autoAppliedList");
+    const section = $("autoAppliedSection");
+    if (!host || !section) return;
+    host.innerHTML = "";
+
+    const row = document.createElement("div");
+    row.className = "auto-applied-error";
+    row.setAttribute("role", "alert");
+
+    // textContent, not innerHTML: `detail` is server-influenced.
+    const msg = document.createElement("span");
+    msg.className = "aa-error-text";
+    msg.textContent =
+      `Could not load auto-applied changes (${detail}). ` +
+      "Plan changes applied without a review gate are not listed below. " +
+      "Retry before treating this section as empty.";
+
+    const retry = document.createElement("button");
+    retry.type = "button";
+    retry.className = "aa-retry";
+    retry.textContent = "Retry";
+    retry.addEventListener("click", () => loadAutoApplied());
+
+    row.append(msg, retry);
+    host.appendChild(row);
+    section.hidden = false;
+  }
+
   async function loadAutoApplied() {
+    let res;
     try {
-      const res = await authedFetch(`${API_BASE}/protocols/auto-applied`);
-      if (!res.ok) return;
+      res = await authedFetch(`${API_BASE}/protocols/auto-applied`);
+    } catch (e) {
+      console.error("auto-applied feed load failed", e);
+      renderAutoAppliedError("network error");
+      return;
+    }
+
+    // 401/403 is not a feed failure - a signed-in non-clinician simply is not
+    // entitled to this feed. Stay quiet and hidden rather than crying wolf.
+    if (res.status === 401 || res.status === 403) {
+      renderAutoApplied([]);
+      return;
+    }
+
+    if (!res.ok) {
+      console.error("auto-applied feed load failed", res.status);
+      renderAutoAppliedError(`HTTP ${res.status}`);
+      return;
+    }
+
+    try {
       const data = await res.json();
       renderAutoApplied(data.auto_applied || []);
-    } catch (_) {
-      // Non-fatal: the feed is additive. Never block the pending queue.
+    } catch (e) {
+      console.error("auto-applied feed parse failed", e);
+      renderAutoAppliedError("malformed response");
     }
   }
 

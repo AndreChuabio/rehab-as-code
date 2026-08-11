@@ -688,6 +688,29 @@
 .auto-applied-row .aa-revert:hover { background: var(--surface2); }
 .auto-applied-row .aa-ack:hover { background: var(--surface2); }
 
+/* Feed-failure state. Sits on the section's existing --warn-bg and uses
+   --danger for text only - no filled red panel, so it stays subordinate to the
+   safety banners rather than competing with them. */
+.auto-applied-error {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--danger);
+}
+.auto-applied-error .aa-error-text { flex: 1 1 100%; }
+.auto-applied-error .aa-retry {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--danger);
+  background: var(--surface);
+  color: var(--danger);
+  cursor: pointer;
+}
+.auto-applied-error .aa-retry:hover { background: var(--surface2); }
+
 /* AI-generated diff narration. Sits directly below the safety block so
    the clinician scans flags first, narration second, raw diff third.
    PR-Q: rebound to the dedicated AI tokens (--ai-bg, --ai-accent) so

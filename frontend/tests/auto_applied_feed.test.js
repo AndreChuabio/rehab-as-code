@@ -76,14 +76,78 @@ function renderAutoApplied(rows, doc) {
   });
 }
 
+// renderAutoAppliedError mirrors clinician.js. The point of the state is that a
+// BROKEN feed is visibly different from an EMPTY one: section shown, not hidden.
+function renderAutoAppliedError(detail, doc) {
+  const host = doc.getElementById("autoAppliedList");
+  const section = doc.getElementById("autoAppliedSection");
+  if (!host || !section) return;
+  host.innerHTML = "";
+
+  const row = doc.createElement("div");
+  row.className = "auto-applied-error";
+  row.setAttribute("role", "alert");
+
+  const msg = doc.createElement("span");
+  msg.className = "aa-error-text";
+  msg.textContent =
+    `Could not load auto-applied changes (${detail}). ` +
+    "Plan changes applied without a review gate are not listed below. " +
+    "Retry before treating this section as empty.";
+
+  const retry = doc.createElement("button");
+  retry.type = "button";
+  retry.className = "aa-retry";
+  retry.textContent = "Retry";
+
+  row.append(msg, retry);
+  host.appendChild(row);
+  section.hidden = false;
+}
+
+// loadAutoApplied mirrors clinician.js response branching, with fetch injected.
+// This is the part that regressed: the original swallowed every non-OK response
+// and left the section hidden, so a 500 read to a clinician as "nothing here".
+async function loadAutoApplied(fetchImpl, doc) {
+  let res;
+  try {
+    res = await fetchImpl();
+  } catch (_) {
+    renderAutoAppliedError("network error", doc);
+    return;
+  }
+
+  if (res.status === 401 || res.status === 403) {
+    renderAutoApplied([], doc);
+    return;
+  }
+
+  if (!res.ok) {
+    renderAutoAppliedError(`HTTP ${res.status}`, doc);
+    return;
+  }
+
+  try {
+    const data = await res.json();
+    renderAutoApplied(data.auto_applied || [], doc);
+  } catch (_) {
+    renderAutoAppliedError("malformed response", doc);
+  }
+}
+
 // ── Minimal element + document stubs ───────────────────────────────────────
 function makeEl() {
   return {
     className: "",
     innerHTML: "",
+    textContent: "",
+    type: "",
     hidden: false,
+    attrs: {},
     children: [],
     appendChild(child) { this.children.push(child); },
+    append(...kids) { this.children.push(...kids); },
+    setAttribute(k, v) { this.attrs[k] = v; },
     querySelector() { return { addEventListener() {} }; },
     addEventListener() {},
     remove() {},
@@ -181,4 +245,85 @@ assert.equal(autoAppliedSummary(null), "Coach Maya updated the plan");
   assert.equal(doc._host.children.length, 1, "falsy rows are filtered out");
 }
 
-console.log("OK: clinician auto-applied feed — all assertions passed");
+// ── loadAutoApplied: a broken feed is NOT rendered as an empty one ─────────
+// The regression this guards: clinician.js used to `if (!res.ok) return;`, so
+// the section kept its default hidden state and a clinician could not tell a
+// 500 apart from "nothing was auto-applied" - while changes that skipped the
+// approval gate sat active and unreviewed.
+// Wrapped in an async IIFE, not top-level await: this file is CommonJS (it uses
+// require), and a top-level await makes node reparse it as an ES module, which
+// then blows up on that same require.
+(async function asyncAssertions() {
+  const failureCases = [
+    ["HTTP 500", () => Promise.resolve({ ok: false, status: 500, json: async () => ({}) })],
+    ["network throw", () => Promise.reject(new Error("offline"))],
+    [
+      "malformed body",
+      () => Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => { throw new Error("bad json"); },
+      }),
+    ],
+  ];
+
+  for (const [label, fetchImpl] of failureCases) {
+    const doc = makeDoc();
+    await loadAutoApplied(fetchImpl, doc);
+
+    assert.equal(doc._section.hidden, false, `${label}: section must be visible, not silently hidden`);
+    assert.equal(doc._host.children.length, 1, `${label}: renders exactly one error row`);
+
+    const row = doc._host.children[0];
+    assert.equal(row.className, "auto-applied-error", `${label}: row is the error state`);
+    assert.equal(row.attrs.role, "alert", `${label}: announced to screen readers`);
+
+    const text = row.children.map((c) => c.textContent).join(" ");
+    assert.match(text, /could not load/i, `${label}: says the load failed`);
+    assert.match(text, /retry/i, `${label}: offers a retry`);
+  }
+
+  // ── loadAutoApplied: 401/403 stays quiet ────────────────────────────────
+  // A signed-in non-clinician is not entitled to the feed. That is not a
+  // failure, and shouting would train clinicians to ignore the real alert.
+  for (const status of [401, 403]) {
+    const doc = makeDoc();
+    await loadAutoApplied(() => Promise.resolve({ ok: false, status, json: async () => ({}) }), doc);
+    assert.equal(doc._section.hidden, true, `${status}: section stays hidden`);
+    assert.equal(doc._host.children.length, 0, `${status}: no error row`);
+  }
+
+  // ── loadAutoApplied: healthy responses behave as before ─────────────────
+  {
+    const doc = makeDoc();
+    await loadAutoApplied(
+      () => Promise.resolve({ ok: true, status: 200, json: async () => ({ auto_applied: [] }) }),
+      doc,
+    );
+    assert.equal(doc._section.hidden, true, "empty feed stays hidden");
+    assert.equal(doc._host.children.length, 0, "empty feed renders no rows");
+  }
+  {
+    const doc = makeDoc();
+    await loadAutoApplied(
+      () => Promise.resolve({
+        ok: true,
+        status: 200,
+        json: async () => ({ auto_applied: [{ id: "p1", summary: "Swapped lunge" }] }),
+      }),
+      doc,
+    );
+    assert.equal(doc._section.hidden, false, "populated feed is shown");
+    assert.equal(doc._host.children.length, 1, "one row per entry");
+    assert.equal(
+      doc._host.children[0].className,
+      "auto-applied-row",
+      "renders a normal row, not an error",
+    );
+  }
+
+  console.log("OK: clinician auto-applied feed — all assertions passed");
+})().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

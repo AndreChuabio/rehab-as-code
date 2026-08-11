@@ -1,4 +1,11 @@
-import { test, expect, STORAGE_STATE, hasSavedSession, usePatientView } from "./fixtures";
+import {
+  test,
+  expect,
+  STORAGE_STATE,
+  hasSavedSession,
+  usePatientView,
+  suppressTour,
+} from "./fixtures";
 
 /**
  * Authenticated patient dashboard.
@@ -20,6 +27,9 @@ test.beforeEach(async ({ page }) => {
   // Staff accounts are redirected to /clinician otherwise; patient specs must
   // pin themselves to the patient view before the first navigation.
   await usePatientView(page);
+  // Same reason as the clinician suite: the patient tour auto-starts 800ms in
+  // and its overlay swallows clicks. Both must run before the first goto().
+  await suppressTour(page);
 });
 
 test.describe("patient dashboard @authed", () => {

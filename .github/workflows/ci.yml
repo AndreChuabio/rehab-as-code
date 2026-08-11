@@ -28,6 +28,12 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
 
+      # Explicit rather than relying on whatever node the runner image ships,
+      # so the frontend unit-test step below is deterministic.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
       # Vercel installs from the ROOT requirements.txt, so CI installs from the
       # same file — a dep that works here is a dep that works in the lambda.
       # pytest is a test-only dep and deliberately not in either file.
@@ -55,6 +61,22 @@ jobs:
       # paths, so this needs no DATABASE_URL and never touches Supabase.
       - name: Run backend suite
         run: python -m pytest backend/tests/ -q
+
+      # frontend/tests/*.test.js are dependency-free node scripts that mirror the
+      # render helpers inside clinician.js / app.js. They existed but nothing ran
+      # them, so a mirror could drift from the real code unnoticed.
+      - name: Run frontend unit tests
+        run: |
+          rc=0
+          for f in frontend/tests/*.test.js; do
+            if node "$f"; then
+              echo "PASS $f"
+            else
+              echo "::error file=$f::$f failed"
+              rc=1
+            fi
+          done
+          exit $rc
 
   e2e-smoke:
     name: e2e smoke (@public)

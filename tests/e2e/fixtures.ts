@@ -69,6 +69,36 @@ export function hasSavedSession(): boolean {
 }
 
 /**
+ * Stop the onboarding tour before it can cover the page.
+ *
+ * `.tour-overlay` is a fixed, full-viewport modal, so while a tour is running
+ * it swallows clicks aimed at anything underneath. It auto-starts on a timer -
+ * 600ms on /clinician (clinician.js:163), 800ms on the patient app
+ * (app.js:650) - which makes it a genuine flake source rather than a constant
+ * failure: a fast run clicks first and passes.
+ *
+ * It bit hardest on LOCAL runs. A captured storageState carries localStorage
+ * scoped to the origin it was captured on (prod), so against 127.0.0.1 the
+ * "already seen the tour" flag is absent and the tour replays even though the
+ * same spec is green against prod.
+ *
+ * Tour.autoStart() no-ops when its versioned flag is set (tour.js:18,31 -
+ * FLAG_PREFIX "rehab_tour_" + the per-surface key), so set both before any page
+ * script runs. Call BEFORE goto(). A spec that actually wants to test the tour
+ * simply does not call this.
+ */
+export async function suppressTour(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    try {
+      window.localStorage.setItem("rehab_tour_clinician_v1", "1");
+      window.localStorage.setItem("rehab_tour_patient_v1", "1");
+    } catch {
+      /* storage disabled - the tour runs and clicks may hit the overlay */
+    }
+  });
+}
+
+/**
  * Dismiss the sign-in overlay by taking the app's built-in demo path.
  *
  * The button is painted before app.js attaches its click listener (that wiring

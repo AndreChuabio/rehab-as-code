@@ -1,4 +1,11 @@
-import { test, expect, STORAGE_STATE, hasSavedSession, authedRequest } from "./fixtures";
+import {
+  test,
+  expect,
+  STORAGE_STATE,
+  hasSavedSession,
+  authedRequest,
+  suppressTour,
+} from "./fixtures";
 
 /**
  * Clinician review console.
@@ -20,6 +27,8 @@ test.beforeEach(async ({ page }) => {
     "No authenticated session. Run `npm run qa:login` or set E2E_EMAIL/E2E_PASSWORD.",
   );
 
+  // Before goto: the tour overlay would otherwise intercept clicks on the queue.
+  await suppressTour(page);
   await page.goto("/clinician");
 
   // /protocols/pending is clinician-only; 403 means this account is not staff,
@@ -148,5 +157,48 @@ test.describe("clinician console @authed @clinician", () => {
         `draft ${row.id} is already active while still queued - the clinician gate leaked`,
       ).not.toBe("active");
     }
+  });
+
+  /**
+   * A broken auto-applied feed must not read as an empty one.
+   *
+   * clinician.js loadAutoApplied() used to do `if (!res.ok) return;` and swallow
+   * throws, leaving #autoAppliedSection in its default hidden state. Since this
+   * section is the only place a clinician sees changes Coach Maya put live with
+   * no approval gate, a silent failure showed "nothing to review" while those
+   * changes sat active and unreviewed.
+   *
+   * Both cases below are served from an intercepted route with synthetic
+   * responses - no real protocol data is read, and revert is never called.
+   */
+  test("a failed auto-applied feed is visibly different from an empty one", async ({ page }) => {
+    await page.route("**/protocols/auto-applied", (route) =>
+      route.fulfill({ status: 500, contentType: "application/json", body: "{}" }),
+    );
+
+    // The beforeEach already navigated, so re-navigate now the route is armed.
+    await page.goto("/clinician");
+
+    await expect(page.locator("#autoAppliedSection")).toBeVisible();
+    const err = page.locator(".auto-applied-error");
+    await expect(err).toBeVisible();
+    await expect(err).toContainText(/could not load/i);
+    await expect(err.locator(".aa-retry")).toBeVisible();
+  });
+
+  test("an empty auto-applied feed stays hidden", async ({ page }) => {
+    await page.route("**/protocols/auto-applied", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ auto_applied: [] }),
+      }),
+    );
+
+    await page.goto("/clinician");
+
+    await expect(page.locator("#clinicianHeaderTitle")).toBeVisible();
+    await expect(page.locator("#autoAppliedSection")).toBeHidden();
+    await expect(page.locator(".auto-applied-error")).toHaveCount(0);
   });
 });

@@ -125,7 +125,7 @@ Covered here (all read-only — nothing calls revert):
   order, `main.py:1032` vs `1303`)
 - every row offered for revert is genuinely `auto_applied`, `active`, and un-reverted
 
-## Two app behaviours that will bite you when writing specs
+## Three app behaviours that will bite you when writing specs
 
 1. **Staff accounts get redirected.** `app.js maybeRedirectToClinician()` bounces
    `role=clinician|admin` from `/` to `/clinician`, and it awaits `/me/role`, so
@@ -140,6 +140,15 @@ Covered here (all read-only — nothing calls revert):
    listeners attach only after `RehabAuth.init()` finishes (`fetch /config` →
    ESM CDN import of supabase-js). A single early click is silently swallowed.
    Both `continueAsDemo()` and `auth.setup.ts` retry the click until it takes.
+
+3. **The onboarding tour covers the page.** `.tour-overlay` is a fixed
+   full-viewport modal that auto-starts on a timer (600ms on `/clinician`,
+   800ms on the patient app), so it swallows clicks aimed at anything beneath
+   it. Call `suppressTour(page)` **before** `goto()`. This bites hardest on
+   **local** runs: a captured `storageState` carries localStorage scoped to the
+   origin it was captured on (prod), so against `127.0.0.1` the "already seen
+   it" flag is missing and the tour replays — a spec green against prod fails
+   locally with `<div class="tour-overlay"> intercepts pointer events`.
 
 ## Layout
 
