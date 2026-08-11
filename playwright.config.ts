@@ -201,6 +201,9 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
       dependencies: ["setup"],
+      // pose-* specs need the fake-camera lane; without those flags the
+      // headless browser has no camera and they would fail for the wrong reason.
+      testIgnore: /pose-.*\.spec\.ts/,
     },
 
     // Patient UI was re-skinned for desktop (Deep Plum) but is used on phones;
@@ -208,6 +211,33 @@ export default defineConfig({
     {
       name: "mobile-safari",
       use: { ...devices["iPhone 14"] },
+      dependencies: ["setup"],
+      testIgnore: /pose-.*\.spec\.ts/,
+    },
+
+    // Guided form-check lane. Chromium can serve a Y4M file as the webcam,
+    // which makes MediaPipe deterministic and sidesteps OS auto-framing
+    // (macOS Center Stage) entirely - the thing that blocks testing this
+    // surface with a real camera. WebKit has no equivalent, so this lane is
+    // chromium-only. Run: npm run qa:pose (generates the clip first).
+    // QA_POSE_CLIP overrides the clip - point it at a real recorded .y4m to
+    // exercise landmark detection and rep counting instead of just plumbing.
+    {
+      name: "pose-chromium",
+      testMatch: /pose-.*\.spec\.ts/,
+      use: {
+        ...devices["Desktop Chrome"],
+        permissions: ["camera"],
+        launchOptions: {
+          args: [
+            "--use-fake-ui-for-media-stream",
+            "--use-fake-device-for-media-capture",
+            `--use-file-for-fake-video-capture=${
+              process.env.QA_POSE_CLIP ?? "playwright/.assets/fake-camera.y4m"
+            }`,
+          ],
+        },
+      },
       dependencies: ["setup"],
     },
   ],

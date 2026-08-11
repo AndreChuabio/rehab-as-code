@@ -6,6 +6,7 @@
   "scripts": {
     "qa": "playwright test",
     "qa:headed": "playwright test --headed",
+    "qa:pose": "node scripts/qa-fake-camera.mjs && playwright test --project=pose-chromium",
     "qa:ui": "playwright test --ui",
     "qa:report": "playwright show-report",
     "qa:login": "node scripts/qa-login.mjs",
