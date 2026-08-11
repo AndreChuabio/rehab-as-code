@@ -1,0 +1,69 @@
+name: Prod smoke
+
+# Post-deploy verification against the live site. Separate from ci.yml on
+# purpose: this one depends on prod being up and on prod data, so it must never
+# gate a merge — a red run here means production is unhealthy, not that the PR
+# is bad.
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: "Target URL (defaults to production)"
+        required: false
+        default: "https://rehab-as-code-five.vercel.app"
+  schedule:
+    # 13:00 UTC daily (~09:00 ET).
+    - cron: "0 13 * * *"
+
+concurrency:
+  group: prod-smoke
+  cancel-in-progress: false
+
+jobs:
+  smoke:
+    name: smoke vs prod
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+
+      - run: npm ci
+
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+
+      # Both lanes: the patient UI was re-skinned for desktop (Deep Plum) but is
+      # used on phones, so mobile WebKit is a real regression surface.
+      - name: Install browsers
+        run: npx playwright install --with-deps chromium webkit
+
+      # Read-only by construction. QA_ALLOW_MUTATION is never set here, and even
+      # if it were, playwright.config.ts refuses outright when the target is not
+      # local. No test approves a protocol, submits intake, or calls revert.
+      #
+      # E2E_EMAIL / E2E_PASSWORD are optional: without them auth.setup.ts skips,
+      # the @authed and @clinician specs skip, and the @public suite still runs.
+      # With them, this also covers the signed-in patient and clinician surfaces.
+      - name: Run suite against prod
+        run: npx playwright test
+        env:
+          QA_BASE_URL: ${{ github.event.inputs.base_url || 'https://rehab-as-code-five.vercel.app' }}
+          E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
+          E2E_PASSWORD: ${{ secrets.E2E_PASSWORD }}
+
+      - name: Upload Playwright report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prod-smoke-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 14

@@ -13,6 +13,9 @@ PLAN.md
 AGENTS.md
 .cursorrules
 
+# CI definitions - GitHub-only, never part of the deployment.
+/.github/
+
 # Playwright QA harness - dev tooling, never part of the deployment.
 # Anchored to the repo root so `/tests/` does not also match backend/tests/.
 node_modules/
