@@ -4574,6 +4574,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
     guided.spokenCorrectionsThisRep.clear();
     guided.lastInRep = false;
     guided.lastMoving = false;
+    guided.wasCalibrating = false;
     guided.lastSpokenCount = -1;
     if (guided.startAnywayTimer) { clearTimeout(guided.startAnywayTimer); guided.startAnywayTimer = null; }
     // Redraw immediately: the label otherwise shows the previous set's last
@@ -4919,6 +4920,27 @@ async function togglePoseFormCheck(wrap, item, btn) {
       const inLiveCall = !!(tavusCall && tavusConvId);
       if (!inLiveCall || LOCAL_TTS_IN_CALL) speakNow(decision.cue);
       showCorrectionBubble(decision.cue, decision.status);
+    }
+
+    // Calibration visibility (Andre, 2026-08-12: "as a user I couldn't tell
+    // it was still calibrating"). The guard arms only after ~2s of stable
+    // stance; until then NOTHING counts, and that state was invisible - it
+    // cost three live debugging loops in one night. Surface it: while the
+    // rise metric reports idle during an active set, show the calibration
+    // message; on the idle -> live transition, flash GO and say it.
+    if (guided.phase === "active") {
+      const rise = (payload.metrics || []).find((m) => m && m.id === "calf_rise");
+      if (rise) {
+        const calibrating = rise.status === "idle";
+        if (calibrating && !guided.wasCalibrating) {
+          showCorrectionBubble(rise.msg || "Hold still — calibrating", "warn");
+        } else if (!calibrating && guided.wasCalibrating) {
+          showCorrectionBubble("GO — counting your reps", "good");
+          const inLiveCall = !!(tavusCall && tavusConvId);
+          if (!inLiveCall || LOCAL_TTS_IN_CALL) speakNow("Go");
+        }
+        guided.wasCalibrating = calibrating;
+      }
     }
 
     // Rep events: append, speak count, redraw the recent-reps list. This is
