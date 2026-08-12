@@ -1,0 +1,33 @@
+{
+  "_readme": "Ground-truth contract for the pose fixture runner (tests/e2e/pose-fixtures.spec.ts). Expected values are what Andre ACTUALLY performed on camera - never invented. duration_s: 0 is a skeleton value the conversion script overwrites; the runner rejects any entry still at 0. Clips live gitignored under playwright/.assets/fixtures/<exercise_id>/.",
+  "ankle_calf_raises_double_leg": {
+    "mode": "rise",
+    "clips": {
+      "good": { "file": "good.y4m", "duration_s": 0, "expected_reps": 8, "expected_bad_max": 0 },
+      "bad":  { "file": "bad.y4m",  "duration_s": 0, "expected_reps": 4, "expected_bad_min": 3 },
+      "walk": { "file": "walk.y4m", "duration_s": 0, "expected_reps": 2 }
+    }
+  },
+  "ankle_calf_raises_single_leg": {
+    "mode": "rise",
+    "clips": {
+      "good": { "file": "good.y4m", "duration_s": 0, "expected_reps": 6, "expected_bad_max": 1 },
+      "bad":  { "file": "bad.y4m",  "duration_s": 0, "expected_reps": 4, "expected_bad_min": 3 },
+      "walk": { "file": "walk.y4m", "duration_s": 0, "expected_reps": 2 }
+    }
+  },
+  "ankle_single_leg_balance": {
+    "mode": "hold",
+    "clips": {
+      "good": { "file": "good.y4m", "duration_s": 0, "expected_hold_s": { "min": 15, "max": 25 } },
+      "bad":  { "file": "bad.y4m",  "duration_s": 0, "expected_hold_s": { "min": 8, "max": 18 } },
+      "walk": { "file": "walk.y4m", "duration_s": 0, "expected_hold_s": { "min": 6, "max": 14 } }
+    }
+  },
+  "ankle_alphabet": {
+    "mode": "presence",
+    "clips": {
+      "good": { "file": "good.y4m", "duration_s": 0, "expected_presence": true }
+    }
+  }
+}
