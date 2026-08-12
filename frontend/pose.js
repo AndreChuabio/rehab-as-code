@@ -479,20 +479,18 @@ function bodySample(lms) {
   const hipY = (lh.y + rh.y) / 2;
   const hipX = (lh.x + rh.x) / 2;
   const shoulderY = (ls.y + rs.y) / 2;
-  // Span reaches to the PLANTED foot: the lowest (largest-y) visible ankle.
-  // Averaging both ankles broke single-leg exercises - the free foot is
-  // airborne and swinging, so the mean bounced every rep, the drift window
-  // read it as walking, and span-stability voided genuine reps (field
-  // regression 2026-08-12: ~15 single-leg raises performed, 2-3 counted).
-  // The planted ankle is stable in both single- and double-leg stances.
-  const la = lms[L.LEFT_ANKLE], ra = lms[L.RIGHT_ANKLE];
-  const ankles = [la, ra].filter((a) => visibleEnough(a));
-  let span;
-  if (ankles.length) {
-    span = Math.max(...ankles.map((a) => a.y)) - shoulderY;
-  } else {
-    span = (hipY - shoulderY) / 0.37;
-  }
+  // Span derives from the TORSO (shoulder to hip, scaled by the ~0.37
+  // torso:body ratio) - never from ankles. Two field regressions in one
+  // evening taught this: the ankle MEAN bounces when a free foot swings
+  // (single-leg: 15 performed, 2-3 counted), and the PLANTED pick is
+  // bistable because the working ankle rises with every heel lift while
+  // the free foot hovers near the floor, so the max flips mid-rep
+  // (single-leg: 10+ performed, 1 counted). The torso is rigid through a
+  // calf raise, identical in both stances, and still scales with camera
+  // distance, so the walking checks keep their meaning. Severe trunk lean
+  // shortens it a few percent - which voids exactly the deep-lean reps the
+  // span-stability check should void.
+  const span = (hipY - shoulderY) / 0.37;
   return { hipY, hipX, span };
 }
 
