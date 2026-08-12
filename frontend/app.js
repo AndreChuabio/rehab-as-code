@@ -4513,6 +4513,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
   };
 
   function clearTimers() {
+    if (guided.countdownTimer)      { clearInterval(guided.countdownTimer); guided.countdownTimer = null; }
     if (guided.restTimer)           { clearInterval(guided.restTimer); guided.restTimer = null; }
     if (guided.correctionFadeTimer) { clearTimeout(guided.correctionFadeTimer); guided.correctionFadeTimer = null; }
     if (guided.presenceTimer)       { clearInterval(guided.presenceTimer); guided.presenceTimer = null; }
@@ -4569,7 +4570,16 @@ async function togglePoseFormCheck(wrap, item, btn) {
   }
 
   function startSet() {
-    guided.phase = "active";
+    // Get-ready countdown before the set arms. The patient taps Start at the
+    // laptop and then WALKS to their spot; on 2026-08-12 that transit counted
+    // 1-2 phantom reps at the start of both live sets (the walk-onset leak).
+    // Vision-level gates for it drowned in keypoint noise - three field
+    // regressions in one night - but the observed leak mechanism is purely
+    // transit-after-tap, and a countdown closes it deterministically: the
+    // payload handler drops everything while phase is not "active", so
+    // nothing can count until GO. Real reps cannot be lost - the set has not
+    // started.
+    guided.phase = "getready";
     guided.repsHistoryThisSet = [];
     guided.spokenCorrectionsThisRep.clear();
     guided.lastInRep = false;
@@ -4577,25 +4587,47 @@ async function togglePoseFormCheck(wrap, item, btn) {
     guided.wasCalibrating = false;
     guided.lastSpokenCount = -1;
     if (guided.startAnywayTimer) { clearTimeout(guided.startAnywayTimer); guided.startAnywayTimer = null; }
-    // Redraw immediately: the label otherwise shows the previous set's last
-    // value until the first rep event lands, which read as a counter bug
-    // during live acceptance (stale "Rep 8/15" at set-2 start).
-    updateSetRepLabels();
     preflightEl.hidden = true;
     stageEl.classList.remove("pose-stage--preflight");
     restOverlay.hidden = true;
     betweenOl.hidden = true;
     doneOverlay.hidden = true;
-    if (isPresenceMode) {
-      // PR-U2: presence-mode exercises (ankle alphabet, band isolations,
-      // lateral hops) don't have a 2D-trackable rep signal. Run a hold
-      // timer instead of the rep state machine; expose a manual "Mark
-      // set done" button so the patient can advance early if their PT
-      // gave a different cadence. On either path, endSet() fires.
-      startPresenceHold();
-    } else {
-      updateSetRepLabels();
-    }
+
+    // Arm only after the countdown. Everything the set needs to start lives
+    // here; the payload handler drops rep events until phase is "active".
+    const armSet = () => {
+      guided.phase = "active";
+      if (isPresenceMode) {
+        // PR-U2: presence-mode exercises (ankle alphabet, band isolations,
+        // lateral hops) don't have a 2D-trackable rep signal. Run a hold
+        // timer instead of the rep state machine; expose a manual "Mark
+        // set done" button so the patient can advance early if their PT
+        // gave a different cadence. On either path, endSet() fires.
+        startPresenceHold();
+      } else {
+        // Redraw immediately: the label otherwise shows the previous set's
+        // last value until the first rep event lands (stale "Rep 8/15" bug).
+        updateSetRepLabels();
+        showCorrectionBubble("GO — counting your reps", "good");
+        speakNow("Go");
+      }
+    };
+
+    setLabel.textContent = `Set ${guided.setIdx + 1}/${guided.totalSets}`;
+    repLabel.textContent = "Get in position";
+    speakNow("Get in position");
+    let count = 3;
+    guided.countdownTimer = setInterval(() => {
+      if (count > 0) {
+        repLabel.textContent = String(count);
+        speakNow(String(count));
+        count -= 1;
+        return;
+      }
+      clearInterval(guided.countdownTimer);
+      guided.countdownTimer = null;
+      armSet();
+    }, 1000);
   }
 
   // PR-U2: presence-mode set runner. Speaks start / halfway / complete
