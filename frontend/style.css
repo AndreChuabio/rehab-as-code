@@ -3552,6 +3552,11 @@ body.pose-active .stage-chat .chat-card .chat-log { min-height: 0; }
 #poseStage .pose-preflight-card {
   max-width: 460px;
   width: 100%;
+  /* The card grows when the framing help or the Center Stage callout render
+     their longer text; without a height cap it clips past the video box and
+     forces page scroll (Andre, 2026-08-12). Scroll internally instead. */
+  max-height: calc(100% - 32px);
+  overflow-y: auto;
   background: rgba(20, 24, 28, 0.92);
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 12px;

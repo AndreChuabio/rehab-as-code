@@ -4567,8 +4567,13 @@ async function togglePoseFormCheck(wrap, item, btn) {
     guided.repsHistoryThisSet = [];
     guided.spokenCorrectionsThisRep.clear();
     guided.lastInRep = false;
+    guided.lastMoving = false;
     guided.lastSpokenCount = -1;
     if (guided.startAnywayTimer) { clearTimeout(guided.startAnywayTimer); guided.startAnywayTimer = null; }
+    // Redraw immediately: the label otherwise shows the previous set's last
+    // value until the first rep event lands, which read as a counter bug
+    // during live acceptance (stale "Rep 8/15" at set-2 start).
+    updateSetRepLabels();
     preflightEl.hidden = true;
     stageEl.classList.remove("pose-stage--preflight");
     restOverlay.hidden = true;
@@ -4601,6 +4606,11 @@ async function togglePoseFormCheck(wrap, item, btn) {
     speakNow(`Set ${guided.setIdx + 1}, hold for ${total} seconds`);
     if (guided.presenceTimer) clearInterval(guided.presenceTimer);
     guided.presenceTimer = setInterval(() => {
+      // Locomotion pause: hold seconds only accrue while the patient is
+      // actually holding. guided.lastMoving mirrors payload.moving, which is
+      // true only on an explicit moving verdict - a blind guard (seated
+      // framing, no standing body sample) never pauses this timer.
+      if (guided.lastMoving) return;
       elapsed += 1;
       repLabel.textContent = `Hold ${fmt(elapsed)} / ${fmt(total)}`;
       if (elapsed === Math.floor(total / 2)) speakNow("Halfway");
@@ -4748,7 +4758,11 @@ async function togglePoseFormCheck(wrap, item, btn) {
   // frame is empty (an empty room is a stepped-away patient, not a crop).
   const AUTO_FRAMING_FLAG_MS = 8000;
   function maybeFlagAutoFraming(fs) {
-    if (fs.ready || fs.visible === 0) {
+    // Fire only for a patient who is SUBSTANTIALLY visible yet never passes:
+    // that is the auto-framing crop signature. A sliver of shoulders at the
+    // desk (2/8 while reading the screen) is just someone near the camera,
+    // and flagging it cried wolf during live acceptance (2026-08-12).
+    if (fs.ready || fs.visible < 4) {
       guided.partialFramingSinceTs = null;
       return;
     }
@@ -4877,6 +4891,7 @@ async function togglePoseFormCheck(wrap, item, btn) {
       !!payload.inRep,
     );
     guided.lastInRep = !!payload.inRep;
+    guided.lastMoving = !!payload.moving;
 
     // Correction TTS + bubble. Pure throttle decision in decideCorrectionCue.
     const nowTs = performance.now();
@@ -4931,7 +4946,15 @@ async function togglePoseFormCheck(wrap, item, btn) {
         }
       }
       updateSetRepLabels();
-      renderPoseSession(sessionEl, guided.repsHistoryAll, payload.repSummary);
+      // Per-set view: the header says SET, so it must count THIS set, and
+      // row numbers restart each set. Engine-cumulative numbers ("Rep 27",
+      // "SET - 32 REPS" mid-session) corrupted two live acceptance readings.
+      // repsHistoryAll still backs the posted session payload.
+      renderPoseSession(
+        sessionEl,
+        guided.repsHistoryThisSet.map((r, i) => ({ ...r, repNumber: i + 1 })),
+        { repCount: guided.repsHistoryThisSet.length },
+      );
     } else {
       updateSetRepLabels();
     }
@@ -5018,6 +5041,14 @@ async function togglePoseFormCheck(wrap, item, btn) {
           // exactly where to turn it off. Shown even with a single camera
           // (the picker is pointless then, but the hint is the fix).
           const activeLabel = window.PoseFormCheck.currentCameraLabel?.() || "";
+          // With a single camera there is nothing to pick: show the hint
+          // alone and hide the empty select (it rendered as a blank dropdown
+          // when the Center Stage callout unhid this row - Andre, 2026-08-12).
+          const camLabelEl = camRow.querySelector("label");
+          if (cams.length < 2) {
+            camSel.hidden = true;
+            if (camLabelEl) camLabelEl.hidden = true;
+          }
           if (window.PoseFormCheck.cameraLooksAutoFraming?.(activeLabel)) {
             const hint = camRow.querySelector(".pose-preflight-camera-hint");
             if (hint) {

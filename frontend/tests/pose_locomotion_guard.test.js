@@ -316,4 +316,25 @@ const still = (n, hipY, span, hipX = 0.5) =>
   assert.equal(t.repCount, 0, "abandon, never bank");
 }
 
+// ── Mirror of pose.js swayFrom (byte-equivalent) ────────────────────────────
+const SWAY_WARN_FRAC = 0.05;
+const SWAY_BAD_FRAC  = 0.10;
+function swayFrom(hipX, baselineX, baselineSpan) {
+  const frac = Math.abs(hipX - baselineX) / baselineSpan;
+  let status = "good";
+  if (frac > SWAY_BAD_FRAC) status = "bad";
+  else if (frac > SWAY_WARN_FRAC) status = "warn";
+  return { frac: +(frac * 100).toFixed(1), status };
+}
+
+// ─── Sway: baseline-relative and distance-invariant ────────────────────────
+{
+  assert.equal(swayFrom(0.60, 0.60, 0.5).status, "good", "standing off-center is not sway");
+  const nearWobble = swayFrom(0.545, 0.5, 0.9);
+  const farWobble  = swayFrom(0.525, 0.5, 0.5);
+  assert.equal(nearWobble.status, farWobble.status, "same body wobble, same verdict at any distance");
+  assert.equal(swayFrom(0.60, 0.5, 0.5).status, "bad");
+  assert.equal(swayFrom(0.535, 0.5, 0.5).status, "warn");
+}
+
 console.log("OK: locomotion guard - all assertions passed");

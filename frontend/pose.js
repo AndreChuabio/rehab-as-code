@@ -296,7 +296,13 @@ function checkHipDrop(lms) {
   const lh = lms[L.LEFT_HIP], rh = lms[L.RIGHT_HIP];
   if (!visibleEnough(lh, rh)) return null;
   const dy = rh.y - lh.y;            // +ve = right hip lower
-  const abs = Math.abs(dy);
+  // Span-normalized: the old thresholds were fractions of FRAME height
+  // (0.03/0.06), calibrated for a close stance where the body filled ~60
+  // percent of the frame. Dividing by the guard's settled span keeps the
+  // same clinical sensitivity at any distance; the constants are the old
+  // ones re-based to that calibration stance (0.03/0.6 = 0.05 of span).
+  const span = guardState.baselineSpan > 0 ? guardState.baselineSpan : 0.6;
+  const abs = Math.abs(dy) / span * 0.6;
 
   let status = "good", msg;
   if (abs > 0.06)      { status = "bad";  msg = `${dy > 0 ? "right" : "left"} hip dropping (Trendelenburg)`; }
@@ -569,21 +575,38 @@ function checkCalfRaiseRise(lms) {
   };
 }
 
+// Pure sway core (mirrored in pose_locomotion_guard.test.js). Thresholds are
+// fractions of the patient's own span: beyond 5 percent is a warn, beyond 10
+// percent is bad. The old check measured distance from FRAME CENTER (0.5) in
+// frame widths, which flagged any off-center stance as permanent sway and
+// scaled with distance from the camera.
+const SWAY_WARN_FRAC = 0.05;
+const SWAY_BAD_FRAC  = 0.10;
+function swayFrom(hipX, baselineX, baselineSpan) {
+  const frac = Math.abs(hipX - baselineX) / baselineSpan;
+  let status = "good";
+  if (frac > SWAY_BAD_FRAC) status = "bad";
+  else if (frac > SWAY_WARN_FRAC) status = "warn";
+  return { frac: +(frac * 100).toFixed(1), status };
+}
+
 function checkSway(lms) {
-  // Simple instantaneous deviation from baseline (no windowing for spike).
   const lh = lms[L.LEFT_HIP], rh = lms[L.RIGHT_HIP];
   if (!visibleEnough(lh, rh)) return null;
-  const x = ((lh.x + rh.x) / 2 - 0.5) * 100;
-  const abs = Math.abs(x);
-  let status = "good";
-  if (abs > 12) status = "bad";
-  else if (abs > 6) status = "warn";
+  // Baseline-relative: needs the guard's settled stance. While the guard has
+  // no baseline (moving, or settling) sway is unknowable - report idle rather
+  // than inventing a verdict against frame center.
+  if (guardState.baselineX == null || !(guardState.baselineSpan > 0)) {
+    return { id: "sway", label: "sway", value: 0, unit: "%", status: "idle" };
+  }
+  const hipX = (lh.x + rh.x) / 2;
+  const r = swayFrom(hipX, guardState.baselineX, guardState.baselineSpan);
   return {
     id: "sway",
     label: "sway",
-    value: +x.toFixed(1),
-    unit: "%w",
-    status,
+    value: r.frac,
+    unit: "%",
+    status: r.status,
   };
 }
 
@@ -1402,14 +1425,16 @@ function loop() {
       const metrics = smoothMetrics(rawMetrics, ts);
 
       // Run rep trackers on each depth metric (smoothed) and collect events.
-      // While the guard is not tracking, feed null: walking flexes the knee
+      // While the guard says MOVING, feed null: walking flexes the knee
       // enough to fake shallow reps, and observe(null) abandons in-flight
-      // state instead of banking it.
+      // state instead of banking it. Only explicit moving starves the
+      // trackers - a blind guard (seated or floor exercise, no standing
+      // body sample) must not freeze families it cannot judge.
       const repEvents = [];
       for (const m of metrics) {
         if (!isDepthMetric(m, ex)) continue;
         const tracker = getOrCreateTracker(m, ex);
-        const angleVal = guardFrame.phase === "tracking" ? m.value : null;
+        const angleVal = guardFrame.phase === "moving" ? null : m.value;
         const ev = tracker.observe(angleVal, metrics, ts);
         if (ev) repEvents.push(ev);
       }
@@ -1538,7 +1563,7 @@ function loop() {
           corrections: exDef.corrections || {},
           inRep,
           framingStatus,
-          moving: guardFrame.phase !== "tracking",
+          moving: guardFrame.phase === "moving",
         });
       }
     } else if (ctx) {
@@ -1785,6 +1810,7 @@ if (typeof window !== "undefined") {
     locomotionStep,
     bodySample,
     repTrackerIdleReset,
+    swayFrom,
     GUARD_BASELINE_FRAMES,
     GUARD_MOVE_X_FRAC,
     GUARD_MOVE_SCALE_FRAC,
