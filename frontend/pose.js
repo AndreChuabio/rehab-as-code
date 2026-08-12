@@ -378,15 +378,109 @@ function checkElbowAngle(side, lms) {
 // resetCalfRaiseTracker(). Rep counting for this lives in
 // CalfRaiseRepTracker (separate from the angle-based RepTracker because
 // the kinematic signal is hip-displacement, not joint-angle).
-const calfRaiseState = {
-  baselineY: null, baselineX: null, baselineSpan: null, samples: [], peakRise: 0,
-};
+const calfRaiseState = { peakRise: 0 };
 function resetCalfRaiseTracker() {
-  calfRaiseState.baselineY = null;
-  calfRaiseState.baselineX = null;
-  calfRaiseState.baselineSpan = null;
-  calfRaiseState.samples = [];
   calfRaiseState.peakRise = 0;
+}
+
+// ── Shared locomotion guard (pure core; mirrored in
+//    pose_locomotion_guard.test.js) ─────────────────────────────────────────
+//
+// One guard for every signal family. Live acceptance 2026-08-12 (plan T1)
+// showed the original cumulative thresholds leak exactly 2 phantom reps at
+// WALK ONSET: the first steps live under the 10 percent scale / 12 percent
+// lateral trip while each step's hip-bob clears the 3-percent-of-span rep
+// bar, and the phantoms pad the in-set count until sets auto-complete early.
+// Hence the short-horizon drift window: walking changes apparent size
+// continuously, so span moves a few percent within ~2s long before the
+// cumulative threshold fires.
+const GUARD_BASELINE_FRAMES  = 30;
+const GUARD_MOVE_X_FRAC      = 0.12;  // cumulative lateral hip drift = walking
+const GUARD_MOVE_SCALE_FRAC  = 0.10;  // cumulative apparent-size change = walking
+const GUARD_DRIFT_FRAMES     = 60;    // ~2s at 30fps: the drift-window horizon
+const GUARD_DRIFT_FRAC       = 0.03;  // span drift across the window = walking
+const GUARD_REP_SPAN_DRIFT   = 0.03;  // rep must start and end at the same distance
+
+function locomotionStep(st, sample) {
+  if (!sample || !(sample.span > 0)) return { phase: "baselining", riseFrac: null };
+
+  // Short-horizon drift: walking changes apparent size continuously, so the
+  // span moves a few percent within the window long before the cumulative
+  // threshold trips. Checked before everything else so onset is caught even
+  // while a stale baseline still looks plausible.
+  st.recentSpans.push(sample.span);
+  if (st.recentSpans.length > GUARD_DRIFT_FRAMES) st.recentSpans.shift();
+  if (st.recentSpans.length === GUARD_DRIFT_FRAMES) {
+    const oldest = st.recentSpans[0];
+    if (Math.abs(sample.span / oldest - 1) > GUARD_DRIFT_FRAC) {
+      st.baselineY = null;
+      st.baselineX = null;
+      st.baselineSpan = null;
+      st.samples = [];
+      st.recentSpans = [];
+      return { phase: "moving", riseFrac: null };
+    }
+  }
+
+  if (st.baselineY == null) {
+    st.samples.push(sample);
+    if (st.samples.length >= GUARD_BASELINE_FRAMES) {
+      const med = (key) => {
+        const a = st.samples.map((s) => s[key]).sort((x, y) => x - y);
+        return a[Math.floor(a.length / 2)];
+      };
+      st.baselineY = med("hipY");
+      st.baselineX = med("hipX");
+      st.baselineSpan = med("span");
+    }
+    return { phase: "baselining", riseFrac: null };
+  }
+  const lateral = Math.abs(sample.hipX - st.baselineX) / st.baselineSpan;
+  const scale = Math.abs(sample.span / st.baselineSpan - 1);
+  if (lateral > GUARD_MOVE_X_FRAC || scale > GUARD_MOVE_SCALE_FRAC) {
+    st.baselineY = null;
+    st.baselineX = null;
+    st.baselineSpan = null;
+    st.samples = [];
+    st.recentSpans = [];
+    return { phase: "moving", riseFrac: null };
+  }
+  return { phase: "tracking", riseFrac: (st.baselineY - sample.hipY) / st.baselineSpan };
+}
+
+// Per-session guard state + the per-frame snapshot the loop publishes for
+// every consumer (checks, trackers, payload). Reset on start().
+const guardState = { baselineY: null, baselineX: null, baselineSpan: null, samples: [], recentSpans: [] };
+let guardFrame = { phase: "baselining", riseFrac: null, span: null };
+function resetLocomotionGuard() {
+  guardState.baselineY = null;
+  guardState.baselineX = null;
+  guardState.baselineSpan = null;
+  guardState.samples = [];
+  guardState.recentSpans = [];
+  guardFrame = { phase: "baselining", riseFrac: null, span: null };
+}
+
+// Body sample for the guard: hips required; span is shoulders to ankles when
+// visible (they are, at the head-to-feet distance the framing gate enforces),
+// torso-scaled fallback (~0.37 torso:span ratio) when ankles drop out.
+function bodySample(lms) {
+  if (!lms) return null;
+  const lh = lms[L.LEFT_HIP], rh = lms[L.RIGHT_HIP];
+  if (!visibleEnough(lh, rh)) return null;
+  const ls = lms[L.LEFT_SHOULDER], rs = lms[L.RIGHT_SHOULDER];
+  if (!visibleEnough(ls, rs)) return null;
+  const hipY = (lh.y + rh.y) / 2;
+  const hipX = (lh.x + rh.x) / 2;
+  const shoulderY = (ls.y + rs.y) / 2;
+  const la = lms[L.LEFT_ANKLE], ra = lms[L.RIGHT_ANKLE];
+  let span;
+  if (visibleEnough(la, ra)) {
+    span = (la.y + ra.y) / 2 - shoulderY;
+  } else {
+    span = (hipY - shoulderY) / 0.37;
+  }
+  return { hipY, hipX, span };
 }
 
 // ── Calf-rise sampling core (pure; mirrored in pose_guided.test.js) ─────────
@@ -409,67 +503,33 @@ function resetCalfRaiseTracker() {
 //      size means the patient is WALKING, not exercising. Counting pauses and
 //      the baseline resets, so reps resume only after they plant and stand
 //      still again at the new spot.
-const CALF_BASELINE_FRAMES  = 30;
 const CALF_RISE_STRONG_FRAC = 0.05;  // rise of 5% of body span == pct 100
-const CALF_MOVE_X_FRAC      = 0.12;  // lateral hip drift beyond 12% of span = walking
-const CALF_MOVE_SCALE_FRAC  = 0.10;  // apparent size change beyond 10% = toward/away
+// Locomotion thresholds moved to the shared guard (GUARD_*); aliases keep the
+// exported helper names stable for the node mirrors.
+const CALF_BASELINE_FRAMES  = GUARD_BASELINE_FRAMES;
+const CALF_MOVE_X_FRAC      = GUARD_MOVE_X_FRAC;
+const CALF_MOVE_SCALE_FRAC  = GUARD_MOVE_SCALE_FRAC;
 
+// Thin compatibility wrapper over locomotionStep for callers and tests that
+// consume the {phase, pct} shape. The state passed in needs a recentSpans
+// array (locomotionStep's drift window); older callers created state without
+// it, so it is defaulted here.
 function calfRiseSampleStep(st, sample) {
-  if (!sample || !(sample.span > 0)) return { phase: "baselining", pct: null };
-  if (st.baselineY == null) {
-    st.samples.push(sample);
-    if (st.samples.length >= CALF_BASELINE_FRAMES) {
-      // Median so a momentary tip-toe or step during settling doesn't
-      // pollute the baseline.
-      const med = (key) => {
-        const a = st.samples.map((s) => s[key]).sort((x, y) => x - y);
-        return a[Math.floor(a.length / 2)];
-      };
-      st.baselineY = med("hipY");
-      st.baselineX = med("hipX");
-      st.baselineSpan = med("span");
-    }
-    return { phase: "baselining", pct: null };
-  }
-  const lateral = Math.abs(sample.hipX - st.baselineX) / st.baselineSpan;
-  const scale = Math.abs(sample.span / st.baselineSpan - 1);
-  if (lateral > CALF_MOVE_X_FRAC || scale > CALF_MOVE_SCALE_FRAC) {
-    // Walking. Drop the baseline entirely: the old floor is meaningless at
-    // the new stance, and resuming against it is how steps became reps.
-    st.baselineY = null;
-    st.baselineX = null;
-    st.baselineSpan = null;
-    st.samples = [];
-    return { phase: "moving", pct: null };
-  }
-  // Lower y = higher in frame. Rise = baseline - current (positive when up).
-  const riseFrac = (st.baselineY - sample.hipY) / st.baselineSpan;
-  const pct = Math.max(0, Math.min(100, Math.round((riseFrac / CALF_RISE_STRONG_FRAC) * 100)));
+  if (!Array.isArray(st.recentSpans)) st.recentSpans = [];
+  const step = locomotionStep(st, sample);
+  if (step.phase !== "tracking") return { phase: step.phase, pct: null };
+  const pct = Math.max(0, Math.min(100, Math.round((step.riseFrac / CALF_RISE_STRONG_FRAC) * 100)));
   return { phase: "tracking", pct };
 }
 
 function checkCalfRaiseRise(lms) {
   const lh = lms[L.LEFT_HIP], rh = lms[L.RIGHT_HIP];
   if (!visibleEnough(lh, rh)) return null;
-  const hipY = (lh.y + rh.y) / 2;
-  const hipX = (lh.x + rh.x) / 2;
 
-  // Body span for normalization: shoulders -> ankles when visible (they are,
-  // at the head-to-feet distance the framing gate enforces). Fallback when
-  // ankles drop out mid-set: scale the shoulder->hip torso length up by the
-  // anthropometric torso:span ratio (~0.37) rather than losing the rep.
-  const ls = lms[L.LEFT_SHOULDER], rs = lms[L.RIGHT_SHOULDER];
-  const la = lms[L.LEFT_ANKLE], ra = lms[L.RIGHT_ANKLE];
-  if (!visibleEnough(ls, rs)) return null;
-  const shoulderY = (ls.y + rs.y) / 2;
-  let span;
-  if (visibleEnough(la, ra)) {
-    span = (la.y + ra.y) / 2 - shoulderY;
-  } else {
-    span = (hipY - shoulderY) / 0.37;
-  }
-
-  const step = calfRiseSampleStep(calfRaiseState, { hipY, hipX, span });
+  // The loop computes the guard once per frame (bodySample + locomotionStep)
+  // and publishes the snapshot in guardFrame; consuming it here instead of
+  // re-stepping keeps every family reading the same locomotion verdict.
+  const step = guardFrame;
   if (step.phase === "baselining") {
     return {
       id: "calf_rise",
@@ -490,7 +550,7 @@ function checkCalfRaiseRise(lms) {
       msg: "hold still — reps count once you're planted",
     };
   }
-  const pct = step.pct;
+  const pct = Math.max(0, Math.min(100, Math.round((step.riseFrac / CALF_RISE_STRONG_FRAC) * 100)));
   if (pct > calfRaiseState.peakRise) calfRaiseState.peakRise = pct;
   // After the baseline is set, never emit "idle" for a low reading — standing
   // flat (pct near 0) is a valid resting state, and the rep state machine
@@ -818,6 +878,17 @@ const BASELINE_MS    = 1500;
 const DESCEND_DELTA  = 20;
 const COMPLETE_DELTA = 10;
 
+// Abandon any in-flight rep. Idle frames (guard moving, baseline pending,
+// or the joint not visible) must never bank progress: the walking motion
+// pattern enters a rep phase before locomotion thresholds trip, and a
+// banked phase "completes" as a phantom rep on the first quiet frame.
+function repTrackerIdleReset(t) {
+  t.state = "idle";
+  t.curMin = null;
+  t.curWorstStatus = "good";
+  t.curWorstMsg = null;
+}
+
 class RepTracker {
   constructor(metricId, label, target, mode) {
     this.metricId = metricId;
@@ -835,7 +906,7 @@ class RepTracker {
     this.curWorstMsg    = null;
   }
   observe(angle, frameMetrics, ts) {
-    if (angle == null) return null;
+    if (angle == null) { repTrackerIdleReset(this); return null; }
     if (this.startTs == null) this.startTs = ts;
 
     // Establish baseline.
@@ -931,7 +1002,7 @@ const RISE_GOOD  = 70;   // peak pct at/above this counts as good depth
 // metric value, `isIdle` is true while the baseline is still being set,
 // `frameWorst` is the worst non-rise alignment status seen this frame. Returns
 // a rep event object when a rep completes this step, else null.
-function calfRaiseStep(state, pct, isIdle, frameWorst) {
+function calfRaiseStep(state, pct, isIdle, frameWorst, span) {
   if (isIdle || pct == null) {
     // Baseline-pending or locomotion: abandon any in-flight rise rather than
     // banking it. Without this, the hip-rise phase of a WALK (before the
@@ -939,6 +1010,7 @@ function calfRaiseStep(state, pct, isIdle, frameWorst) {
     // rep on the first low reading after the patient re-plants.
     state.state = "idle";
     state.peak = 0;
+    state.spanAtEnter = null;
     return null;
   }
   if (state.state === "idle") {
@@ -946,6 +1018,7 @@ function calfRaiseStep(state, pct, isIdle, frameWorst) {
       state.state = "rising";
       state.peak  = pct;
       state.worst = "good";
+      state.spanAtEnter = span != null ? span : null;
     }
     return null;
   }
@@ -953,6 +1026,18 @@ function calfRaiseStep(state, pct, isIdle, frameWorst) {
   if (pct > state.peak) state.peak = pct;
   if (statusRank(frameWorst) > statusRank(state.worst)) state.worst = frameWorst;
   if (pct <= RISE_EXIT) {
+    // Span-stability: a genuine rep begins and ends at the same distance
+    // from the camera. A walking bob that sneaked past the guard drifts a
+    // few percent across its cycle - abandon it instead of counting it.
+    if (
+      state.spanAtEnter != null && span != null &&
+      Math.abs(span / state.spanAtEnter - 1) > GUARD_REP_SPAN_DRIFT
+    ) {
+      state.state = "idle";
+      state.peak = 0;
+      state.spanAtEnter = null;
+      return null;
+    }
     state.repCount += 1;
     const peak = state.peak;
     let status = state.worst;
@@ -976,6 +1061,7 @@ function calfRaiseStep(state, pct, isIdle, frameWorst) {
     };
     state.state = "idle";
     state.peak  = 0;
+    state.spanAtEnter = null;
     return event;
   }
   return null;
@@ -983,7 +1069,7 @@ function calfRaiseStep(state, pct, isIdle, frameWorst) {
 
 class CalfRaiseRepTracker {
   constructor() {
-    this.s = { state: "idle", peak: 0, repCount: 0, worst: "good" };
+    this.s = { state: "idle", peak: 0, repCount: 0, worst: "good", spanAtEnter: null };
   }
   // metric: the calf_rise metric object from runChecks (may have status
   // "idle" during baseline). frameMetrics: all metrics this frame, used to
@@ -997,7 +1083,7 @@ class CalfRaiseRepTracker {
       if (m.status === "good" || m.status === "idle") continue;
       if (statusRank(m.status) > statusRank(frameWorst)) frameWorst = m.status;
     }
-    return calfRaiseStep(this.s, metric.value, isIdle, frameWorst);
+    return calfRaiseStep(this.s, metric.value, isIdle, frameWorst, guardFrame.span);
   }
   get repCount() { return this.s.repCount; }
 }
@@ -1305,15 +1391,26 @@ function loop() {
     const result = landmarker.detectForVideo(videoEl, ts);
     const lms = result?.landmarks?.[0];
     if (lms) {
+      // Locomotion guard first: one verdict per frame, consumed by the calf
+      // check (via guardFrame), the angle trackers (starved to null while
+      // moving), and the payload (moving flag for the wrapper's hold timer).
+      const sample = bodySample(lms);
+      const step = locomotionStep(guardState, sample);
+      guardFrame = { phase: step.phase, riseFrac: step.riseFrac, span: sample ? sample.span : null };
+
       const { ex, metrics: rawMetrics } = runChecks(lms, activeExId);
       const metrics = smoothMetrics(rawMetrics, ts);
 
       // Run rep trackers on each depth metric (smoothed) and collect events.
+      // While the guard is not tracking, feed null: walking flexes the knee
+      // enough to fake shallow reps, and observe(null) abandons in-flight
+      // state instead of banking it.
       const repEvents = [];
       for (const m of metrics) {
         if (!isDepthMetric(m, ex)) continue;
         const tracker = getOrCreateTracker(m, ex);
-        const ev = tracker.observe(m.value, metrics, ts);
+        const angleVal = guardFrame.phase === "tracking" ? m.value : null;
+        const ev = tracker.observe(angleVal, metrics, ts);
         if (ev) repEvents.push(ev);
       }
 
@@ -1441,6 +1538,7 @@ function loop() {
           corrections: exDef.corrections || {},
           inRep,
           framingStatus,
+          moving: guardFrame.phase !== "tracking",
         });
       }
     } else if (ctx) {
@@ -1468,6 +1566,7 @@ async function start(_videoEl, _canvasEl, exerciseId, onPayload, opts = {}) {
   prevCheckStatus       = {};
 
   resetSmoothing();
+  resetLocomotionGuard();
   resetCalfRaiseTracker();
   calfRaiseRepTracker = new CalfRaiseRepTracker();
   trackers       = [];
@@ -1682,6 +1781,17 @@ window.PoseFormCheck = {
 // harness (mirrors the __poseGuidedHelpers convention in app.js). Keep the
 // test file's copy byte-equivalent to calfRaiseStep above.
 if (typeof window !== "undefined") {
+  window.__poseLocomotionHelpers = {
+    locomotionStep,
+    bodySample,
+    repTrackerIdleReset,
+    GUARD_BASELINE_FRAMES,
+    GUARD_MOVE_X_FRAC,
+    GUARD_MOVE_SCALE_FRAC,
+    GUARD_DRIFT_FRAMES,
+    GUARD_DRIFT_FRAC,
+    GUARD_REP_SPAN_DRIFT,
+  };
   window.__poseCalfRaiseHelpers = {
     calfRaiseStep,
     calfRiseSampleStep,
