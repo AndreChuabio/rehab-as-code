@@ -4440,13 +4440,19 @@ async function togglePoseFormCheck(wrap, item, btn) {
   // planner-renamed presence exercise doesn't miss its mode and trap the
   // patient in a set that never ends.
   const poseKey = item.ex.library_id || item.ex.id;
-  const isPresenceMode =
-    window.PoseFormCheck?.EXERCISES?.[poseKey]?.mode === "presence";
-  // Hold duration for presence mode. Library entries don't (yet) carry
-  // a duration_min; we default to 60s/set, which lines up with the
-  // typical PT cue ("hold for one minute"). When library/protocol
-  // payloads start carrying explicit durations, source from there.
-  const presenceHoldSeconds = 60;
+  const poseMode = window.PoseFormCheck?.EXERCISES?.[poseKey]?.mode || null;
+  // Timer-driven sets: presence AND hold. Hold-mode exercises
+  // (single_leg_balance, bird dog) have no rep cycle - the rep-tracker path
+  // never advances for them, so before this branch a guided hold set could
+  // never complete on its own. Their form checks (sway, trunk lean, hip
+  // drop) still run live; only set completion is time-based.
+  const isPresenceMode = poseMode === "presence" || poseMode === "hold";
+  // Hold duration per set. Hold-mode doses encode seconds in the reps slot
+  // ("3 x 30 - seconds"), so prefer the parsed dose; presence keeps the
+  // 60s default, the typical PT cue ("hold for one minute"). When
+  // library/protocol payloads carry explicit durations, source from there.
+  const presenceHoldSeconds =
+    poseMode === "hold" ? (parseTargetReps(item.ex.default_dose) || 30) : 60;
   const videoEl      = videoWrap.querySelector("#poseVideo");
   const canvasEl     = videoWrap.querySelector("#poseCanvas");
   const stageEl      = videoWrap.querySelector("#poseStage");

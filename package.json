@@ -11,7 +11,8 @@
     "qa:report": "playwright show-report",
     "qa:login": "node scripts/qa-login.mjs",
     "qa:codegen": "playwright codegen",
-    "qa:install": "playwright install chromium"
+    "qa:install": "playwright install chromium",
+    "qa:fixtures": "playwright test tests/e2e/pose-fixtures.spec.ts --project=pose-chromium --workers=1"
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
