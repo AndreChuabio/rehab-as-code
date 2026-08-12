@@ -316,6 +316,84 @@ const still = (n, hipY, span, hipX = 0.5) =>
   assert.equal(t.repCount, 0, "abandon, never bank");
 }
 
+// ── Mirror of pose.js bodySample + deps (byte-equivalent) ───────────────────
+const L = {
+  LEFT_SHOULDER: 11, RIGHT_SHOULDER: 12,
+  LEFT_HIP: 23, RIGHT_HIP: 24,
+  LEFT_ANKLE: 27, RIGHT_ANKLE: 28,
+};
+const VIS_THRESHOLD = 0.3;
+function visibleEnough(...pts) {
+  return pts.every((p) => p && (p.visibility ?? 1) >= VIS_THRESHOLD);
+}
+
+function bodySample(lms) {
+  if (!lms) return null;
+  const lh = lms[L.LEFT_HIP], rh = lms[L.RIGHT_HIP];
+  if (!visibleEnough(lh, rh)) return null;
+  const ls = lms[L.LEFT_SHOULDER], rs = lms[L.RIGHT_SHOULDER];
+  if (!visibleEnough(ls, rs)) return null;
+  const hipY = (lh.y + rh.y) / 2;
+  const hipX = (lh.x + rh.x) / 2;
+  const shoulderY = (ls.y + rs.y) / 2;
+  // Span reaches to the PLANTED foot: the lowest (largest-y) visible ankle.
+  // Averaging both ankles broke single-leg exercises - the free foot is
+  // airborne and swinging, so the mean bounced every rep, the drift window
+  // read it as walking, and span-stability voided genuine reps (field
+  // regression 2026-08-12: ~15 single-leg raises performed, 2-3 counted).
+  // The planted ankle is stable in both single- and double-leg stances.
+  const la = lms[L.LEFT_ANKLE], ra = lms[L.RIGHT_ANKLE];
+  const ankles = [la, ra].filter((a) => visibleEnough(a));
+  let span;
+  if (ankles.length) {
+    span = Math.max(...ankles.map((a) => a.y)) - shoulderY;
+  } else {
+    span = (hipY - shoulderY) / 0.37;
+  }
+  return { hipY, hipX, span };
+}
+
+// ─── SINGLE-LEG FIELD REGRESSION: swinging free foot must not void reps ─────
+// 2026-08-12: ~15 single-leg raises performed on the first guard build,
+// 2-3 counted. The free foot's swing polluted the ankle-MEAN span; with the
+// planted-ankle span the same motion counts every rep.
+{
+  const mkLms = (hipY, freeAnkleY) => {
+    const lms = [];
+    lms[L.LEFT_SHOULDER] = { x: 0.48, y: hipY - 0.17, visibility: 1 };
+    lms[L.RIGHT_SHOULDER] = { x: 0.52, y: hipY - 0.17, visibility: 1 };
+    lms[L.LEFT_HIP] = { x: 0.48, y: hipY, visibility: 1 };
+    lms[L.RIGHT_HIP] = { x: 0.52, y: hipY, visibility: 1 };
+    lms[L.LEFT_ANKLE] = { x: 0.49, y: hipY + 0.28, visibility: 1 };   // planted
+    lms[L.RIGHT_ANKLE] = { x: 0.55, y: freeAnkleY, visibility: 1 };   // free, swinging
+    return lms;
+  };
+
+  const g = freshGuard();
+  const r = freshRep();
+  const events = [];
+  const feed = (hipY, freeAnkleY) => {
+    const sample = bodySample(mkLms(hipY, freeAnkleY));
+    const step = locomotionStep(g, sample);
+    const pct = step.phase === "tracking"
+      ? Math.max(0, Math.min(100, Math.round((step.riseFrac / CALF_RISE_STRONG_FRAC) * 100)))
+      : null;
+    const ev = calfRaiseStep(r, pct, step.phase !== "tracking", "good", sample ? sample.span : null);
+    if (ev) events.push(ev);
+  };
+
+  // Settle standing on one leg, free foot hovering and jittering.
+  for (let i = 0; i < 70; i++) feed(0.45, 0.62 + 0.02 * Math.sin(i / 3));
+  // Six genuine raises: hips rise ~4.4 percent of the planted span while the
+  // free foot swings hard (its y moving several percent every few frames).
+  for (let rep = 0; rep < 6; rep++) {
+    for (let i = 0; i < 6; i++) feed(0.428, 0.60 + 0.03 * Math.sin((rep * 12 + i) / 2));
+    for (let i = 0; i < 6; i++) feed(0.449, 0.63 + 0.03 * Math.sin((rep * 12 + 6 + i) / 2));
+  }
+  assert.equal(events.length, 6,
+    `swinging free foot voided reps: counted ${events.length} of 6 performed`);
+}
+
 // ── Mirror of pose.js swayFrom (byte-equivalent) ────────────────────────────
 const SWAY_WARN_FRAC = 0.05;
 const SWAY_BAD_FRAC  = 0.10;

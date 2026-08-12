@@ -479,10 +479,17 @@ function bodySample(lms) {
   const hipY = (lh.y + rh.y) / 2;
   const hipX = (lh.x + rh.x) / 2;
   const shoulderY = (ls.y + rs.y) / 2;
+  // Span reaches to the PLANTED foot: the lowest (largest-y) visible ankle.
+  // Averaging both ankles broke single-leg exercises - the free foot is
+  // airborne and swinging, so the mean bounced every rep, the drift window
+  // read it as walking, and span-stability voided genuine reps (field
+  // regression 2026-08-12: ~15 single-leg raises performed, 2-3 counted).
+  // The planted ankle is stable in both single- and double-leg stances.
   const la = lms[L.LEFT_ANKLE], ra = lms[L.RIGHT_ANKLE];
+  const ankles = [la, ra].filter((a) => visibleEnough(a));
   let span;
-  if (visibleEnough(la, ra)) {
-    span = (la.y + ra.y) / 2 - shoulderY;
+  if (ankles.length) {
+    span = Math.max(...ankles.map((a) => a.y)) - shoulderY;
   } else {
     span = (hipY - shoulderY) / 0.37;
   }
