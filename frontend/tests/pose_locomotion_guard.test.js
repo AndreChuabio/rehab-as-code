@@ -30,25 +30,6 @@ const GUARD_REP_SPAN_DRIFT   = 0.03;  // rep must start and end at the same dist
 
 function locomotionStep(st, sample) {
   if (!sample || !(sample.span > 0)) return { phase: "baselining", riseFrac: null };
-
-  // Short-horizon drift: walking changes apparent size continuously, so the
-  // span moves a few percent within the window long before the cumulative
-  // threshold trips. Checked before everything else so onset is caught even
-  // while a stale baseline still looks plausible.
-  st.recentSpans.push(sample.span);
-  if (st.recentSpans.length > GUARD_DRIFT_FRAMES) st.recentSpans.shift();
-  if (st.recentSpans.length === GUARD_DRIFT_FRAMES) {
-    const oldest = st.recentSpans[0];
-    if (Math.abs(sample.span / oldest - 1) > GUARD_DRIFT_FRAC) {
-      st.baselineY = null;
-      st.baselineX = null;
-      st.baselineSpan = null;
-      st.samples = [];
-      st.recentSpans = [];
-      return { phase: "moving", riseFrac: null };
-    }
-  }
-
   if (st.baselineY == null) {
     st.samples.push(sample);
     if (st.samples.length >= GUARD_BASELINE_FRAMES) {
@@ -109,18 +90,6 @@ function calfRaiseStep(state, pct, isIdle, frameWorst, span) {
   if (pct > state.peak) state.peak = pct;
   if (statusRank(frameWorst) > statusRank(state.worst)) state.worst = frameWorst;
   if (pct <= RISE_EXIT) {
-    // Span-stability: a genuine rep begins and ends at the same distance
-    // from the camera. A walking bob that sneaked past the guard drifts a
-    // few percent across its cycle - abandon it instead of counting it.
-    if (
-      state.spanAtEnter != null && span != null &&
-      Math.abs(span / state.spanAtEnter - 1) > GUARD_REP_SPAN_DRIFT
-    ) {
-      state.state = "idle";
-      state.peak = 0;
-      state.spanAtEnter = null;
-      return null;
-    }
     state.repCount += 1;
     const peak = state.peak;
     let status = state.worst;
@@ -212,43 +181,25 @@ const still = (n, hipY, span, hipX = 0.5) =>
   assert.ok(Math.abs(r.riseFrac - 0.044) < 0.001);
 }
 
-// ─── Drift window: slow walking trips the guard inside ~2s ─────────────────
+// ─── KNOWN ACCEPTED LEAK: walk-onset step-bobs can count 1-2 phantoms ──────
+// The 2026-08-12 gate experiments (span drift window, per-rep span
+// stability) all failed in the field: span noise at gate granularity voided
+// GENUINE reps far more than it caught phantoms (worst build: 1 counted of
+// 10+ performed). Reverted to cumulative-only gates by Andre's call -
+// counting truth for real reps outranks walk purity. The walk-onset gate is
+// being redesigned offline against replayed fixture clips; until then this
+// scenario documents the accepted behavior instead of asserting zero.
 {
-  // Span shrinks 0.2 percent per frame - far under the 10 percent cumulative
-  // trip for a long time, but 60 frames of it is ~11 percent... use a gentler
-  // slope: 0.07 percent per frame = ~4.3 percent over the 60-frame window,
-  // above GUARD_DRIFT_FRAC. The guard must flip to moving without the
-  // cumulative threshold ever firing.
-  const st = freshGuard();
-  for (const f of still(60, 0.45, 0.5)) locomotionStep(st, f);
-  let sawMoving = false;
-  let span = 0.5;
-  for (let i = 0; i < 90; i++) {
-    span *= 0.9993;
-    const r = locomotionStep(st, { hipY: 0.45 - i * 0.0006, hipX: 0.5, span });
-    if (r.phase === "moving") { sawMoving = true; break; }
-  }
-  assert.ok(sawMoving, "slow walk must trip the drift window, not wait for 10 percent");
-}
-
-// ─── THE T1 LEAK: walk-onset step-bobs must not count ──────────────────────
-{
-  // Reproduces 2026-08-12 set 1/2: baseline standing at the desk, then walk
-  // away. Each step bobs the hips (rise-shaped cycles ~0.8s) while span
-  // shrinks ~5 percent per second. Old behavior: the first 1-2 bobs complete
-  // as reps before cumulative thresholds trip. Required: ZERO reps.
-  const st = freshGuard();
-  const rep = freshRep();
   const samples = [...still(60, 0.45, 0.5)];
   let span = 0.5;
   for (let i = 0; i < 90; i++) {
-    span *= 0.9983;                                 // ~5 percent shrink per 30 frames
-    const bob = 0.018 * Math.abs(Math.sin(i / 12)); // step bob: ~3.6 percent of span
+    span *= 0.9983;
+    const bob = 0.018 * Math.abs(Math.sin(i / 12));
     samples.push({ hipY: 0.45 - bob - i * 0.0008, hipX: 0.5, span });
   }
   const { events } = runPipeline(samples);
-  assert.equal(events.length, 0,
-    `walk-onset bobs counted ${events.length} phantom rep(s) - the T1 leak is open`);
+  assert.ok(events.length <= 2,
+    `walk-onset leak exceeded the documented bound: ${events.length} phantoms`);
 }
 
 // ─── Real raises still count: distant, full-body stance ────────────────────
@@ -277,34 +228,6 @@ const still = (n, hipY, span, hipX = 0.5) =>
   const { events, phases } = runPipeline(samples);
   assert.equal(events.length, 1, "exactly the one genuine post-replant rep");
   assert.ok(phases.includes("moving"), "the walk must register as locomotion");
-}
-
-// ─── Span-stability rejection at rep completion ────────────────────────────
-{
-  // A bob that clears ENTER and EXIT while span drifts 5 percent across the
-  // cycle is a walking artifact, not a rep - even if the guard missed it.
-  const st = freshRep();
-  assert.equal(calfRaiseStep(st, 80, false, "good", 0.50), null);   // enter at span 0.50
-  assert.equal(st.state, "rising");
-  const done = calfRaiseStep(st, 10, false, "good", 0.475);         // exit at span 0.475
-  assert.equal(done, null, "5 percent span drift across the cycle must abandon the rep");
-  assert.equal(st.repCount, 0);
-  assert.equal(st.state, "idle");
-}
-{
-  // Same cycle with stable span completes normally.
-  const st = freshRep();
-  calfRaiseStep(st, 80, false, "good", 0.50);
-  const done = calfRaiseStep(st, 10, false, "good", 0.503);
-  assert.ok(done, "stable-span rep must complete");
-  assert.equal(done.status, "good");
-}
-{
-  // Span unavailable (ankles briefly lost): the check is skipped, not fatal.
-  const st = freshRep();
-  calfRaiseStep(st, 80, false, "good", null);
-  const done = calfRaiseStep(st, 10, false, "good", null);
-  assert.ok(done, "missing span must not block a rep");
 }
 
 // ─── RepTracker idle contract (angle family) ───────────────────────────────
@@ -336,18 +259,23 @@ function bodySample(lms) {
   const hipY = (lh.y + rh.y) / 2;
   const hipX = (lh.x + rh.x) / 2;
   const shoulderY = (ls.y + rs.y) / 2;
-  // Span derives from the TORSO (shoulder to hip, scaled by the ~0.37
-  // torso:body ratio) - never from ankles. Two field regressions in one
-  // evening taught this: the ankle MEAN bounces when a free foot swings
-  // (single-leg: 15 performed, 2-3 counted), and the PLANTED pick is
-  // bistable because the working ankle rises with every heel lift while
-  // the free foot hovers near the floor, so the max flips mid-rep
-  // (single-leg: 10+ performed, 1 counted). The torso is rigid through a
-  // calf raise, identical in both stances, and still scales with camera
-  // distance, so the walking checks keep their meaning. Severe trunk lean
-  // shortens it a few percent - which voids exactly the deep-lean reps the
-  // span-stability check should void.
-  const span = (hipY - shoulderY) / 0.37;
+  // Span is a RULER, not a tripwire: it scales the rise percentage and the
+  // cumulative walk thresholds, where a few percent of keypoint noise is
+  // harmless (the 60/25 rise hysteresis dwarfs it). One night of field
+  // regressions (2026-08-12) taught the boundary: three span variants all
+  // counted fine as rulers, and every attempt to ALSO use span as a
+  // fine-grained movement gate (3 percent windows) drowned in noise -
+  // ankle-mean bounced with a swinging free foot, planted-ankle flipped
+  // when feet overlap in image space, and torso/0.37 amplified jitter 2.7x
+  // past the gates. Walk-onset detection is deliberately absent here; it is
+  // being redesigned offline against replayed fixture clips.
+  const la = lms[L.LEFT_ANKLE], ra = lms[L.RIGHT_ANKLE];
+  let span;
+  if (visibleEnough(la, ra)) {
+    span = (la.y + ra.y) / 2 - shoulderY;
+  } else {
+    span = (hipY - shoulderY) / 0.37;
+  }
   return { hipY, hipX, span };
 }
 

@@ -409,25 +409,6 @@ const GUARD_REP_SPAN_DRIFT   = 0.03;  // rep must start and end at the same dist
 
 function locomotionStep(st, sample) {
   if (!sample || !(sample.span > 0)) return { phase: "baselining", riseFrac: null };
-
-  // Short-horizon drift: walking changes apparent size continuously, so the
-  // span moves a few percent within the window long before the cumulative
-  // threshold trips. Checked before everything else so onset is caught even
-  // while a stale baseline still looks plausible.
-  st.recentSpans.push(sample.span);
-  if (st.recentSpans.length > GUARD_DRIFT_FRAMES) st.recentSpans.shift();
-  if (st.recentSpans.length === GUARD_DRIFT_FRAMES) {
-    const oldest = st.recentSpans[0];
-    if (Math.abs(sample.span / oldest - 1) > GUARD_DRIFT_FRAC) {
-      st.baselineY = null;
-      st.baselineX = null;
-      st.baselineSpan = null;
-      st.samples = [];
-      st.recentSpans = [];
-      return { phase: "moving", riseFrac: null };
-    }
-  }
-
   if (st.baselineY == null) {
     st.samples.push(sample);
     if (st.samples.length >= GUARD_BASELINE_FRAMES) {
@@ -479,18 +460,23 @@ function bodySample(lms) {
   const hipY = (lh.y + rh.y) / 2;
   const hipX = (lh.x + rh.x) / 2;
   const shoulderY = (ls.y + rs.y) / 2;
-  // Span derives from the TORSO (shoulder to hip, scaled by the ~0.37
-  // torso:body ratio) - never from ankles. Two field regressions in one
-  // evening taught this: the ankle MEAN bounces when a free foot swings
-  // (single-leg: 15 performed, 2-3 counted), and the PLANTED pick is
-  // bistable because the working ankle rises with every heel lift while
-  // the free foot hovers near the floor, so the max flips mid-rep
-  // (single-leg: 10+ performed, 1 counted). The torso is rigid through a
-  // calf raise, identical in both stances, and still scales with camera
-  // distance, so the walking checks keep their meaning. Severe trunk lean
-  // shortens it a few percent - which voids exactly the deep-lean reps the
-  // span-stability check should void.
-  const span = (hipY - shoulderY) / 0.37;
+  // Span is a RULER, not a tripwire: it scales the rise percentage and the
+  // cumulative walk thresholds, where a few percent of keypoint noise is
+  // harmless (the 60/25 rise hysteresis dwarfs it). One night of field
+  // regressions (2026-08-12) taught the boundary: three span variants all
+  // counted fine as rulers, and every attempt to ALSO use span as a
+  // fine-grained movement gate (3 percent windows) drowned in noise -
+  // ankle-mean bounced with a swinging free foot, planted-ankle flipped
+  // when feet overlap in image space, and torso/0.37 amplified jitter 2.7x
+  // past the gates. Walk-onset detection is deliberately absent here; it is
+  // being redesigned offline against replayed fixture clips.
+  const la = lms[L.LEFT_ANKLE], ra = lms[L.RIGHT_ANKLE];
+  let span;
+  if (visibleEnough(la, ra)) {
+    span = (la.y + ra.y) / 2 - shoulderY;
+  } else {
+    span = (hipY - shoulderY) / 0.37;
+  }
   return { hipY, hipX, span };
 }
 
@@ -1054,18 +1040,6 @@ function calfRaiseStep(state, pct, isIdle, frameWorst, span) {
   if (pct > state.peak) state.peak = pct;
   if (statusRank(frameWorst) > statusRank(state.worst)) state.worst = frameWorst;
   if (pct <= RISE_EXIT) {
-    // Span-stability: a genuine rep begins and ends at the same distance
-    // from the camera. A walking bob that sneaked past the guard drifts a
-    // few percent across its cycle - abandon it instead of counting it.
-    if (
-      state.spanAtEnter != null && span != null &&
-      Math.abs(span / state.spanAtEnter - 1) > GUARD_REP_SPAN_DRIFT
-    ) {
-      state.state = "idle";
-      state.peak = 0;
-      state.spanAtEnter = null;
-      return null;
-    }
     state.repCount += 1;
     const peak = state.peak;
     let status = state.worst;
