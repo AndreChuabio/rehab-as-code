@@ -3,31 +3,78 @@
   "ankle_calf_raises_double_leg": {
     "mode": "rise",
     "clips": {
-      "good": { "file": "good.y4m", "duration_s": 0, "expected_reps": 8, "expected_bad_max": 0 },
-      "bad":  { "file": "bad.y4m",  "duration_s": 0, "expected_reps": 4, "expected_bad_min": 3 },
-      "walk": { "file": "walk.y4m", "duration_s": 0, "expected_reps": 2 }
+      "good": {
+        "file": "good.y4m",
+        "duration_s": 46.5,
+        "expected_reps": 9,
+        "expected_bad_max": 0
+      },
+      "walk": {
+        "file": "walk.y4m",
+        "duration_s": 37.8,
+        "expected_reps": 2
+      }
     }
   },
   "ankle_calf_raises_single_leg": {
     "mode": "rise",
     "clips": {
-      "good": { "file": "good.y4m", "duration_s": 0, "expected_reps": 6, "expected_bad_max": 1 },
-      "bad":  { "file": "bad.y4m",  "duration_s": 0, "expected_reps": 4, "expected_bad_min": 3 },
-      "walk": { "file": "walk.y4m", "duration_s": 0, "expected_reps": 2 }
+      "good": {
+        "file": "good.y4m",
+        "duration_s": 31.8,
+        "expected_reps": 6,
+        "expected_bad_max": 1
+      },
+      "bad": {
+        "file": "bad.y4m",
+        "duration_s": 61.5,
+        "expected_reps": 4,
+        "expected_bad_min": 3
+      },
+      "walk": {
+        "file": "walk.y4m",
+        "duration_s": 37.3,
+        "expected_reps": 2
+      }
     }
   },
   "ankle_single_leg_balance": {
     "mode": "hold",
     "clips": {
-      "good": { "file": "good.y4m", "duration_s": 0, "expected_hold_s": { "min": 15, "max": 25 } },
-      "bad":  { "file": "bad.y4m",  "duration_s": 0, "expected_hold_s": { "min": 8, "max": 18 } },
-      "walk": { "file": "walk.y4m", "duration_s": 0, "expected_hold_s": { "min": 6, "max": 14 } }
+      "good": {
+        "file": "good.y4m",
+        "duration_s": 65.0,
+        "expected_hold_s": {
+          "min": 15,
+          "max": 25
+        }
+      },
+      "bad": {
+        "file": "bad.y4m",
+        "duration_s": 36.9,
+        "expected_hold_s": {
+          "min": 8,
+          "max": 18
+        }
+      },
+      "walk": {
+        "file": "walk.y4m",
+        "duration_s": 29.4,
+        "expected_hold_s": {
+          "min": 6,
+          "max": 14
+        }
+      }
     }
   },
   "ankle_alphabet": {
     "mode": "presence",
     "clips": {
-      "good": { "file": "good.y4m", "duration_s": 0, "expected_presence": true }
+      "good": {
+        "file": "good.y4m",
+        "duration_s": 39.4,
+        "expected_presence": true
+      }
     }
   }
 }
