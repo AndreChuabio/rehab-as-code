@@ -51,8 +51,12 @@ jobs:
       # E2E_EMAIL / E2E_PASSWORD are optional: without them auth.setup.ts skips,
       # the @authed and @clinician specs skip, and the @public suite still runs.
       # With them, this also covers the signed-in patient and clinician surfaces.
+      # grep-invert excludes the mutating lanes: the fixture runner
+      # (@pose @mutating) refuses any non-local target by design - its guard
+      # throwing inside the daily smoke is the guard working in the wrong
+      # context, which is exactly what turned the 2026-08-13 run red.
       - name: Run suite against prod
-        run: npx playwright test
+        run: npx playwright test --grep-invert "@mutating"
         env:
           QA_BASE_URL: ${{ github.event.inputs.base_url || 'https://rehab-as-code-five.vercel.app' }}
           E2E_EMAIL: ${{ secrets.E2E_EMAIL }}
